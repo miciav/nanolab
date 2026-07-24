@@ -39,8 +39,8 @@ dev = [
 ]
 
 [tool.uv.sources]
-tui-toolkit = { path = "../tui-toolkit", editable = true }
-workflow-tasks = { path = "../workflow-tasks", editable = true }
+tui-toolkit = { workspace = true }
+workflow-tasks = { workspace = true }
 
 [tool.ruff]
 target-version = "py311"
