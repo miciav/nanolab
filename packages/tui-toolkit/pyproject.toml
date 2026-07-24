@@ -35,7 +35,7 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q --cov=tui_toolkit --cov-report=term-missing --cov-fail-under=80"
+addopts = "-q --cov=tui_toolkit --cov-config=packages/tui-toolkit/pyproject.toml --cov-report=term-missing --cov-fail-under=80"
 
 [tool.coverage.run]
 omit = ["*/tui_toolkit/pickers.py"]

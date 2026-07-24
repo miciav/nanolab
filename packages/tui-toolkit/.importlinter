@@ -1,9 +1,9 @@
-# tools/tui-toolkit/.importlinter
 [importlinter]
-root_package = tui_toolkit
+root_packages =
+    tui_toolkit
 include_external_packages = True
 
-[importlinter:contract:no_controlplane_dep]
+[importlinter:contract:no_nanolab_dep]
 name = tui_toolkit must not import nanolab
 type = forbidden
 source_modules = tui_toolkit

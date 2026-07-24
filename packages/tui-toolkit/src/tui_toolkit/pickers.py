@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 import questionary
 from prompt_toolkit.application import Application
@@ -404,7 +404,9 @@ def multiselect(
     style = to_questionary_style(get_ui().theme)
 
     if not sys.stdin.isatty() or not sys.stdout.isatty():
-        return _ask(lambda: questionary.checkbox(
+        # Questionary accepts multiple defaults at runtime but types this argument as one string.
+        checkbox = cast(Any, questionary.checkbox)
+        return _ask(lambda: checkbox(
             message, choices=_normalize_choices(choices),
             default=default_values, style=style,
         ).ask())

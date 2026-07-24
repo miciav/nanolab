@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from pathlib import Path
+
+MEMBER_ROOT = Path(__file__).resolve().parents[3]
 
 ENTRYPOINT_IMPORT_MODULES = (
     "nanolab.app.main",
@@ -31,7 +34,7 @@ print("Cross-project coupling: OK")
 CHECKS = (
     ("ruff", ["ruff", "check", "."]),
     ("basedpyright", ["basedpyright"]),
-    ("import-linter", ["lint-imports"]),
+    ("import-linter", ["lint-imports", "--config", ".importlinter", "--no-cache"]),
     (
         "entrypoint-imports",
         [
@@ -50,7 +53,7 @@ CHECKS = (
 def main() -> None:
     failures: list[str] = []
     for name, command in CHECKS:
-        completed = subprocess.run(command, check=False)
+        completed = subprocess.run(command, check=False, cwd=MEMBER_ROOT)
         if completed.returncode != 0:
             failures.append(name)
 

@@ -1,5 +1,6 @@
 [importlinter]
-root_package = workflow_tasks
+root_packages =
+    workflow_tasks
 include_external_packages = True
 
 [importlinter:contract:tasks_are_independent]
