@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typer.testing import CliRunner
 
-from controlplane_tool.app.main import app
+from nanolab.app.main import app
 
 runner = CliRunner()
 

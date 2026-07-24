@@ -1,6 +1,6 @@
 """Pickers — select() and multiselect() with a description side panel.
 
-Ported from controlplane_tool.tui_widgets. The prompt_toolkit-driven
+Extracted from the legacy monolithic TUI. The prompt_toolkit-driven
 full-screen picker is preserved; the adapter layer reads theme + brand
 from the active UIContext.
 

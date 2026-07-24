@@ -4,9 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from controlplane_tool.images.plan import build_image_plan
-from controlplane_tool.release import arm
-from controlplane_tool.release.state import ArtifactEvidence
+from nanolab.images.plan import build_image_plan
+from nanolab.release import arm
+from nanolab.release.state import ArtifactEvidence
 
 
 REPO_ROOT = Path(__file__).resolve().parents[4]

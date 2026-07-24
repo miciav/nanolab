@@ -18,11 +18,11 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 def _run_from_project_root(monkeypatch):
     monkeypatch.chdir(_PROJECT_ROOT)
 
-from controlplane_tool.app.main import app
-from controlplane_tool.cli.preflight import PreflightError
-from controlplane_tool.cli.product import _git_provenance, _slice, _workflow
-import controlplane_tool.cli.product as product_module
-from controlplane_tool.config import EnvironmentConfig, ScenarioConfig
+from nanolab.app.main import app
+from nanolab.cli.preflight import PreflightError
+from nanolab.cli.product import _git_provenance, _slice, _workflow
+import nanolab.cli.product as product_module
+from nanolab.config import EnvironmentConfig, ScenarioConfig
 from workflow_tasks.core.workflow import Workflow
 
 
@@ -82,7 +82,7 @@ def test_plan_builds_shared_validate_workflow() -> None:
 
 def test_run_renders_normalized_task_progress(monkeypatch) -> None:
     monkeypatch.setattr(
-        "controlplane_tool.cli.product._workflow",
+        "nanolab.cli.product._workflow",
         lambda *args, **kwargs: Workflow(tasks=[_Task()]),
     )
 
@@ -172,16 +172,16 @@ def test_run_provisions_before_executing_workflow(monkeypatch, tmp_path: Path) -
         finally:
             actions.append("cleanup")
 
-    monkeypatch.setattr("controlplane_tool.cli.product.provision_environment", provision)
+    monkeypatch.setattr("nanolab.cli.product.provision_environment", provision)
     monkeypatch.setattr(
-        "controlplane_tool.cli.product._workflow",
+        "nanolab.cli.product._workflow",
         lambda *args, **kwargs: (
             actions.append(f"build:{kwargs['control_plane_url']}:{kwargs['prometheus_url']}")
             or workflow
         ),
     )
     monkeypatch.setattr(
-        "controlplane_tool.cli.product.resolve_loadtest_urls",
+        "nanolab.cli.product.resolve_loadtest_urls",
         lambda *args, **kwargs: (
             actions.append("resolve") or "http://stack:30080",
             "http://stack:30090",
@@ -189,7 +189,7 @@ def test_run_provisions_before_executing_workflow(monkeypatch, tmp_path: Path) -
     )
     monkeypatch.setattr(workflow, "run", lambda: actions.append("run"))
     monkeypatch.setattr(
-        "controlplane_tool.cli.product._git_provenance",
+        "nanolab.cli.product._git_provenance",
         lambda *args: actions.append("provenance")
         or {
             "git_commit": "abc",
@@ -269,11 +269,11 @@ def test_failed_loadtest_writes_failure_metadata(monkeypatch, tmp_path: Path) ->
             raise RuntimeError("load exploded")
 
     monkeypatch.setattr(
-        "controlplane_tool.cli.product._workflow",
+        "nanolab.cli.product._workflow",
         lambda *args, **kwargs: Workflow(tasks=[_FailTask()]),
     )
     monkeypatch.setattr(
-        "controlplane_tool.cli.product.resolve_loadtest_urls",
+        "nanolab.cli.product.resolve_loadtest_urls",
         lambda *args, **kwargs: ("http://stack:30080", "http://stack:30090"),
     )
 

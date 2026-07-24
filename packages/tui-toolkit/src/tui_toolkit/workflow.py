@@ -2,7 +2,7 @@
 
 The workflow event types, context management, event builders, and reporting
 helpers live in workflow_tasks. The Rich renderer lives in
-controlplane_tool/tui/workflow_renderer.py.
+nanolab/tui/workflow.py.
 """
 from __future__ import annotations
 

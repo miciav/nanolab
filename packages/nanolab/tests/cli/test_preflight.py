@@ -8,8 +8,8 @@ import urllib.request
 
 import pytest
 
-from controlplane_tool.cli.preflight import PreflightError, preflight_control_plane
-from controlplane_tool.config import EnvironmentConfig, ScenarioConfig
+from nanolab.cli.preflight import PreflightError, preflight_control_plane
+from nanolab.config import EnvironmentConfig, ScenarioConfig
 
 
 START_COMMAND = "./gradlew :control-plane:bootRun"

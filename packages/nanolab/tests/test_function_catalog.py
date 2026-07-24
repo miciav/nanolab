@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from controlplane_tool.functions.catalog import (
+from nanolab.functions.catalog import (
     _discover_example_functions,
     list_function_presets,
     list_functions,

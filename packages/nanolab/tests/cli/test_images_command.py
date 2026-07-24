@@ -12,11 +12,11 @@ from workflow_tasks.execution.bindings import RoleBindings
 from workflow_tasks.tasks.models import TaskResult
 from workflow_tasks.vm.models import VmRequest
 
-from controlplane_tool.app.main import app
-import controlplane_tool.cli.images as images_module
-from controlplane_tool.config import EnvironmentConfig
-from controlplane_tool.images.plan import build_image_plan
-from controlplane_tool.workspace.paths import default_tool_paths
+from nanolab.app.main import app
+import nanolab.cli.images as images_module
+from nanolab.config import EnvironmentConfig
+from nanolab.images.plan import build_image_plan
+from nanolab.workspace.paths import default_tool_paths
 
 
 def test_images_command_surface_contains_only_plan_and_build() -> None:

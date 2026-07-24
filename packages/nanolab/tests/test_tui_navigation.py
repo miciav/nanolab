@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from controlplane_tool.tui.app import NanofaasTUI
+from nanolab.tui.app import NanofaasTUI
 
 
 EXPECTED_SCENARIOS = {

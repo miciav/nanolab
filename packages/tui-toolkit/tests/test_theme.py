@@ -65,7 +65,7 @@ def test_to_pt_translates_rich_format(rich_style, expected_pt):
 
 def test_to_questionary_style_matches_legacy_byte_for_byte():
     """Parity gate: DEFAULT_THEME must produce the exact same selector→style
-    mapping as the legacy `_STYLE` from controlplane_tool.tui_widgets."""
+    mapping as the legacy monolithic TUI mapping."""
     qs = to_questionary_style(DEFAULT_THEME)
     # Serialize in the same format as the captured golden file.
     actual_lines = [f"{sel}\t{style}" for sel, style in qs.style_rules]

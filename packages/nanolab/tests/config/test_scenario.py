@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from controlplane_tool.config.scenario import ScenarioConfig
+from nanolab.config.scenario import ScenarioConfig
 
 
 @pytest.mark.parametrize("workflow", ["validate", "cli", "loadtest"])

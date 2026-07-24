@@ -1,36 +1,36 @@
 [importlinter]
 root_packages =
-    controlplane_tool
+    nanolab
     workflow_tasks
 
 [importlinter:contract:core_is_independent]
 name = core must not import product packages
 type = forbidden
-source_modules = controlplane_tool.core
+source_modules = nanolab.core
 forbidden_modules =
-    controlplane_tool.app
-    controlplane_tool.cli
-    controlplane_tool.config
-    controlplane_tool.functions
-    controlplane_tool.plans
-    controlplane_tool.tui
-    controlplane_tool.workspace
+    nanolab.app
+    nanolab.cli
+    nanolab.config
+    nanolab.functions
+    nanolab.plans
+    nanolab.tui
+    nanolab.workspace
 
 [importlinter:contract:no_runtime_dependency_on_tui]
 name = runtime packages must not depend on tui
 type = forbidden
 source_modules =
-    controlplane_tool.cli
-    controlplane_tool.config
-    controlplane_tool.core
-    controlplane_tool.functions
-    controlplane_tool.plans
-    controlplane_tool.workspace
-forbidden_modules = controlplane_tool.tui
+    nanolab.cli
+    nanolab.config
+    nanolab.core
+    nanolab.functions
+    nanolab.plans
+    nanolab.workspace
+forbidden_modules = nanolab.tui
 
 [importlinter:contract:workflow_tasks_is_independent]
-name = workflow_tasks must not depend on controlplane
+name = workflow_tasks must not depend on nanolab
 type = forbidden
 source_modules = workflow_tasks
-forbidden_modules = controlplane_tool
+forbidden_modules = nanolab
 include_external_packages = True

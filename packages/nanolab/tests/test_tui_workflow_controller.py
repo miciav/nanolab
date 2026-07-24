@@ -7,8 +7,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from controlplane_tool.tui.workflow import WorkflowDashboard, WorkflowKeyListener
-from controlplane_tool.tui.workflow_controller import TuiWorkflowController
+from nanolab.tui.workflow import WorkflowDashboard, WorkflowKeyListener
+from nanolab.tui.workflow_controller import TuiWorkflowController
 from workflow_tasks.workflow.event_builders import build_task_event
 
 
@@ -31,8 +31,8 @@ def run_with_mocks(
         bool(controller.console.is_terminal) if input_is_tty is None else input_is_tty
     )
     with (
-        patch("controlplane_tool.tui.workflow_controller.Live", return_value=live) as live_type,
-        patch("controlplane_tool.tui.workflow_controller.WorkflowKeyListener", return_value=listener),
+        patch("nanolab.tui.workflow_controller.Live", return_value=live) as live_type,
+        patch("nanolab.tui.workflow_controller.WorkflowKeyListener", return_value=listener),
     ):
         result = controller.run_live_workflow(
             title="Test",
@@ -134,9 +134,9 @@ def test_action_failure_uses_next_pending_phase_not_completed_phase() -> None:
         listener = MagicMock()
         listener.input_is_tty = False
         with (
-            patch("controlplane_tool.tui.workflow_controller.Live", return_value=live),
+            patch("nanolab.tui.workflow_controller.Live", return_value=live),
             patch(
-                "controlplane_tool.tui.workflow_controller.WorkflowKeyListener",
+                "nanolab.tui.workflow_controller.WorkflowKeyListener",
                 return_value=listener,
             ),
         ):
@@ -266,7 +266,7 @@ def test_key_listener_restores_terminal_and_joins_thread() -> None:
 
     with (
         patch.dict(sys.modules, {"termios": termios, "tty": tty}),
-        patch("controlplane_tool.tui.workflow.Thread", return_value=thread),
+        patch("nanolab.tui.workflow.Thread", return_value=thread),
     ):
         listener = WorkflowKeyListener(MagicMock(), MagicMock(), input_stream=input_stream)
         listener.start()
@@ -320,8 +320,8 @@ def test_controller_stops_listener_when_action_raises() -> None:
     live = live_mock()
     listener = MagicMock()
     with (
-        patch("controlplane_tool.tui.workflow_controller.Live", return_value=live),
-        patch("controlplane_tool.tui.workflow_controller.WorkflowKeyListener", return_value=listener),
+        patch("nanolab.tui.workflow_controller.Live", return_value=live),
+        patch("nanolab.tui.workflow_controller.WorkflowKeyListener", return_value=listener),
         pytest.raises(ValueError, match="boom"),
     ):
         controller.run_live_workflow(
@@ -343,8 +343,8 @@ def test_controller_stops_listener_when_start_raises() -> None:
     listener.start.side_effect = RuntimeError("terminal setup failed")
 
     with (
-        patch("controlplane_tool.tui.workflow_controller.Live", return_value=live),
-        patch("controlplane_tool.tui.workflow_controller.WorkflowKeyListener", return_value=listener),
+        patch("nanolab.tui.workflow_controller.Live", return_value=live),
+        patch("nanolab.tui.workflow_controller.WorkflowKeyListener", return_value=listener),
         pytest.raises(RuntimeError, match="terminal setup failed"),
     ):
         controller.run_live_workflow(
@@ -367,8 +367,8 @@ def test_listener_stop_failure_does_not_mask_action_failure() -> None:
     listener.stop.side_effect = RuntimeError("restore failed")
 
     with (
-        patch("controlplane_tool.tui.workflow_controller.Live", return_value=live),
-        patch("controlplane_tool.tui.workflow_controller.WorkflowKeyListener", return_value=listener),
+        patch("nanolab.tui.workflow_controller.Live", return_value=live),
+        patch("nanolab.tui.workflow_controller.WorkflowKeyListener", return_value=listener),
         pytest.raises(ValueError, match="action failed") as raised,
     ):
         controller.run_live_workflow(
@@ -391,8 +391,8 @@ def test_listener_stop_failure_is_raised_after_successful_action() -> None:
     listener.stop.side_effect = RuntimeError("restore failed")
 
     with (
-        patch("controlplane_tool.tui.workflow_controller.Live", return_value=live),
-        patch("controlplane_tool.tui.workflow_controller.WorkflowKeyListener", return_value=listener),
+        patch("nanolab.tui.workflow_controller.Live", return_value=live),
+        patch("nanolab.tui.workflow_controller.WorkflowKeyListener", return_value=listener),
         pytest.raises(RuntimeError, match="restore failed"),
     ):
         controller.run_live_workflow(

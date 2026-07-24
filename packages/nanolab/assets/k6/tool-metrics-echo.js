@@ -19,8 +19,8 @@ export const options = {
 
 export default function () {
     const payload = JSON.stringify({
-        input: { seq: __ITER, source: 'controlplane-tool' },
-        metadata: { source: 'controlplane-tool' },
+        input: { seq: __ITER, source: 'nanolab' },
+        metadata: { source: 'nanolab' },
     });
     const url = `${BASE_URL}/v1/functions/${FUNCTION_NAME}:invoke`;
     const res = http.post(url, payload, {

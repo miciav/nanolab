@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from rich.console import Console
 
-from controlplane_tool.tui.event_aggregator import WorkflowEventAggregator
-from controlplane_tool.tui.workflow import TuiWorkflowSink, WorkflowDashboard, WorkflowStepState
+from nanolab.tui.event_aggregator import WorkflowEventAggregator
+from nanolab.tui.workflow import TuiWorkflowSink, WorkflowDashboard, WorkflowStepState
 from workflow_tasks.workflow.event_builders import build_log_event, build_task_event
 
 

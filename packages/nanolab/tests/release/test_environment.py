@@ -5,8 +5,8 @@ from pathlib import Path
 import pytest
 import yaml
 
-from controlplane_tool.config import EnvironmentConfig
-from controlplane_tool.release.environment import validate_release_environment
+from nanolab.config import EnvironmentConfig
+from nanolab.release.environment import validate_release_environment
 
 
 SOURCE_REPO = Path(__file__).resolve().parents[4]

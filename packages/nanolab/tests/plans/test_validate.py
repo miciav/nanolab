@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 
-from controlplane_tool.config.scenario import ScenarioConfig
-from controlplane_tool.plans.validate import build_validate_plan
+from nanolab.config.scenario import ScenarioConfig
+from nanolab.plans.validate import build_validate_plan
 from workflow_tasks.execution.bindings import RoleBindings
 from workflow_tasks.tasks.models import CommandTaskSpec, TaskResult
 

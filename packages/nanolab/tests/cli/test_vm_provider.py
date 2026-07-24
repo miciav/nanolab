@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from controlplane_tool.cli.vm_provider import vm_request_for_role
-from controlplane_tool.config import EnvironmentConfig
+from nanolab.cli.vm_provider import vm_request_for_role
+from nanolab.config import EnvironmentConfig
 
 
 def test_azure_stack_request_uses_cloud_defaults_and_node_ports() -> None:

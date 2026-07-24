@@ -4,9 +4,9 @@ from pathlib import Path
 import pytest
 import yaml
 
-from controlplane_tool.config.environment import EnvironmentConfig
-from controlplane_tool.config.scenario import ScenarioConfig
-from controlplane_tool.plans.offload_loadtest import build_offload_loadtest_plan
+from nanolab.config.environment import EnvironmentConfig
+from nanolab.config.scenario import ScenarioConfig
+from nanolab.plans.offload_loadtest import build_offload_loadtest_plan
 from workflow_tasks.execution.bindings import RoleBindings
 from workflow_tasks.loadtest.tasks import FetchVmResults, RunK6
 from workflow_tasks.tasks.models import CommandTaskSpec, TaskResult

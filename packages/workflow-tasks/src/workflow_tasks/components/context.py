@@ -20,7 +20,7 @@ class ResolvedFunctionView(Protocol):
 class ResolvedScenarioView(Protocol):
     """Structural view of a resolved scenario, as read by components.
 
-    The concrete ResolvedScenario (pydantic) in controlplane satisfies this by shape.
+    A product-specific resolved scenario satisfies this protocol by shape.
     """
 
     namespace: str | None
@@ -32,13 +32,13 @@ class ScenarioExecutionContext:
     """Neutral execution context consumed by scenario components.
 
     Deliberately free of product request types (E2eRequest/CliTestRequest): the
-    factory that builds it lives in controlplane.
+    factory that builds it lives in nanolab.
     """
 
     repo_root: Path
     scenario_name: str
     # str rather than a Literal/RuntimeKind to keep this library module free of
-    # controlplane type aliases (do not narrow this back — it would re-introduce coupling).
+    # nanolab type aliases (do not narrow this back — it would re-introduce coupling).
     runtime: str
     namespace: str | None
     local_registry: str
@@ -48,8 +48,8 @@ class ScenarioExecutionContext:
     manifest_path: Path | None = None
     release: str | None = None
     loadgen_vm_request: VmRequest | None = None
-    # Controlplane-tool verification commands, injected by the controlplane context
-    # factory. Empty by default so this library module stays controlplane-agnostic.
+    # nanolab verification commands, injected by the nanolab context factory.
+    # Empty by default so this library module stays nanolab-agnostic.
     k3s_curl_verify_command: tuple[str, ...] = ()
     loadtest_run_command: tuple[str, ...] = ()
     autoscaling_command: tuple[str, ...] = ()

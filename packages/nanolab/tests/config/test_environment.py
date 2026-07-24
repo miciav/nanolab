@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from controlplane_tool.config.environment import EnvironmentConfig
+from nanolab.config.environment import EnvironmentConfig
 
 
 def test_local_environment_defaults_stack_to_host() -> None:

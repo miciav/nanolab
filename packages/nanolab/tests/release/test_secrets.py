@@ -9,7 +9,7 @@ import pytest
 from workflow_tasks.tasks.models import CommandTaskSpec
 from workflow_tasks.tasks.rendering import render_task_command
 
-from controlplane_tool.release.secrets import validate_secret_file
+from nanolab.release.secrets import validate_secret_file
 
 
 @dataclass
@@ -94,7 +94,7 @@ def test_validate_secret_file_accepts_private_regular_file(tmp_path: Path) -> No
     secret.write_text("fixture-token", encoding="utf-8")
     secret.chmod(0o600)
 
-    module = importlib.import_module("controlplane_tool.release.secrets")
+    module = importlib.import_module("nanolab.release.secrets")
 
     assert module.validate_secret_file(secret) == secret
 
@@ -144,7 +144,7 @@ def test_validate_secret_file_requires_current_user_ownership(
     secret = tmp_path / "token"
     secret.write_text("fixture-token", encoding="utf-8")
     secret.chmod(0o600)
-    module = importlib.import_module("controlplane_tool.release.secrets")
+    module = importlib.import_module("nanolab.release.secrets")
     monkeypatch.setattr(module.os, "getuid", lambda: secret.stat().st_uid + 1)
 
     with pytest.raises(PermissionError, match="owned"):
@@ -162,7 +162,7 @@ def test_staging_rejects_secret_replaced_by_symlink(
     secret.chmod(0o600)
     replacement.chmod(0o600)
     provider = _Provider()
-    module = importlib.import_module("controlplane_tool.release.secrets")
+    module = importlib.import_module("nanolab.release.secrets")
     original_validate = module.validate_secret_file
 
     def replace_after_validation(path: Path) -> Path:
@@ -200,7 +200,7 @@ def test_stage_ghcr_credentials_logs_in_from_file_and_cleans_metadata(tmp_path: 
     token.write_text(secret_value, encoding="utf-8")
     token.chmod(0o600)
     provider = _Provider()
-    module = importlib.import_module("controlplane_tool.release.secrets")
+    module = importlib.import_module("nanolab.release.secrets")
 
     with module.stage_ghcr_credentials(
         provider,
@@ -238,7 +238,7 @@ def test_stage_ghcr_credentials_cleans_after_transfer_failure(tmp_path: Path) ->
     token.write_text("fixture-secret-must-not-leak", encoding="utf-8")
     token.chmod(0o600)
     provider = _Provider(fail_transfer=True)
-    module = importlib.import_module("controlplane_tool.release.secrets")
+    module = importlib.import_module("nanolab.release.secrets")
 
     with pytest.raises(RuntimeError) as error:
         with module.stage_ghcr_credentials(
@@ -266,7 +266,7 @@ def test_stage_ghcr_credentials_cleans_after_auth_failure(tmp_path: Path) -> Non
     token.write_text("fixture-ghcr-token-must-not-leak", encoding="utf-8")
     token.chmod(0o600)
     provider = _Provider(fail_login=True)
-    module = importlib.import_module("controlplane_tool.release.secrets")
+    module = importlib.import_module("nanolab.release.secrets")
 
     with pytest.raises(RuntimeError) as error:
         with module.stage_ghcr_credentials(
@@ -294,7 +294,7 @@ def test_stage_ghcr_credentials_cleans_if_remote_hardening_fails(tmp_path: Path)
     token.write_text("fixture-secret-must-not-leak", encoding="utf-8")
     token.chmod(0o600)
     provider = _Provider(fail_directory_chmod=True)
-    module = importlib.import_module("controlplane_tool.release.secrets")
+    module = importlib.import_module("nanolab.release.secrets")
 
     with pytest.raises(RuntimeError) as error:
         with module.stage_ghcr_credentials(
@@ -319,7 +319,7 @@ def test_stage_ghcr_credentials_reports_cleanup_failure_without_leaking(tmp_path
     token.write_text("fixture-secret-must-not-leak", encoding="utf-8")
     token.chmod(0o600)
     provider = _Provider(fail_login=True, fail_cleanup=True)
-    module = importlib.import_module("controlplane_tool.release.secrets")
+    module = importlib.import_module("nanolab.release.secrets")
 
     with pytest.raises(RuntimeError, match="cleanup") as error:
         with module.stage_ghcr_credentials(
@@ -341,7 +341,7 @@ def test_cleanup_failure_preserves_sanitized_context_body_failure(tmp_path: Path
     token.write_text(secret_value, encoding="utf-8")
     token.chmod(0o600)
     provider = _Provider(fail_cleanup=True)
-    module = importlib.import_module("controlplane_tool.release.secrets")
+    module = importlib.import_module("nanolab.release.secrets")
 
     with pytest.raises(module.ReleaseCredentialCleanupError) as error:
         with module.stage_ghcr_credentials(
@@ -370,7 +370,7 @@ def test_stage_ghcr_credentials_cleans_when_context_body_fails(tmp_path: Path) -
     token.write_text("fixture-ghcr-token-must-not-leak", encoding="utf-8")
     token.chmod(0o600)
     provider = _Provider()
-    module = importlib.import_module("controlplane_tool.release.secrets")
+    module = importlib.import_module("nanolab.release.secrets")
 
     with pytest.raises(_BodyFailure, match="publication failed"):
         with module.stage_ghcr_credentials(
@@ -399,7 +399,7 @@ def test_ghcr_credential_commands_render_without_secret_values(tmp_path: Path) -
     token.write_text(secret_value, encoding="utf-8")
     token.chmod(0o600)
     provider = _Provider()
-    module = importlib.import_module("controlplane_tool.release.secrets")
+    module = importlib.import_module("nanolab.release.secrets")
 
     with module.stage_ghcr_credentials(
         provider,
@@ -427,7 +427,7 @@ def test_stage_cosign_credentials_exposes_only_remote_paths(
     key.chmod(0o600)
     password.chmod(0o600)
     provider = _Provider()
-    module = importlib.import_module("controlplane_tool.release.secrets")
+    module = importlib.import_module("nanolab.release.secrets")
     monkeypatch.setattr(Path, "read_text", lambda *args, **kwargs: pytest.fail("read_text"))
     monkeypatch.setattr(Path, "read_bytes", lambda *args, **kwargs: pytest.fail("read_bytes"))
 
@@ -461,7 +461,7 @@ def test_stage_cosign_credentials_cleans_when_context_body_fails(tmp_path: Path)
     key.chmod(0o600)
     password.chmod(0o600)
     provider = _Provider()
-    module = importlib.import_module("controlplane_tool.release.secrets")
+    module = importlib.import_module("nanolab.release.secrets")
 
     with pytest.raises(_BodyFailure, match="signing failed"):
         with module.stage_cosign_credentials(

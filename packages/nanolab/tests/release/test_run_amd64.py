@@ -13,10 +13,10 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
-from controlplane_tool.release import arm
-from controlplane_tool.release import run as release_run
-from controlplane_tool.release.metrics import build_release_record
-from controlplane_tool.release.versioning import read_project_version
+from nanolab.release import arm
+from nanolab.release import run as release_run
+from nanolab.release.metrics import build_release_record
+from nanolab.release.versioning import read_project_version
 
 
 REPO_ROOT = Path(__file__).resolve().parents[4]

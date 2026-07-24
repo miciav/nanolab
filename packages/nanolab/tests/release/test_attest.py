@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from controlplane_tool.release import attest
-from controlplane_tool.release.secrets import RemoteCosignCredentials
-from controlplane_tool.release.state import ReleaseIdentity, ReleaseJournal
+from nanolab.release import attest
+from nanolab.release.secrets import RemoteCosignCredentials
+from nanolab.release.state import ReleaseIdentity, ReleaseJournal
 
 
 FIXTURE_PASSWORD = "fixture-cosign-password"

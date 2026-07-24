@@ -12,8 +12,8 @@ from prompt_toolkit.output import DummyOutput
 import pytest
 from rich.console import Console
 
-from controlplane_tool.tui.setup import NANOFAAS_BRAND, NANOFAAS_THEME
-from controlplane_tool.tui.workflow import WorkflowDashboard
+from nanolab.tui.setup import NANOFAAS_BRAND, NANOFAAS_THEME
+from nanolab.tui.workflow import WorkflowDashboard
 from tui_toolkit.context import UIContext, bind_ui
 from tui_toolkit.pickers import Choice, _build_select_application
 
@@ -202,7 +202,7 @@ def test_picker_and_dashboard_align_the_first_logo_line() -> None:
 
 
 def test_controlplane_does_not_use_the_standalone_toolkit_header() -> None:
-    source_root = Path(__file__).parents[1] / "src" / "controlplane_tool"
+    source_root = Path(__file__).parents[1] / "src" / "nanolab"
 
     for source_file in source_root.rglob("*.py"):
         tree = ast.parse(source_file.read_text(), filename=str(source_file))

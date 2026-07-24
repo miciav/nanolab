@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from controlplane_tool.devtools.package_report import (
+from nanolab.devtools.package_report import (
     PackageMetrics,
     calculate_metrics,
     format_metrics_table,
@@ -10,35 +10,35 @@ from controlplane_tool.devtools.package_report import (
 def test_calculate_metrics_counts_internal_outgoing_and_incoming_edges() -> None:
     metrics = calculate_metrics(
         packages=[
-            "controlplane_tool.core",
-            "controlplane_tool.plans",
-            "controlplane_tool.tui",
+            "nanolab.core",
+            "nanolab.plans",
+            "nanolab.tui",
         ],
         edges=[
-            ("controlplane_tool.core.models", "controlplane_tool.core.net_utils"),
-            ("controlplane_tool.plans.validate", "controlplane_tool.core.models"),
-            ("controlplane_tool.tui.app", "controlplane_tool.plans.validate"),
+            ("nanolab.core.models", "nanolab.core.net_utils"),
+            ("nanolab.plans.validate", "nanolab.core.models"),
+            ("nanolab.tui.app", "nanolab.plans.validate"),
         ],
     )
 
     by_package = {metric.package: metric for metric in metrics}
 
-    assert by_package["controlplane_tool.core"] == PackageMetrics(
-        package="controlplane_tool.core",
+    assert by_package["nanolab.core"] == PackageMetrics(
+        package="nanolab.core",
         internal_imports=1,
         outgoing_imports=0,
         incoming_imports=1,
         instability=0.0,
     )
-    assert by_package["controlplane_tool.plans"] == PackageMetrics(
-        package="controlplane_tool.plans",
+    assert by_package["nanolab.plans"] == PackageMetrics(
+        package="nanolab.plans",
         internal_imports=0,
         outgoing_imports=1,
         incoming_imports=1,
         instability=0.5,
     )
-    assert by_package["controlplane_tool.tui"] == PackageMetrics(
-        package="controlplane_tool.tui",
+    assert by_package["nanolab.tui"] == PackageMetrics(
+        package="nanolab.tui",
         internal_imports=0,
         outgoing_imports=1,
         incoming_imports=0,
@@ -50,7 +50,7 @@ def test_format_metrics_table_includes_header_and_package_rows() -> None:
     table = format_metrics_table(
         [
             PackageMetrics(
-                package="controlplane_tool.core",
+                package="nanolab.core",
                 internal_imports=1,
                 outgoing_imports=0,
                 incoming_imports=2,
@@ -64,4 +64,4 @@ def test_format_metrics_table_includes_header_and_package_rows() -> None:
     assert "outgoing" in table
     assert "incoming" in table
     assert "instability" in table
-    assert "controlplane_tool.core" in table
+    assert "nanolab.core" in table

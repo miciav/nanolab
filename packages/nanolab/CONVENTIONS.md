@@ -41,7 +41,7 @@ All terminal output goes through `tui_toolkit`:
 - `from tui_toolkit.pickers import select, multiselect, Choice` — interactive pickers
 - `from tui_toolkit import render_screen_frame` — screen chrome
 
-The active theme and brand are configured once in `controlplane_tool.ui_setup.setup_ui()`
+The active theme and brand are configured once in `nanolab.tui.setup.setup_ui()`
 and read implicitly by every widget. To override in tests: `with bind_ui(UIContext(theme=...))`.
 
 Never use `print()` or `rich.print()` directly.

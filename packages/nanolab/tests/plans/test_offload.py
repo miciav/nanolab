@@ -2,8 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from controlplane_tool.config.scenario import ScenarioConfig
-from controlplane_tool.plans.offload import build_offload_plan
+from nanolab.config.scenario import ScenarioConfig
+from nanolab.plans.offload import build_offload_plan
 from workflow_tasks.core.resource_task import ResourceTask
 from workflow_tasks.execution.bindings import RoleBindings
 from workflow_tasks.tasks.models import TaskResult

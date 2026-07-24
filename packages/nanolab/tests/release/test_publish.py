@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from controlplane_tool.release import publish
-from controlplane_tool.release.state import ArtifactEvidence
+from nanolab.release import publish
+from nanolab.release.state import ArtifactEvidence
 
 
 REPO_ROOT = Path(__file__).resolve().parents[4]

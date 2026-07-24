@@ -26,7 +26,7 @@ def test_operator_docs_use_the_six_command_surface() -> None:
 def test_launcher_is_a_locked_thin_wrapper() -> None:
     script = (ROOT / "scripts" / "controlplane.sh").read_text(encoding="utf-8")
 
-    assert "uv run --project tools/controlplane --locked controlplane-tool" in script
+    assert "uv run --project tools/controlplane --locked nanolab" in script
 
 
 def test_operator_docs_describe_the_adapted_tui_surface() -> None:

@@ -8,8 +8,8 @@ from typing import Callable
 
 import pytest
 
-from controlplane_tool.release import versioning
-from controlplane_tool.release.versioning import (
+from nanolab.release import versioning
+from nanolab.release.versioning import (
     normalize_version,
     prepare_version,
     read_project_version,

@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from workflow_tasks.shell import RecordingShell
-from controlplane_tool.core.task_shell_adapter import (
+from nanolab.core.task_shell_adapter import (
     ShellCommandTaskRunner,
     task_result_to_shell_result,
 )

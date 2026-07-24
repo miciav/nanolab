@@ -3,8 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from controlplane_tool.cli.provisioning import provision_environment
-from controlplane_tool.config import EnvironmentConfig, ScenarioConfig
+from nanolab.cli.provisioning import provision_environment
+from nanolab.config import EnvironmentConfig, ScenarioConfig
 
 
 @dataclass

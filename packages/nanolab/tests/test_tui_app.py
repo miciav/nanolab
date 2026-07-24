@@ -14,12 +14,12 @@ from rich.console import Console
 from rich.table import Table
 from workflow_tasks import WorkflowEvent, bind_workflow_sink, step, workflow_log
 
-import controlplane_tool.tui.app as tui_app
-import controlplane_tool.tui.workflow_controller as workflow_controller_module
-from controlplane_tool.cli.preflight import PreflightError
-from controlplane_tool.tui import NanofaasTUI
-from controlplane_tool.tui.workflow import TuiWorkflowSink
-from controlplane_tool.tui.workflow_controller import TuiWorkflowController
+import nanolab.tui.app as tui_app
+import nanolab.tui.workflow_controller as workflow_controller_module
+from nanolab.cli.preflight import PreflightError
+from nanolab.tui import NanofaasTUI
+from nanolab.tui.workflow import TuiWorkflowSink
+from nanolab.tui.workflow_controller import TuiWorkflowController
 
 
 class ScriptedChooser:

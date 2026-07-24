@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from controlplane_tool.release.state import (
+from nanolab.release.state import (
     ArtifactDigest,
     ArtifactEvidence,
     JournalCorruptionError,
@@ -76,7 +76,7 @@ def test_interrupted_atomic_write_never_creates_a_visible_entry(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     journal = _journal(tmp_path)
-    module = __import__("controlplane_tool.release.state", fromlist=["os"])
+    module = __import__("nanolab.release.state", fromlist=["os"])
     monkeypatch.setattr(module.os, "replace", lambda _source, _target: (_ for _ in ()).throw(OSError("stop")))
 
     with pytest.raises(OSError, match="stop"):
@@ -185,7 +185,7 @@ def test_crash_before_atomic_invalidation_never_allows_stale_downstream_reuse(
     journal.record("amd64-build", artifacts=(_marker(tmp_path, "amd64"),))
     journal.record("benchmark", artifacts=(_marker(tmp_path, "benchmark"),))
     source.write_text("changed", encoding="utf-8")
-    module = __import__("controlplane_tool.release.state", fromlist=["os"])
+    module = __import__("nanolab.release.state", fromlist=["os"])
     original_replace = module.os.replace
     monkeypatch.setattr(module.os, "replace", lambda _source, _target: (_ for _ in ()).throw(OSError("crash")))
 
@@ -299,7 +299,7 @@ def test_missing_remote_evidence_invalidates_it_and_downstream(tmp_path: Path) -
 def test_journal_uses_exclusive_lock_and_fsyncs_file_and_directory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    module = __import__("controlplane_tool.release.state", fromlist=["fcntl", "os"])
+    module = __import__("nanolab.release.state", fromlist=["fcntl", "os"])
     locks: list[int] = []
     syncs: list[int] = []
     original_flock = module.fcntl.flock

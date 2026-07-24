@@ -5,7 +5,7 @@ sequence) is identical across the multipass/azure/proxmox loadtest scenarios; th
 only differences are already-resolved inputs (endpoints, URLs, paths, runner). These
 builders capture the shared shape so the sequence is defined once.
 
-This module must not import controlplane_tool (import-linter contract): callers pass
+This module must not import nanolab (import-linter contract): callers pass
 already-resolved primitives in.
 """
 from __future__ import annotations

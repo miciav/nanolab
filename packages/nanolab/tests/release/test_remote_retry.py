@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from controlplane_tool.release.remote_retry import (
+from nanolab.release.remote_retry import (
     CONNECTION_DEAD,
     retry_on_connection_death,
 )

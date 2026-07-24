@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from controlplane_tool.cli.execution import build_role_bindings, resolve_loadtest_urls
-from controlplane_tool.config.environment import EnvironmentConfig
+from nanolab.cli.execution import build_role_bindings, resolve_loadtest_urls
+from nanolab.config.environment import EnvironmentConfig
 from workflow_tasks.tasks.models import CommandTaskSpec
 
 

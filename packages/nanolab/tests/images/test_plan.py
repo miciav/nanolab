@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from controlplane_tool.functions.catalog import list_functions
-from controlplane_tool.images.plan import build_image_plan
+from nanolab.functions.catalog import list_functions
+from nanolab.images.plan import build_image_plan
 
 
 REPO_ROOT = Path(__file__).resolve().parents[4]

@@ -139,8 +139,8 @@ uv run pytest -q
 uv run ruff check .
 uv run basedpyright
 uv run lint-imports
-uv run controlplane-package-report
-uv run pydeps controlplane_tool
+uv run nanolab-package-report
+uv run pydeps nanolab
 ```
 
 ## Related documentation
@@ -152,9 +152,9 @@ uv run pydeps controlplane_tool
 
 ## Image releases
 
-`controlplane-tool images` renders and builds the 52-cell image matrix
+`nanolab images` renders and builds the 52-cell image matrix
 anywhere without publishing. Official releases run only through
-`controlplane-tool release` on the pinned Azure profile; see
+`nanolab release` on the pinned Azure profile; see
 [docs/operations/image-releases.md](../../docs/operations/image-releases.md).
 GitHub Actions never publishes images, and local/Multipass/Proxmox builds
 cannot promote to GHCR.

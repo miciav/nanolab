@@ -3,8 +3,8 @@ from pathlib import Path
 import pytest
 import yaml
 
-from controlplane_tool.config.environment import EnvironmentConfig
-from controlplane_tool.config.scenario import ScenarioConfig
+from nanolab.config.environment import EnvironmentConfig
+from nanolab.config.scenario import ScenarioConfig
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 

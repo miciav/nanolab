@@ -4,11 +4,11 @@ root_package = tui_toolkit
 include_external_packages = True
 
 [importlinter:contract:no_controlplane_dep]
-name = tui_toolkit must not import controlplane_tool
+name = tui_toolkit must not import nanolab
 type = forbidden
 source_modules = tui_toolkit
 forbidden_modules =
-    controlplane_tool
+    nanolab
 include_external_packages = True
 
 [importlinter:contract:no_workflow_tasks_dep]

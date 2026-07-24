@@ -8,7 +8,7 @@ from typing import Any, cast
 import pytest
 import yaml
 
-from controlplane_tool.release.metrics import (
+from nanolab.release.metrics import (
     PerformanceProfile,
     RegressionPolicy,
     aggregate_runs,

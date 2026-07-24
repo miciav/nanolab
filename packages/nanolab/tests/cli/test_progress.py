@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 
-from controlplane_tool.cli.progress import ConsoleProgressSink
+from nanolab.cli.progress import ConsoleProgressSink
 from workflow_tasks.workflow.events import WorkflowEvent
 
 

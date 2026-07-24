@@ -1,8 +1,8 @@
 from types import SimpleNamespace
 
-import controlplane_tool.app.main as main_module
-import controlplane_tool.tui.app as tui_app
-from controlplane_tool.tui.setup import NANOFAAS_BRAND, NANOFAAS_THEME, setup_ui
+import nanolab.app.main as main_module
+import nanolab.tui.app as tui_app
+from nanolab.tui.setup import NANOFAAS_BRAND, NANOFAAS_THEME, setup_ui
 from tui_toolkit import AppBrand, Theme
 from tui_toolkit.context import get_ui
 
@@ -49,7 +49,7 @@ def test_tui_command_sets_up_ui_before_running(monkeypatch) -> None:
 def test_default_main_sets_up_ui_before_running_tui(monkeypatch) -> None:
     events: list[str] = []
     monkeypatch.setattr(main_module, "setup_ui", lambda: events.append("setup"))
-    monkeypatch.setattr(main_module.sys, "argv", ["controlplane-tool"])
+    monkeypatch.setattr(main_module.sys, "argv", ["nanolab"])
     monkeypatch.setattr(
         tui_app,
         "NanofaasTUI",

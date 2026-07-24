@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from controlplane_tool.images.bake import render_bake, render_bake_json
-from controlplane_tool.images.plan import build_image_plan
+from nanolab.images.bake import render_bake, render_bake_json
+from nanolab.images.plan import build_image_plan
 
 
 REPO_ROOT = Path(__file__).resolve().parents[4]

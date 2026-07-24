@@ -1,5 +1,5 @@
 [project]
-name = "controlplane-tool"
+name = "nanolab"
 version = "0.1.0"
 description = "Control-plane orchestration product for build, test, and reporting"
 requires-python = ">=3.11"
@@ -14,9 +14,9 @@ dependencies = [
 ]
 
 [project.scripts]
-controlplane-tool = "controlplane_tool.app.main:main"
-controlplane-package-report = "controlplane_tool.devtools.package_report:main"
-controlplane-quality = "controlplane_tool.devtools.quality:main"
+nanolab = "nanolab.app.main:main"
+nanolab-package-report = "nanolab.devtools.package_report:main"
+nanolab-quality = "nanolab.devtools.quality:main"
 
 [build-system]
 requires = ["setuptools>=61.0"]
@@ -50,13 +50,12 @@ line-length = 100
 select = ["F", "SLF"]
 
 [tool.ruff.lint.per-file-ignores]
-"diagnose_proxmox_ssh.py" = ["SLF001"]
-"src/controlplane_tool/tui/app.py" = ["SLF001"]
+"src/nanolab/tui/app.py" = ["SLF001"]
 "tests/**/*.py" = ["F841", "SLF001"]
 
 [tool.basedpyright]
 include = [
-    "src/controlplane_tool",
+    "src/nanolab",
 ]
 typeCheckingMode = "basic"
 reportMissingTypeStubs = false

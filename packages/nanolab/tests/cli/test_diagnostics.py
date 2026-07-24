@@ -1,4 +1,4 @@
-from controlplane_tool.cli.diagnostics import REQUIRED_EXECUTABLES, missing_executables
+from nanolab.cli.diagnostics import REQUIRED_EXECUTABLES, missing_executables
 
 
 def test_missing_executables_checks_the_shared_product_prerequisites(monkeypatch) -> None:
@@ -8,7 +8,7 @@ def test_missing_executables_checks_the_shared_product_prerequisites(monkeypatch
         checked.append(name)
         return "/usr/bin/ssh" if name == "ssh" else None
 
-    monkeypatch.setattr("controlplane_tool.cli.diagnostics.shutil.which", which)
+    monkeypatch.setattr("nanolab.cli.diagnostics.shutil.which", which)
 
     assert REQUIRED_EXECUTABLES == ("docker", "ssh")
     assert missing_executables() == ["docker"]
