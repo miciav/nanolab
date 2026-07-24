@@ -1173,7 +1173,7 @@ wheels = [
 [[package]]
 name = "shellcraft"
 version = "0.1.0"
-source = { git = "https://github.com/miciav/shellcraft.git#b6547835aac88d058810c7b9a592ad442c54ac99" }
+source = { git = "https://github.com/miciav/shellcraft.git?rev=b6547835aac88d058810c7b9a592ad442c54ac99#b6547835aac88d058810c7b9a592ad442c54ac99" }
 
 [[package]]
 name = "shellingham"
@@ -1373,7 +1373,7 @@ requires-dist = [
     { name = "proxmox-sdk", git = "https://github.com/miciav/proxmox-sdk.git?rev=9e20703" },
     { name = "pydantic", specifier = ">=2.9.2" },
     { name = "pydantic-settings", specifier = ">=2.5" },
-    { name = "shellcraft", git = "https://github.com/miciav/shellcraft.git" },
+    { name = "shellcraft", git = "https://github.com/miciav/shellcraft.git?rev=b6547835aac88d058810c7b9a592ad442c54ac99" },
 ]
 
 [package.metadata.requires-dev]
