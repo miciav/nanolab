@@ -43,6 +43,15 @@ def test_top_level_exposes_only_six_product_commands() -> None:
     assert commands == {"run", "plan", "list", "inspect", "doctor", "tui"}
 
 
+def test_list_does_not_require_nanofaas_root(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("NANOFAAS_ROOT", raising=False)
+
+    result = CliRunner().invoke(app, ["list"])
+
+    assert result.exit_code == 0, result.output
+    assert "validate-container.yaml" in result.output
+
+
 def test_doctor_uses_shared_diagnostics(monkeypatch) -> None:
     shared_check = MagicMock(return_value=["docker"])
     monkeypatch.setattr(

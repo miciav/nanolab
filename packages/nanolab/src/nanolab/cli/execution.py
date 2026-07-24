@@ -64,7 +64,7 @@ def resolve_loadtest_urls(
                 discovered_prometheus = f"http://<proxmox-prometheus:{request.name}>"
         else:
             provider = vm_provider or vm_provider_for_environment(
-                environment, default_tool_paths().workspace_root
+                environment, default_tool_paths().nanofaas_root
             )
             if environment.provider == "azure":
                 host = provider.connection_host(request)  # type: ignore[attr-defined]
@@ -199,7 +199,7 @@ def build_role_bindings(
 
     if environment.provider in {"azure", "proxmox"}:
         provider = vm_provider or vm_provider_for_environment(
-            environment, repo_root or default_tool_paths().workspace_root
+            environment, repo_root or default_tool_paths().nanofaas_root
         )
 
         def provider_remote(role: str):

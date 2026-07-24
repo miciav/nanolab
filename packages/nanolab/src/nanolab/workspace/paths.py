@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 from pathlib import Path
+
+
+_NANOFAAS_MARKERS = ("build.gradle", "settings.gradle")
 
 
 @dataclass(frozen=True)
 class ToolPaths:
-    workspace_root: Path
+    nanofaas_root: Path
     tool_root: Path
     profiles_dir: Path
     runs_dir: Path
@@ -14,43 +18,44 @@ class ToolPaths:
     scenario_payloads_dir: Path
 
     @classmethod
-    def repo_root(cls, root: Path) -> "ToolPaths":
-        workspace_root = Path(root)
-        tool_root = workspace_root / "tools" / "controlplane"
+    def from_roots(cls, nanofaas_root: Path, tool_root: Path) -> "ToolPaths":
+        source_root = Path(nanofaas_root)
+        product_root = Path(tool_root)
         return cls(
-            workspace_root=workspace_root,
-            tool_root=tool_root,
-            profiles_dir=tool_root / "profiles",
-            runs_dir=tool_root / "runs",
-            scenarios_dir=tool_root / "scenarios",
-            scenario_payloads_dir=tool_root / "scenarios" / "payloads",
+            nanofaas_root=source_root,
+            tool_root=product_root,
+            profiles_dir=product_root / "profiles",
+            runs_dir=product_root / "runs",
+            scenarios_dir=product_root / "scenarios",
+            scenario_payloads_dir=product_root / "scenarios" / "payloads",
         )
 
 
-def discover_repo_root() -> Path:
-    return Path(__file__).resolve().parents[5]
+def discover_tool_root() -> Path:
+    return Path(__file__).resolve().parents[3]
+
+
+def nanofaas_root_from_env() -> Path:
+    value = os.getenv("NANOFAAS_ROOT", "").strip()
+    if not value:
+        raise RuntimeError("NANOFAAS_ROOT must point to a nanoFaaS checkout")
+    root = Path(value).expanduser().resolve()
+    missing = [marker for marker in _NANOFAAS_MARKERS if not (root / marker).is_file()]
+    if missing:
+        raise RuntimeError(
+            f"NANOFAAS_ROOT is not a nanoFaaS checkout; missing: {', '.join(missing)}"
+        )
+    return root
 
 
 def default_tool_paths() -> ToolPaths:
-    return ToolPaths.repo_root(discover_repo_root())
+    return ToolPaths.from_roots(nanofaas_root_from_env(), discover_tool_root())
 
 
 def scenario_path_from_env(cli_path: Path | None = None) -> Path | None:
     """Resolve scenario path: CLI argument takes precedence over NANOFAAS_SCENARIO_PATH env var."""
     if cli_path is not None:
         return cli_path
-    import os
 
     s = os.getenv("NANOFAAS_SCENARIO_PATH", "").strip()
     return Path(s) if s else None
-
-
-def resolve_workspace_path(path: Path) -> Path:
-    if path.is_absolute():
-        return path.resolve()
-
-    workspace_candidate = default_tool_paths().workspace_root / path
-    if workspace_candidate.exists():
-        return workspace_candidate.resolve()
-
-    return (Path.cwd() / path).resolve()

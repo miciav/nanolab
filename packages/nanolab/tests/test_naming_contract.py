@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 from pathlib import Path
+import subprocess
 import tomllib
 
 
@@ -24,3 +26,18 @@ def test_distribution_and_console_scripts_use_nanolab_name() -> None:
         "nanolab-package-report": "nanolab.devtools.package_report:main",
         "nanolab-quality": "nanolab.devtools.quality:main",
     }
+
+
+def test_help_does_not_require_nanofaas_root() -> None:
+    environment = os.environ.copy()
+    environment.pop("NANOFAAS_ROOT", None)
+
+    result = subprocess.run(
+        ("nanolab", "--help"),
+        capture_output=True,
+        env=environment,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr

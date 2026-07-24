@@ -194,7 +194,7 @@ def test_images_plan_rejects_official_ghcr_registry(tmp_path: Path) -> None:
 def test_build_specs_use_one_bake_group_per_arch_and_verify_all_cells(
     tmp_path: Path,
 ) -> None:
-    plan = build_image_plan(default_tool_paths().workspace_root, "0.18.0")
+    plan = build_image_plan(default_tool_paths().nanofaas_root, "0.18.0")
 
     specs = images_module._build_specs(
         plan,
@@ -654,7 +654,7 @@ def test_distinct_builder_workflow_stages_bake_transports_and_pushes_on_stack(
     monkeypatch, tmp_path: Path
 ) -> None:
     plan = build_image_plan(
-        default_tool_paths().workspace_root,
+        default_tool_paths().nanofaas_root,
         "0.18.0",
         selectors=("watchdog",),
         architectures=("amd64",),
@@ -679,7 +679,7 @@ def test_distinct_builder_workflow_stages_bake_transports_and_pushes_on_stack(
         bake_file,
         environment=_two_vm_environment(),
         builder_role="loadgen",
-        repo_root=default_tool_paths().workspace_root,
+        repo_root=default_tool_paths().nanofaas_root,
         push=True,
         provider=provider,
     )
@@ -700,7 +700,7 @@ def test_distinct_builder_workflow_stages_bake_transports_and_pushes_on_stack(
 
 def test_remote_bake_file_is_cleaned_when_build_fails(monkeypatch, tmp_path: Path) -> None:
     plan = build_image_plan(
-        default_tool_paths().workspace_root,
+        default_tool_paths().nanofaas_root,
         "0.18.0",
         selectors=("watchdog",),
         architectures=("amd64",),
@@ -725,7 +725,7 @@ def test_remote_bake_file_is_cleaned_when_build_fails(monkeypatch, tmp_path: Pat
         bake_file,
         environment=_two_vm_environment(),
         builder_role="loadgen",
-        repo_root=default_tool_paths().workspace_root,
+        repo_root=default_tool_paths().nanofaas_root,
         push=False,
         provider=provider,
     )

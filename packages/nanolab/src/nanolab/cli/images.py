@@ -236,7 +236,7 @@ def _prepare_plan(
     selected_flavors = _selected(flavors, _FLAVORS, "flavor")
     try:
         plan = build_image_plan(
-            paths.workspace_root,
+            paths.nanofaas_root,
             version,
             registry=registry,
             selectors=selectors,
@@ -533,7 +533,7 @@ def install_image_commands(app: typer.Typer) -> None:
             bake_file,
             environment=environment_config,
             builder_role=builder_role,
-            repo_root=default_tool_paths().workspace_root,
+            repo_root=default_tool_paths().nanofaas_root,
             push=push,
         )
         with bind_workflow_sink(ConsoleProgressSink()):

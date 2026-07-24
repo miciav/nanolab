@@ -17,7 +17,7 @@ from nanolab.cli.preflight import PreflightError, preflight_control_plane
 from nanolab.cli.product import _environment, _scenario, _workflow
 from nanolab.cli.provisioning import provision_environment
 from nanolab.tui.workflow_controller import TuiWorkflowController
-from nanolab.workspace.paths import default_tool_paths
+from nanolab.workspace.paths import default_tool_paths, discover_tool_root
 from tui_toolkit import Choice, render_screen_frame, select
 from tui_toolkit.console import console as default_console
 
@@ -201,7 +201,7 @@ class NanofaasTUI:
                 return
             try:
                 scenario = _scenario(
-                    default_tool_paths().tool_root / "scenarios-v2" / selected
+                    discover_tool_root() / "scenarios-v2" / selected
                 )
                 body = scenario.model_dump_json(by_alias=True, indent=2)
             except Exception as exc:
@@ -221,7 +221,7 @@ class NanofaasTUI:
             )
 
     def _select_environment(self) -> Path | None:
-        environment_dir = default_tool_paths().tool_root / "environments"
+        environment_dir = discover_tool_root() / "environments"
         while True:
             environment_paths = [
                 path
@@ -267,8 +267,7 @@ class NanofaasTUI:
             return Path(selected)
 
     def _workflow_menu(self, scenario_name: str) -> None:
-        paths = default_tool_paths()
-        scenario_path = paths.tool_root / "scenarios-v2" / scenario_name
+        scenario_path = discover_tool_root() / "scenarios-v2" / scenario_name
         title = _SCENARIO_TITLES[scenario_name]
         state = "environment"
         environment_path: Path | None = None
@@ -400,7 +399,7 @@ class NanofaasTUI:
                     provision_environment(
                         scenario,
                         environment,
-                        repo_root=paths.workspace_root,
+                        repo_root=default_tool_paths().nanofaas_root,
                         keep=keep,
                     )
                     if provision

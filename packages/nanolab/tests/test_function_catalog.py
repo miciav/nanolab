@@ -28,7 +28,7 @@ def test_function_catalog_exposes_demo_families() -> None:
     assert "tool-metrics-echo" in keys
 
 
-def test_function_catalog_discovers_repository_examples() -> None:
+def test_function_catalog_discovers_repository_examples(nanofaas_root: Path) -> None:
     keys = {function.key for function in list_functions()}
 
     assert {
@@ -53,6 +53,9 @@ def test_function_catalog_discovers_repository_examples() -> None:
         "tool-metrics-echo",
     }.issubset(keys)
     assert "building-java" not in keys
+    assert resolve_function_definition("word-stats-java").example_dir == (
+        nanofaas_root / "functions" / "java" / "word-stats"
+    )
 
 
 def test_resolve_function_definition_uses_dynamic_index() -> None:

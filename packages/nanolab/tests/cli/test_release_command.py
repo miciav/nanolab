@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -13,8 +14,9 @@ from nanolab.release.run import GitState
 from nanolab.release.versioning import read_project_version
 
 
-REPO_ROOT = Path(__file__).resolve().parents[4]
-CURRENT_VERSION = read_project_version(REPO_ROOT)
+NANOFAAS_ROOT = Path(os.environ["NANOFAAS_ROOT"]).resolve()
+NANOLAB_ROOT = Path(__file__).resolve().parents[2]
+CURRENT_VERSION = read_project_version(NANOFAAS_ROOT)
 
 
 def _file(path: Path, value: str = "fixture") -> Path:
@@ -95,7 +97,7 @@ def test_release_prepare_delegates_to_curated_version_preparation(monkeypatch) -
     result = CliRunner().invoke(app, ["release", "prepare", "v0.18.0"])
 
     assert result.exit_code == 0, result.output
-    assert seen == [(release_cli.default_tool_paths().workspace_root, "v0.18.0")]
+    assert seen == [(release_cli.default_tool_paths().nanofaas_root, "v0.18.0")]
     assert "build.gradle" in result.output
     assert "commit" in result.output.lower()
 
@@ -156,9 +158,9 @@ def test_release_plan_uses_the_real_planner_without_cloud_or_secrets(
             "plan",
             CURRENT_VERSION,
             "--environment",
-            str(REPO_ROOT / "tools/controlplane/environments/azure-release.yaml.example"),
+            str(NANOLAB_ROOT / "environments/azure-release.yaml.example"),
             "--release-config",
-            str(REPO_ROOT / "tools/controlplane/release.yaml"),
+            str(NANOLAB_ROOT / "release.yaml"),
             "--run-dir",
             str(tmp_path / "run"),
         ],

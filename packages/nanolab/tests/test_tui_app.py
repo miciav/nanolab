@@ -119,10 +119,11 @@ def _install_paths(monkeypatch: pytest.MonkeyPatch, root: Path) -> Path:
     environment_path = environment_dir / "local.yaml"
     environment_path.write_text("provider: local\n", encoding="utf-8")
     (root / "scenarios-v2").mkdir()
+    monkeypatch.setattr(tui_app, "discover_tool_root", lambda: root)
     monkeypatch.setattr(
         tui_app,
         "default_tool_paths",
-        lambda: SimpleNamespace(tool_root=root, workspace_root=root),
+        lambda: SimpleNamespace(tool_root=root, nanofaas_root=root),
     )
     return environment_path
 
@@ -196,6 +197,13 @@ def test_tools_inspect_selects_only_stable_scenarios_and_renders_validated_json(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     _install_paths(monkeypatch, tmp_path)
+    monkeypatch.delenv("NANOFAAS_ROOT", raising=False)
+    monkeypatch.setattr(tui_app, "discover_tool_root", lambda: tmp_path)
+    monkeypatch.setattr(
+        tui_app,
+        "default_tool_paths",
+        lambda: (_ for _ in ()).throw(AssertionError("source root must stay deferred")),
+    )
     loaded_paths: list[Path] = []
 
     class Scenario:
@@ -250,6 +258,34 @@ def test_tools_inspect_selects_only_stable_scenarios_and_renders_validated_json(
     assert frame_calls[0]["title"] == "Inspect scenario"
     assert frame_calls[0]["breadcrumb"] == "Main / Tools / Inspect scenario"
     assert console.calls == [("clear", None), ("print", frame), ("clear", None)]
+
+
+def test_tool_navigation_does_not_require_nanofaas_root(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    environment_dir = tmp_path / "environments"
+    environment_dir.mkdir()
+    (environment_dir / "local.yaml").write_text("provider: local\n", encoding="utf-8")
+    scenarios_dir = tmp_path / "scenarios-v2"
+    scenarios_dir.mkdir()
+    (scenarios_dir / "validate-container.yaml").write_text(
+        "workflow: validate\nbackend: container\n",
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("NANOFAAS_ROOT", raising=False)
+    monkeypatch.setattr(tui_app, "discover_tool_root", lambda: tmp_path)
+    monkeypatch.setattr(
+        tui_app,
+        "default_tool_paths",
+        lambda: (_ for _ in ()).throw(AssertionError("source root must stay deferred")),
+    )
+
+    chooser = ScriptedChooser(iter(["back"]))
+    app = NanofaasTUI(choose=chooser)
+
+    assert app._select_environment() is None
+    assert chooser.calls[0][0] == "Environment"
 
 
 @pytest.mark.parametrize(

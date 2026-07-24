@@ -26,7 +26,7 @@ def _release_plan(
     paths = default_tool_paths()
     plain_version, _ = normalize_version(version)
     return build_amd64_release_plan(
-        repo_root=paths.workspace_root,
+        repo_root=paths.nanofaas_root,
         version=version,
         environment_path=environment,
         release_config_path=release_config or paths.tool_root / "release.yaml",
@@ -45,15 +45,15 @@ def install_release_commands(app: typer.Typer) -> None:
     @release.command("prepare")
     def prepare_command(version: str = typer.Argument(...)) -> None:
         paths = default_tool_paths()
-        source = git_state(paths.workspace_root)
+        source = git_state(paths.nanofaas_root)
         if not source.clean:
             raise typer.BadParameter("release preparation requires a clean Git tree")
         try:
-            updated = prepare_version(paths.workspace_root, version)
+            updated = prepare_version(paths.nanofaas_root, version)
         except (FileNotFoundError, PermissionError, RuntimeError, ValueError) as error:
             raise _bad_parameter(error) from error
         for path in updated:
-            typer.echo(path.relative_to(paths.workspace_root))
+            typer.echo(path.relative_to(paths.nanofaas_root))
         typer.echo("Commit the prepared version changes before release plan or run.")
 
     @release.command("plan")

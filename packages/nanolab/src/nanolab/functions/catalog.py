@@ -35,10 +35,6 @@ class FunctionPresetSpec:
     keys: tuple[str, ...]
 
 
-_PATHS = default_tool_paths()
-_EXAMPLES_ROOT = _PATHS.workspace_root / "functions"
-
-
 _RUNTIME_DIR_TO_CATALOG_RUNTIME: dict[str, FunctionRuntimeKind] = {
     "bash": "exec",
     "go": "go",
@@ -204,8 +200,12 @@ _FIXTURE_FUNCTIONS: tuple[FunctionDefinition, ...] = (
 
 
 def _load_functions() -> tuple[FunctionDefinition, ...]:
+    paths = default_tool_paths()
     functions = (
-        *_discover_example_functions(_EXAMPLES_ROOT, _PATHS.scenario_payloads_dir),
+        *_discover_example_functions(
+            paths.nanofaas_root / "functions",
+            paths.scenario_payloads_dir,
+        ),
         *_FIXTURE_FUNCTIONS,
     )
     seen: set[str] = set()

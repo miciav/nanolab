@@ -23,7 +23,7 @@ from nanolab.plans.offload_loadtest import build_offload_loadtest_plan
 from nanolab.plans.cli import build_cli_plan
 from nanolab.plans.loadtest import build_loadtest_plan
 from nanolab.plans.validate import build_validate_plan
-from nanolab.workspace.paths import default_tool_paths
+from nanolab.workspace.paths import default_tool_paths, discover_tool_root
 
 
 def _read(path: Path) -> dict[str, object]:
@@ -57,16 +57,16 @@ def _workflow(
     bindings, fetcher = build_role_bindings(environment)
     paths = default_tool_paths()
     if scenario.workflow == "validate":
-        return build_validate_plan(scenario, bindings, repo_root=paths.workspace_root)
+        return build_validate_plan(scenario, bindings, repo_root=paths.nanofaas_root)
     if scenario.workflow == "offload":
-        return build_offload_plan(scenario, bindings, repo_root=paths.workspace_root)
+        return build_offload_plan(scenario, bindings, repo_root=paths.nanofaas_root)
     if scenario.workflow == "offload-loadtest":
         return build_offload_loadtest_plan(
             scenario,
             environment,
             bindings,
             run_dir=run_dir or paths.runs_dir / "latest",
-            repo_root=paths.workspace_root,
+            repo_root=paths.nanofaas_root,
             fetcher=fetcher,
             dry_run=dry_run,
         )
@@ -75,7 +75,7 @@ def _workflow(
             scenario,
             bindings,
             endpoint=control_plane_url,
-            repo_root=paths.workspace_root,
+            repo_root=paths.nanofaas_root,
         )
     return build_loadtest_plan(
         scenario,
@@ -85,7 +85,7 @@ def _workflow(
         prometheus_client=HttpPrometheusClient(prometheus_url),
         run_dir=run_dir or paths.runs_dir / "latest",
         fetcher=fetcher,
-        repo_root=paths.workspace_root,
+        repo_root=paths.nanofaas_root,
     )
 
 
@@ -248,14 +248,14 @@ def install_product_commands(app: typer.Typer) -> None:
             effective_run_dir = paths.runs_dir / "latest"
         sink = ConsoleProgressSink()
         started_at = datetime.now(UTC)
-        provenance = _git_provenance(paths.workspace_root)
+        provenance = _git_provenance(paths.nanofaas_root)
         try:
             with bind_workflow_sink(sink):
                 provisioning = (
                     provision_environment(
                         scenario_config,
                         environment_config,
-                        repo_root=paths.workspace_root,
+                        repo_root=paths.nanofaas_root,
                         keep=keep,
                     )
                     if provision
@@ -365,7 +365,7 @@ def install_product_commands(app: typer.Typer) -> None:
 
     @app.command("list")
     def list_command() -> None:
-        for path in sorted((default_tool_paths().tool_root / "scenarios-v2").glob("*.yaml")):
+        for path in sorted((discover_tool_root() / "scenarios-v2").glob("*.yaml")):
             typer.echo(path)
 
     @app.command("inspect")

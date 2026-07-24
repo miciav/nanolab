@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+import os
+from pathlib import Path
 
 import pytest
 
@@ -29,3 +31,21 @@ class FakeSink:
 @pytest.fixture
 def fake_sink() -> FakeSink:
     return FakeSink()
+
+
+@pytest.fixture(scope="session")
+def nanofaas_root() -> Path:
+    value = os.environ.get("NANOFAAS_ROOT", "").strip()
+    if not value:
+        raise RuntimeError("NANOFAAS_ROOT must point to a nanoFaaS checkout")
+    root = Path(value).expanduser().resolve()
+    missing = [
+        marker
+        for marker in ("build.gradle", "settings.gradle")
+        if not (root / marker).is_file()
+    ]
+    if missing:
+        raise RuntimeError(
+            f"NANOFAAS_ROOT is not a nanoFaaS checkout; missing: {', '.join(missing)}"
+        )
+    return root
