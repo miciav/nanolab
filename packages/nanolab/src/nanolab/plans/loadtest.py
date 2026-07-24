@@ -22,6 +22,7 @@ from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.plans._assembly import workflow_from_specs
 from nanolab.plans.validate import _resolve_function
+from nanolab.workspace.paths import discover_tool_root
 
 
 def _home(user: str, explicit: str | None) -> str:
@@ -40,6 +41,7 @@ def build_loadtest_plan(
     run_dir: Path,
     fetcher: RemoteFileFetcher | object | None = None,
     repo_root: Path | None = None,
+    tool_root: Path | None = None,
     stages: tuple[tuple[str, int], ...] | None = None,
     prebuilt_control_plane_image: str | None = None,
     prebuilt_function_images: Mapping[str, str] | None = None,
@@ -54,7 +56,9 @@ def build_loadtest_plan(
             "maxReplicas": 5,
             "metrics": [{"type": "in_flight", "target": "2"}],
         }
-    functions = tuple(_resolve_function(config, key) for key in config.functions)
+    functions = tuple(
+        _resolve_function(config, key, tool_root=tool_root) for key in config.functions
+    )
     prebuilt = prebuilt_control_plane_image is not None or prebuilt_function_images is not None
     if prebuilt:
         if prebuilt_function_images is None:
@@ -87,11 +91,14 @@ def build_loadtest_plan(
         role_target = environment.target("loadgen" if dedicated else "stack")
         home = _home(role_target.user, role_target.home)
         script_name = "autoscaling.js" if config.autoscaling else "two-vm-function-invoke.js"
+        # ponytail: remote checkout still carries legacy tool assets; stage nanolab assets
+        # separately when the monorepo copy is removed.
         script_path = Path(home) / f"nanofaas/tools/controlplane/assets/k6/{script_name}"
         summary_path = Path(home) / "nanofaas-loadtest/k6-summary.json"
     else:
         script_name = "autoscaling.js" if config.autoscaling else "two-vm-function-invoke.js"
-        script_path = root / f"tools/controlplane/assets/k6/{script_name}"
+        product_root = tool_root or discover_tool_root()
+        script_path = product_root / "assets" / "k6" / script_name
         summary_path = run_dir / "k6-summary.json"
     deployment = ValidateWorkflowRequest(
         backend="k8s",

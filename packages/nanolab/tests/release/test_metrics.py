@@ -20,7 +20,7 @@ from nanolab.release.metrics import (
 )
 
 
-REPO_ROOT = Path(__file__).resolve().parents[4]
+NANOLAB_ROOT = Path(__file__).resolve().parents[2]
 PROFILE = PerformanceProfile(
     name="azure-d8s-v5+d2s-v5-amd64-native-loadtest-v1",
     provider="azure",
@@ -271,7 +271,7 @@ def test_regression_policy_checks_throughput_p95_and_error_rate() -> None:
 
 
 def test_release_configuration_owns_the_versioned_policy() -> None:
-    config = yaml.safe_load((REPO_ROOT / "tools/controlplane/release.yaml").read_text())
+    config = yaml.safe_load((NANOLAB_ROOT / "release.yaml").read_text())
 
     assert config == {
         "schemaVersion": 1,

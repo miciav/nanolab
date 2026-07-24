@@ -16,7 +16,7 @@ from workflow_tasks.components.images import (
 from workflow_tasks.vm.models import VmRequest
 
 
-REPO_ROOT = Path(__file__).resolve().parents[4]
+WORKSPACE_ROOT = Path(__file__).resolve().parents[4]
 LIVE_E2E_SCENARIO_IMAGE_CONSUMERS = (
     "packages/workflow-tasks/src/workflow_tasks/components/images.py",
     "packages/workflow-tasks/src/workflow_tasks/workflows/validate.py",
@@ -64,9 +64,9 @@ def test_e2e_image_components_keep_local_e2e_tags() -> None:
 
 def test_live_e2e_scenario_image_consumers_do_not_use_removed_images_cli_syntax() -> None:
     violations = {
-        str(path.relative_to(REPO_ROOT)): syntax
+        str(path.relative_to(WORKSPACE_ROOT)): syntax
         for relative_path in LIVE_E2E_SCENARIO_IMAGE_CONSUMERS
-        for path in [REPO_ROOT / relative_path]
+        for path in [WORKSPACE_ROOT / relative_path]
         for syntax in REMOVED_RELEASE_IMAGE_CLI_SYNTAX
         if syntax in path.read_text(encoding="utf-8")
     }

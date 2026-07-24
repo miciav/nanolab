@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import hashlib
+import os
 from pathlib import Path
 
 import pytest
@@ -10,14 +11,14 @@ from nanolab.release import publish
 from nanolab.release.state import ArtifactEvidence
 
 
-REPO_ROOT = Path(__file__).resolve().parents[4]
+NANOFAAS_ROOT = Path(os.environ["NANOFAAS_ROOT"]).resolve()
 LOCAL_REGISTRY = "localhost:5000/nanofaas"
 VERSION = "v0.18.0"
 
 
 def _plan() -> publish.PublishPlan:
     return publish.build_publish_plan(
-        REPO_ROOT,
+        NANOFAAS_ROOT,
         VERSION,
         local_registry=LOCAL_REGISTRY,
     )

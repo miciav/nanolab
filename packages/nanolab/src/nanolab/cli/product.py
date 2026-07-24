@@ -57,7 +57,12 @@ def _workflow(
     bindings, fetcher = build_role_bindings(environment)
     paths = default_tool_paths()
     if scenario.workflow == "validate":
-        return build_validate_plan(scenario, bindings, repo_root=paths.nanofaas_root)
+        return build_validate_plan(
+            scenario,
+            bindings,
+            repo_root=paths.nanofaas_root,
+            tool_root=paths.tool_root,
+        )
     if scenario.workflow == "offload":
         return build_offload_plan(scenario, bindings, repo_root=paths.nanofaas_root)
     if scenario.workflow == "offload-loadtest":
@@ -67,6 +72,7 @@ def _workflow(
             bindings,
             run_dir=run_dir or paths.runs_dir / "latest",
             repo_root=paths.nanofaas_root,
+            tool_root=paths.tool_root,
             fetcher=fetcher,
             dry_run=dry_run,
         )
@@ -86,6 +92,7 @@ def _workflow(
         run_dir=run_dir or paths.runs_dir / "latest",
         fetcher=fetcher,
         repo_root=paths.nanofaas_root,
+        tool_root=paths.tool_root,
     )
 
 

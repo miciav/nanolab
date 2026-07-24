@@ -20,6 +20,13 @@ commands:
 export NANOFAAS_ROOT=/path/to/nanofaas
 ```
 
+For example:
+
+```bash
+NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab plan packages/nanolab/scenarios-v2/validate-container.yaml
+NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab run packages/nanolab/scenarios-v2/validate-container.yaml
+```
+
 The root quality gates will be:
 
 ```bash

@@ -29,6 +29,7 @@ from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.plans._assembly import workflow_from_specs
 from nanolab.plans.validate import _resolve_function
+from nanolab.workspace.paths import discover_tool_root
 
 _ACTUATOR_PORT = 30081
 _CONTROL_PLANE_PORT = 30080
@@ -138,6 +139,7 @@ def build_offload_loadtest_plan(
     *,
     run_dir: Path,
     repo_root: Path | None = None,
+    tool_root: Path | None = None,
     fetcher: RemoteFileFetcher | None = None,
     dry_run: bool = False,
 ) -> Workflow:
@@ -152,12 +154,16 @@ def build_offload_loadtest_plan(
     # locally once it elapses) — the default 5s is too tight for a cross-VM hop
     # to a function pod that may still be warming up under real load.
     offloadable = replace(
-        _resolve_function(config, offloadable_key),
+        _resolve_function(config, offloadable_key, tool_root=tool_root),
         concurrency=2,
         queue_size=8,
         timeout_ms=15000,
     )
-    control = replace(_resolve_function(config, control_key), concurrency=2, queue_size=8)
+    control = replace(
+        _resolve_function(config, control_key, tool_root=tool_root),
+        concurrency=2,
+        queue_size=8,
+    )
     request = OffloadLoadtestRequest(offloadable=offloadable, control=control, build=config.build)
 
     root = repo_root or Path.cwd()
@@ -181,10 +187,13 @@ def build_offload_loadtest_plan(
         home = role_target.home or (
             "/root" if role_target.user == "root" else f"/home/{role_target.user}"
         )
+        # ponytail: remote checkout still carries legacy tool assets; stage nanolab assets
+        # separately when the monorepo copy is removed.
         script_path = Path(home) / "nanofaas/tools/controlplane/assets/k6/offload-mixed.js"
         summary_path = Path(home) / "nanofaas-loadtest/k6-summary.json"
     else:
-        script_path = root / "tools/controlplane/assets/k6/offload-mixed.js"
+        product_root = tool_root or discover_tool_root()
+        script_path = product_root / "assets/k6/offload-mixed.js"
         summary_path = run_dir / "k6-summary.json"
 
     preflight_spec = CommandTaskSpec(

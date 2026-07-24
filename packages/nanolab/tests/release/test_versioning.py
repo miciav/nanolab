@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -17,7 +18,7 @@ from nanolab.release.versioning import (
 )
 
 
-SOURCE_REPO = Path(__file__).resolve().parents[4]
+NANOFAAS_ROOT = Path(os.environ["NANOFAAS_ROOT"]).resolve()
 CURATED_FILES = (
     Path("build.gradle"),
     Path("deploy/helm/nanofaas/Chart.yaml"),
@@ -47,7 +48,7 @@ def source_tree(tmp_path: Path) -> Path:
     for relative_path in CURATED_FILES:
         destination = tmp_path / relative_path
         destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(SOURCE_REPO / relative_path, destination)
+        shutil.copy2(NANOFAAS_ROOT / relative_path, destination)
     sentinel = tmp_path / "docs" / "release-sentinel.txt"
     sentinel.parent.mkdir(parents=True, exist_ok=True)
     sentinel.write_text("must remain unchanged\n", encoding="utf-8")

@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 
 import pytest
 
@@ -9,7 +10,8 @@ from workflow_tasks.execution.bindings import RoleBindings
 from workflow_tasks.tasks.models import TaskResult
 
 
-REPO_ROOT = Path(__file__).resolve().parents[4]
+NANOFAAS_ROOT = Path(os.environ["NANOFAAS_ROOT"]).resolve()
+NANOLAB_ROOT = Path(__file__).resolve().parents[2]
 
 
 class _RecordingExecutor:
@@ -31,7 +33,7 @@ def test_offload_scenario_rejects_a_backend() -> None:
 
 
 def test_plan_starts_cloud_then_edge_as_managed_resources() -> None:
-    workflow = build_offload_plan(_scenario(), _bindings(), repo_root=REPO_ROOT)
+    workflow = build_offload_plan(_scenario(), _bindings(), repo_root=NANOFAAS_ROOT)
 
     resources = [task for task in workflow.tasks if isinstance(task, ResourceTask)]
     assert [task.task_id for task in resources] == ["offload.start.cloud", "offload.start.edge"]
@@ -43,7 +45,7 @@ def test_plan_starts_cloud_then_edge_as_managed_resources() -> None:
 
 
 def test_plan_ends_with_the_no_fallback_negative_check_and_cleans_up() -> None:
-    workflow = build_offload_plan(_scenario(), _bindings(), repo_root=REPO_ROOT)
+    workflow = build_offload_plan(_scenario(), _bindings(), repo_root=NANOFAAS_ROOT)
 
     ids = [task.task_id for task in workflow.tasks]
     assert ids[-1] == "offload.verify.remote-missing.word-stats-java"
@@ -58,7 +60,7 @@ def test_offload_scenario_file_parses() -> None:
     import yaml
 
     payload = yaml.safe_load(
-        (REPO_ROOT / "tools/controlplane/scenarios-v2/validate-offload.yaml").read_text()
+        (NANOLAB_ROOT / "scenarios-v2/validate-offload.yaml").read_text()
     )
     config = ScenarioConfig.model_validate(payload)
     assert config.workflow == "offload"

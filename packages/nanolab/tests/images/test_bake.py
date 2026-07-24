@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -11,12 +12,12 @@ from nanolab.images.bake import render_bake, render_bake_json
 from nanolab.images.plan import build_image_plan
 
 
-REPO_ROOT = Path(__file__).resolve().parents[4]
+NANOFAAS_ROOT = Path(os.environ["NANOFAAS_ROOT"]).resolve()
 
 
 def _plan():  # noqa: ANN202
     return build_image_plan(
-        REPO_ROOT,
+        NANOFAAS_ROOT,
         "v0.18.0",
         registry="registry.test:5000/nanofaas",
     )
@@ -107,7 +108,7 @@ def test_generated_json_roundtrips_through_buildx_print(tmp_path: Path) -> None:
         pytest.skip("Docker Buildx is absent")
     version = subprocess.run(
         [docker, "buildx", "version"],
-        cwd=REPO_ROOT,
+        cwd=NANOFAAS_ROOT,
         text=True,
         capture_output=True,
         check=False,
@@ -122,7 +123,7 @@ def test_generated_json_roundtrips_through_buildx_print(tmp_path: Path) -> None:
     bake_file.write_text(render_bake_json(_plan()), encoding="utf-8")
     rendered = subprocess.run(
         [docker, "buildx", "bake", "--file", str(bake_file), "--print"],
-        cwd=REPO_ROOT,
+        cwd=NANOFAAS_ROOT,
         text=True,
         capture_output=True,
         check=False,

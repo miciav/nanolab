@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -9,13 +10,13 @@ from nanolab.release import arm
 from nanolab.release.state import ArtifactEvidence
 
 
-REPO_ROOT = Path(__file__).resolve().parents[4]
+NANOFAAS_ROOT = Path(os.environ["NANOFAAS_ROOT"]).resolve()
 REGISTRY = "localhost:5000/nanofaas"
 
 
 def _plan():  # noqa: ANN202
     return arm.build_arm64_image_plan(
-        REPO_ROOT,
+        NANOFAAS_ROOT,
         "v0.18.0",
         registry=REGISTRY,
     )
@@ -123,7 +124,7 @@ def test_watchdog_smoke_accepts_only_the_expected_missing_child_exit() -> None:
 
 
 def test_arm64_plan_is_the_arm_partition_of_the_complete_image_plan() -> None:
-    complete = build_image_plan(REPO_ROOT, "v0.18.0", registry=REGISTRY)
+    complete = build_image_plan(NANOFAAS_ROOT, "v0.18.0", registry=REGISTRY)
 
     assert _plan().cells == tuple(
         cell for cell in complete.cells if cell.architecture == "arm64"

@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from dataclasses import asdict, replace
 import hashlib
 import json
+import os
 import shlex
 import subprocess
 import tarfile
@@ -19,8 +20,9 @@ from nanolab.release.metrics import build_release_record
 from nanolab.release.versioning import read_project_version
 
 
-REPO_ROOT = Path(__file__).resolve().parents[4]
-CURRENT_VERSION = read_project_version(REPO_ROOT)
+NANOFAAS_ROOT = Path(os.environ["NANOFAAS_ROOT"]).resolve()
+NANOLAB_ROOT = Path(__file__).resolve().parents[2]
+CURRENT_VERSION = read_project_version(NANOFAAS_ROOT)
 CURRENT_TAG = f"v{CURRENT_VERSION}"
 BUILDER_NAME = f"nanofaas-release-{CURRENT_TAG.replace('.', '-')}"
 _VERSION_PARTS = tuple(int(part) for part in CURRENT_VERSION.split("."))
@@ -45,10 +47,10 @@ def _plan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         cosign_password=_secret(tmp_path / "cosign.password", "fixture-password"),
     )
     return release_run.build_amd64_release_plan(
-        repo_root=REPO_ROOT,
+        repo_root=NANOFAAS_ROOT,
         version=CURRENT_TAG,
-        environment_path=REPO_ROOT / "tools/controlplane/environments/azure-release.yaml.example",
-        release_config_path=REPO_ROOT / "tools/controlplane/release.yaml",
+        environment_path=NANOLAB_ROOT / "environments/azure-release.yaml.example",
+        release_config_path=NANOLAB_ROOT / "release.yaml",
         run_dir=tmp_path / "run",
         credentials=credentials,
         # finalization must never write into the real repository docs in tests
@@ -95,11 +97,10 @@ def test_plan_rejects_dirty_source_before_creating_release_files(
 
     with pytest.raises(ValueError, match="clean Git tree"):
         release_run.build_amd64_release_plan(
-            repo_root=REPO_ROOT,
+            repo_root=NANOFAAS_ROOT,
             version=CURRENT_VERSION,
-            environment_path=REPO_ROOT
-            / "tools/controlplane/environments/azure-release.yaml.example",
-            release_config_path=REPO_ROOT / "tools/controlplane/release.yaml",
+            environment_path=NANOLAB_ROOT / "environments/azure-release.yaml.example",
+            release_config_path=NANOLAB_ROOT / "release.yaml",
             run_dir=tmp_path / "run",
             credentials=credentials,
         )
@@ -177,11 +178,10 @@ def test_plan_rejects_requested_version_that_is_not_prepared(
 
     with pytest.raises(ValueError, match="prepared project version"):
         release_run.build_amd64_release_plan(
-            repo_root=REPO_ROOT,
+            repo_root=NANOFAAS_ROOT,
             version=MISMATCH_VERSION,
-            environment_path=REPO_ROOT
-            / "tools/controlplane/environments/azure-release.yaml.example",
-            release_config_path=REPO_ROOT / "tools/controlplane/release.yaml",
+            environment_path=NANOLAB_ROOT / "environments/azure-release.yaml.example",
+            release_config_path=NANOLAB_ROOT / "release.yaml",
             run_dir=tmp_path / "run",
             credentials=credentials,
         )
@@ -191,7 +191,7 @@ def test_plan_resolves_relative_release_inputs_against_the_working_directory(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.chdir(REPO_ROOT)
+    monkeypatch.chdir(NANOLAB_ROOT)
     monkeypatch.setattr(
         release_run,
         "git_state",
@@ -204,17 +204,17 @@ def test_plan_resolves_relative_release_inputs_against_the_working_directory(
     )
 
     plan = release_run.build_amd64_release_plan(
-        repo_root=REPO_ROOT,
+        repo_root=NANOFAAS_ROOT,
         version=CURRENT_VERSION,
-        environment_path=Path("tools/controlplane/environments/azure-release.yaml.example"),
-        release_config_path=Path("tools/controlplane/release.yaml"),
+        environment_path=Path("environments/azure-release.yaml.example"),
+        release_config_path=Path("release.yaml"),
         run_dir=tmp_path / "run",
         credentials=credentials,
         # finalization must never write into the real repository docs in tests
         performance_root=tmp_path / "performance-docs",
     )
 
-    assert plan.settings.scenario == (REPO_ROOT / "tools/controlplane/scenarios-v2/loadtest.yaml")
+    assert plan.settings.scenario == (NANOLAB_ROOT / "scenarios-v2/loadtest.yaml")
 
 
 def _release_config(tmp_path: Path) -> tuple[Path, dict[str, object]]:
@@ -235,6 +235,60 @@ def _release_config(tmp_path: Path) -> tuple[Path, dict[str, object]]:
         },
     }
     return tmp_path / "release.yaml", config
+
+
+def test_release_settings_allow_tool_config_outside_nanofaas_source(tmp_path: Path) -> None:
+    path, config = _release_config(tmp_path)
+    path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    settings = release_run._release_settings(Path("/separate/nanofaas"), path)
+
+    assert settings.scenario == tmp_path / "scenario.yaml"
+
+
+def test_release_settings_normalize_equivalent_scenario_paths(tmp_path: Path) -> None:
+    path, config = _release_config(tmp_path)
+    config["benchmark"]["scenario"] = "nested/../scenario.yaml"  # type: ignore[index]
+    path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    settings = release_run._release_settings(Path("/separate/nanofaas"), path)
+
+    assert settings.scenario_name == "scenario.yaml"
+
+
+def test_release_settings_reject_scenario_parent_escape(tmp_path: Path) -> None:
+    config_root = tmp_path / "nanolab"
+    config_root.mkdir()
+    path, config = _release_config(config_root)
+    outside = tmp_path / "outside.yaml"
+    outside.write_text("workflow: loadtest\nfunctions: [word-stats-java]\n")
+    config["benchmark"]["scenario"] = "../outside.yaml"  # type: ignore[index]
+    path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="configuration-relative"):
+        release_run._release_settings(Path("/separate/nanofaas"), path)
+
+
+def test_release_settings_reject_scenario_symlink_escape(tmp_path: Path) -> None:
+    config_root = tmp_path / "nanolab"
+    config_root.mkdir()
+    path, config = _release_config(config_root)
+    outside = tmp_path / "outside.yaml"
+    outside.write_text("workflow: loadtest\nfunctions: [word-stats-java]\n")
+    (config_root / "scenario.yaml").unlink()
+    (config_root / "scenario.yaml").symlink_to(outside)
+    path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="configuration-relative"):
+        release_run._release_settings(Path("/separate/nanofaas"), path)
+
+
+def test_performance_profile_uses_the_tool_relative_scenario(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    profile = release_run._performance_profile(_plan(tmp_path, monkeypatch))
+
+    assert profile.scenario == "scenarios-v2/loadtest.yaml"
 
 
 @pytest.mark.parametrize("runs", (3.0, True, "3"))

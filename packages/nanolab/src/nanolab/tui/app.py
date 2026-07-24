@@ -109,13 +109,13 @@ _PROVIDER_SETUP = {
 }
 _PROVIDER_GUIDANCE = {
     "azure": (
-        "cp tools/controlplane/environments/azure.yaml.example "
-        "tools/controlplane/environments/azure.yaml\n\n"
+        "cp packages/nanolab/environments/azure.yaml.example "
+        "packages/nanolab/environments/azure.yaml\n\n"
         "Set the Azure provider values and ssh_key_path, then run az login."
     ),
     "proxmox": (
-        "cp tools/controlplane/environments/proxmox.yaml.example "
-        "tools/controlplane/environments/proxmox.yaml\n\n"
+        "cp packages/nanolab/environments/proxmox.yaml.example "
+        "packages/nanolab/environments/proxmox.yaml\n\n"
         "Set host, node, template_id, and ssh_key_path. The template's password_env "
         "names PROXMOX_PASSWORD; export that environment variable."
     ),

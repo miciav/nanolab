@@ -126,6 +126,7 @@ class BuilderConfiguration:
 class ReleaseSettings:
     max_parallelism: int
     scenario: Path
+    scenario_name: str
     benchmark_runs: int
     profile: str
     throughput_max_loss_percent: float
@@ -1927,7 +1928,7 @@ def _performance_profile(plan: Amd64ReleasePlan) -> PerformanceProfile:
         loadgen_vm=azure.loadgen_vm_size,
         architecture="amd64",
         flavor="native",
-        scenario=plan.settings.scenario.relative_to(plan.repo_root).as_posix(),
+        scenario=plan.settings.scenario_name,
     )
 
 
@@ -2120,7 +2121,7 @@ def _read_yaml(path: Path) -> dict[str, Any]:
     return value
 
 
-def _release_settings(repo_root: Path, path: Path) -> ReleaseSettings:
+def _release_settings(_repo_root: Path, path: Path) -> ReleaseSettings:
     data = _read_yaml(path)
     try:
         if data["schemaVersion"] != 1:
@@ -2139,13 +2140,14 @@ def _release_settings(repo_root: Path, path: Path) -> ReleaseSettings:
         if not isinstance(runs, int) or isinstance(runs, bool) or runs != 3:
             raise ValueError("benchmark.runs must be the integer 3")
         scenario = Path(str(benchmark["scenario"]))
-        scenario_source = (Path(path).parent / scenario).resolve()
+        config_root = Path(path).parent.resolve()
+        scenario_source = (config_root / scenario).resolve()
         try:
-            scenario_source.relative_to(repo_root)
+            scenario_relative = scenario_source.relative_to(config_root)
         except ValueError:
-            raise ValueError("benchmark scenario must be a repository-relative file") from None
+            raise ValueError("benchmark scenario must be a configuration-relative file") from None
         if scenario.is_absolute() or not scenario_source.is_file():
-            raise ValueError("benchmark scenario must be a repository-relative file")
+            raise ValueError("benchmark scenario must be a configuration-relative file")
         throughput_loss = _finite_nonnegative(
             regression["throughputMaxLossPercent"],
             "benchmark.regression.throughputMaxLossPercent",
@@ -2163,6 +2165,7 @@ def _release_settings(repo_root: Path, path: Path) -> ReleaseSettings:
         return ReleaseSettings(
             max_parallelism=max_parallelism,
             scenario=scenario_source,
+            scenario_name=scenario_relative.as_posix(),
             benchmark_runs=runs,
             profile=str(benchmark["profile"]),
             throughput_max_loss_percent=throughput_loss,

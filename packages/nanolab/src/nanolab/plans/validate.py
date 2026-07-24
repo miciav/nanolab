@@ -16,6 +16,7 @@ from workflow_tasks.workflows.validate import (
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.functions.catalog import FunctionDefinition, resolve_function_definition
 from nanolab.plans._assembly import workflow_from_specs
+from nanolab.workspace.paths import discover_tool_root
 
 
 def _container_control_plane(repo_root: Path):
@@ -85,23 +86,25 @@ def _function_name(definition: FunctionDefinition) -> str:
     return str(manifest.get("name", definition.key))
 
 
-def _payload(definition: FunctionDefinition) -> str:
+def _payload(definition: FunctionDefinition, tool_root: Path | None = None) -> str:
     if definition.default_payload_file is None:
         return '{"input":{}}'
+    product_root = tool_root or discover_tool_root()
     payload_path = (
-        definition.example_dir.parents[2]
-        / "tools/controlplane/scenarios/payloads"
-        / definition.default_payload_file
-        if definition.example_dir is not None
-        else None
+        product_root / "scenarios" / "payloads" / definition.default_payload_file
     )
-    if payload_path is None or not payload_path.exists():
+    if not payload_path.exists():
         return '{"input":{}}'
     payload = json.loads(payload_path.read_text(encoding="utf-8"))
     return json.dumps({"input": payload}, separators=(",", ":"))
 
 
-def _resolve_function(config: ScenarioConfig, key: str) -> ValidateFunction:
+def _resolve_function(
+    config: ScenarioConfig,
+    key: str,
+    *,
+    tool_root: Path | None = None,
+) -> ValidateFunction:
     definition = resolve_function_definition(key)
     image = _function_image(definition)
     resource = config.resources.get(key)
@@ -110,7 +113,7 @@ def _resolve_function(config: ScenarioConfig, key: str) -> ValidateFunction:
         name=_function_name(definition),
         image=image,
         build_argv=_build_argv(definition, image),
-        payload=_payload(definition),
+        payload=_payload(definition, tool_root),
         resources=(
             resource.model_dump(by_alias=True, exclude_none=True) if resource is not None else None
         ),
@@ -122,13 +125,16 @@ def build_validate_plan(
     bindings: RoleBindings,
     *,
     repo_root: Path | None = None,
+    tool_root: Path | None = None,
 ) -> Workflow:
     if config.workflow != "validate" or config.backend is None:
         raise ValueError("validate plan requires a validate scenario with a backend")
     request = ValidateWorkflowRequest(
         backend=config.backend,
         build=config.build,
-        functions=tuple(_resolve_function(config, key) for key in config.functions),
+        functions=tuple(
+            _resolve_function(config, key, tool_root=tool_root) for key in config.functions
+        ),
         additional_modules=("async-queue", "sync-queue") if config.backend == "k8s" else (),
     )
     root = repo_root or Path.cwd()

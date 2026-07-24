@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
+import os
 from pathlib import Path
 
 import pytest
@@ -9,12 +10,12 @@ from nanolab.functions.catalog import list_functions
 from nanolab.images.plan import build_image_plan
 
 
-REPO_ROOT = Path(__file__).resolve().parents[4]
+NANOFAAS_ROOT = Path(os.environ["NANOFAAS_ROOT"]).resolve()
 REGISTRY = "registry.test:5000/nanofaas"
 
 
 def _plan(**kwargs):  # noqa: ANN003, ANN202
-    return build_image_plan(REPO_ROOT, "v0.18.0", registry=REGISTRY, **kwargs)
+    return build_image_plan(NANOFAAS_ROOT, "v0.18.0", registry=REGISTRY, **kwargs)
 
 
 def _function_image_name(runtime: str, family: str) -> str:
@@ -87,7 +88,7 @@ def test_candidate_tags_include_architecture_and_non_default_flavor() -> None:
 
 
 def test_default_candidate_registry_is_stack_local_never_ghcr() -> None:
-    plan = build_image_plan(REPO_ROOT, "v0.18.0", selectors=("watchdog",))
+    plan = build_image_plan(NANOFAAS_ROOT, "v0.18.0", selectors=("watchdog",))
 
     assert plan.registry == "localhost:5000/nanofaas"
     assert all(cell.image.startswith("localhost:5000/nanofaas/") for cell in plan.cells)
@@ -103,7 +104,7 @@ def test_all_amd64_cells_precede_all_arm64_cells() -> None:
 def test_each_discovered_function_dockerfile_maps_to_one_target() -> None:
     plan = _plan()
     function_dockerfiles = {
-        function.example_dir.relative_to(REPO_ROOT) / "Dockerfile"
+        function.example_dir.relative_to(NANOFAAS_ROOT) / "Dockerfile"
         for function in list_functions()
         if function.example_dir is not None
     }

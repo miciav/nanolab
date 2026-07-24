@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.plans.validate import build_validate_plan
@@ -83,3 +84,27 @@ def test_validate_plan_propagates_resource_requests_and_limits() -> None:
     register_body = plan.tasks[3].spec.argv[-2]
     assert '"memoryMiB":128' in register_body
     assert '"memoryMiB":512' in register_body
+
+
+def test_validate_plan_reads_payload_from_the_nanolab_package(tmp_path: Path) -> None:
+    tool_root = tmp_path / "nanolab"
+    payloads = tool_root / "scenarios" / "payloads"
+    payloads.mkdir(parents=True)
+    (payloads / "word-stats-sample.json").write_text(
+        '{"text": "owned by nanolab", "topN": 1}',
+        encoding="utf-8",
+    )
+
+    plan = build_validate_plan(
+        ScenarioConfig(
+            workflow="validate",
+            backend="container",
+            functions=["word-stats-java"],
+        ),
+        RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor()),
+        repo_root=Path("/nanofaas"),
+        tool_root=tool_root,
+    )
+
+    invoke = next(task for task in plan.tasks if task.task_id == "functions.invoke.word-stats-java")
+    assert '"text":"owned by nanolab"' in invoke.spec.argv[-2]

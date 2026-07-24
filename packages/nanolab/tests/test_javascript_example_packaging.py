@@ -1,14 +1,15 @@
+import os
 from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parents[3]
+NANOFAAS_ROOT = Path(os.environ["NANOFAAS_ROOT"]).resolve()
 
 
 def test_javascript_example_images_copy_local_sdk_dependency_target() -> None:
     dockerfiles = (
-        ROOT / "functions" / "javascript" / "word-stats" / "Dockerfile",
-        ROOT / "functions" / "javascript" / "json-transform" / "Dockerfile",
-        ROOT / "functions" / "javascript" / "roman-numeral" / "Dockerfile",
+        NANOFAAS_ROOT / "functions" / "javascript" / "word-stats" / "Dockerfile",
+        NANOFAAS_ROOT / "functions" / "javascript" / "json-transform" / "Dockerfile",
+        NANOFAAS_ROOT / "functions" / "javascript" / "roman-numeral" / "Dockerfile",
     )
 
     for dockerfile in dockerfiles:

@@ -1062,14 +1062,14 @@ def test_provider_setup_guidance_returns_to_rebuilt_environment_picker(
     ]
     azure_body = screens[0][2]
     assert (
-        "cp tools/controlplane/environments/azure.yaml.example "
-        "tools/controlplane/environments/azure.yaml" in azure_body
+        "cp packages/nanolab/environments/azure.yaml.example "
+        "packages/nanolab/environments/azure.yaml" in azure_body
     )
     assert all(value in azure_body for value in ("provider", "ssh_key_path", "az login"))
     proxmox_body = screens[1][2]
     assert (
-        "cp tools/controlplane/environments/proxmox.yaml.example "
-        "tools/controlplane/environments/proxmox.yaml" in proxmox_body
+        "cp packages/nanolab/environments/proxmox.yaml.example "
+        "packages/nanolab/environments/proxmox.yaml" in proxmox_body
     )
     assert all(
         value in proxmox_body

@@ -134,6 +134,50 @@ def test_loadtest_defaults_preserve_task_ids_byte_for_byte(tmp_path: Path) -> No
     assert workflow.task_ids == DEFAULT_TASK_IDS
 
 
+def test_dedicated_loadgen_uses_the_remote_legacy_k6_asset(tmp_path: Path) -> None:
+    executor = RecordingExecutor()
+    environment = EnvironmentConfig.model_validate(
+        {
+            "provider": "external",
+            "roles": {
+                "stack": {"host": "stack.example"},
+                "loadgen": {"host": "load.example"},
+            },
+        }
+    )
+    workflow = build_loadtest_plan(
+        SCENARIO,
+        environment,
+        RoleBindings(host=executor, stack=executor, loadgen=executor),
+        control_plane_url="http://stack:30080",
+        prometheus_client=NoopPrometheus(),
+        run_dir=tmp_path,
+        fetcher=object(),
+    )
+
+    run = next(task for task in workflow.tasks if task.task_id == "loadgen.run_k6")
+    assert run.config.script_path == Path(
+        "/home/ubuntu/nanofaas/tools/controlplane/assets/k6/two-vm-function-invoke.js"
+    )
+
+
+def test_local_loadtest_reads_k6_script_from_the_nanolab_package(tmp_path: Path) -> None:
+    tool_root = tmp_path / "nanolab"
+    workflow = build_loadtest_plan(
+        SCENARIO,
+        EnvironmentConfig(provider="local"),
+        RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor()),
+        control_plane_url="http://stack:30080",
+        prometheus_client=NoopPrometheus(),
+        run_dir=tmp_path / "run",
+        repo_root=Path("/nanofaas"),
+        tool_root=tool_root,
+    )
+
+    run = next(task for task in workflow.tasks if task.task_id == "loadgen.run_k6")
+    assert run.config.script_path == tool_root / "assets/k6/two-vm-function-invoke.js"
+
+
 def test_loadtest_plan_deploys_exact_prebuilt_images(tmp_path: Path) -> None:
     executor = RecordingExecutor()
     control_plane_image = "localhost:5000/nanofaas/control-plane:v0.18.0-amd64-native"

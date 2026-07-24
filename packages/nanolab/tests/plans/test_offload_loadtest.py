@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+import os
 from pathlib import Path
 
 import pytest
@@ -11,7 +12,8 @@ from workflow_tasks.execution.bindings import RoleBindings
 from workflow_tasks.loadtest.tasks import FetchVmResults, RunK6
 from workflow_tasks.tasks.models import CommandTaskSpec, TaskResult
 
-REPO_ROOT = Path(__file__).resolve().parents[4]
+NANOFAAS_ROOT = Path(os.environ["NANOFAAS_ROOT"]).resolve()
+NANOLAB_ROOT = Path(__file__).resolve().parents[2]
 
 SCENARIO = ScenarioConfig(
     workflow="offload-loadtest",
@@ -78,7 +80,7 @@ def test_deployment_then_registration_then_k6_then_evaluation_ordering(tmp_path:
         _local_environment(),
         _bindings(RecordingExecutor()),
         run_dir=tmp_path,
-        repo_root=REPO_ROOT,
+        repo_root=NANOFAAS_ROOT,
     )
 
     ids = [task.task_id for task in workflow.tasks]
@@ -100,16 +102,19 @@ def test_deployment_then_registration_then_k6_then_evaluation_ordering(tmp_path:
 
 
 def test_local_provider_runs_k6_on_stack_without_fetch(tmp_path: Path) -> None:
+    tool_root = tmp_path / "nanolab"
     workflow = build_offload_loadtest_plan(
         SCENARIO,
         _local_environment(),
         _bindings(RecordingExecutor()),
         run_dir=tmp_path,
-        repo_root=REPO_ROOT,
+        repo_root=NANOFAAS_ROOT,
+        tool_root=tool_root,
     )
 
     run_k6 = next(task for task in workflow.tasks if isinstance(task, RunK6))
     assert run_k6.runner._role == "stack"  # noqa: SLF001
+    assert run_k6.config.script_path == tool_root / "assets/k6/offload-mixed.js"
     assert not any(isinstance(task, FetchVmResults) for task in workflow.tasks)
 
 
@@ -119,12 +124,15 @@ def test_dedicated_loadgen_runs_k6_on_loadgen_and_fetches_results(tmp_path: Path
         _external_environment(),
         _bindings(RecordingExecutor()),
         run_dir=tmp_path,
-        repo_root=REPO_ROOT,
+        repo_root=NANOFAAS_ROOT,
         fetcher=object(),
     )
 
     run_k6 = next(task for task in workflow.tasks if isinstance(task, RunK6))
     assert run_k6.runner._role == "loadgen"  # noqa: SLF001
+    assert run_k6.config.script_path == Path(
+        "/home/ubuntu/nanofaas/tools/controlplane/assets/k6/offload-mixed.js"
+    )
     assert any(isinstance(task, FetchVmResults) for task in workflow.tasks)
 
 
@@ -135,7 +143,7 @@ def test_dedicated_loadgen_requires_a_fetcher(tmp_path: Path) -> None:
             _external_environment(),
             _bindings(RecordingExecutor()),
             run_dir=tmp_path,
-            repo_root=REPO_ROOT,
+            repo_root=NANOFAAS_ROOT,
         )
 
 
@@ -145,7 +153,7 @@ def test_edge_offload_target_points_at_the_cloud_role(tmp_path: Path) -> None:
         _external_environment(),
         _bindings(RecordingExecutor()),
         run_dir=tmp_path,
-        repo_root=REPO_ROOT,
+        repo_root=NANOFAAS_ROOT,
         fetcher=object(),
     )
 
@@ -160,7 +168,7 @@ def test_cleanup_covers_both_control_planes(tmp_path: Path) -> None:
         _local_environment(),
         _bindings(RecordingExecutor()),
         run_dir=tmp_path,
-        repo_root=REPO_ROOT,
+        repo_root=NANOFAAS_ROOT,
     )
 
     cleanup_ids = {task.task_id for task in workflow.cleanup_tasks}
@@ -174,7 +182,7 @@ def test_cleanup_covers_both_control_planes(tmp_path: Path) -> None:
 
 def test_scenario_file_parses_with_two_ordered_functions() -> None:
     payload = yaml.safe_load(
-        (REPO_ROOT / "tools/controlplane/scenarios-v2/offload-loadtest.yaml").read_text()
+        (NANOLAB_ROOT / "scenarios-v2/offload-loadtest.yaml").read_text()
     )
     config = ScenarioConfig.model_validate(payload)
     assert config.workflow == "offload-loadtest"
