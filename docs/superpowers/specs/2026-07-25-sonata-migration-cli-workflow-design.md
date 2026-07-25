@@ -47,16 +47,47 @@ accanto a `task_id`: niente `operation_id`, niente alias, niente campo stabile
 consumer e il release dopo l'ultimo, ed esegue i release in ordine inverso anche in caso
 di fallimento.
 
-### C3 — Lo slicing avviene prima del compile
+### C3 — Lo slicing è dell'engine, non del prodotto
 
-I plan builder restituiscono una lista di definizioni `(task, requires)`. `--only`,
-`--from`, `--until` filtrano **quella lista**, poi si compila. Il compiler ri-splicia
-acquire/release attorno ai consumer rimasti, quindi il cleanup resta corretto senza
-logica dedicata.
+Sonata è in fase iniziale ed è nostro: quando una capacità appartiene per natura
+all'orchestratore, si aggiunge a sonata invece di aggirarla a valle. Lo slicing è il
+primo caso.
 
-Conseguenza sulla CLI: la selezione avviene per **slug** (`--only list-functions`), non
-per l'ID ordinale (che cambia quando si slicia) né per gli ID scritti a mano di oggi
-(`--only cli.function.list`). È un cambio di sintassi utente, va documentato.
+Selezionare un sottoinsieme di un workflow interagisce con lo splicing di
+acquire/release, che **solo il compiler** sa fare. Un slicer esterno ha due strade, e
+sono entrambe cattive: filtrare dopo il compile (butta via le unità di risorsa e rompe
+il cleanup) oppure filtrare prima, il che costringe ogni consumer a esporre i workflow
+come liste di definizioni invece di usare l'API fluente `add()`. La seconda funziona ma
+è l'engine che spinge fuori un problema proprio.
+
+Quindi la selezione entra in sonata:
+
+```python
+@dataclass(frozen=True, slots=True)
+class Selection:
+    only: str | None = None
+    start: str | None = None
+    until: str | None = None
+
+workflow.run(select=Selection(only="list-functions"))
+workflow.compile(select=...)   # stesso filtro, per il dry-run
+```
+
+Regole:
+
+- la selezione avviene per **slug** del titolo (`list-functions`), risolto dall'engine;
+- si selezionano solo i task consumer. Le unità acquire/release sono engine-owned e
+  seguono i consumer superstiti: il compiler le ri-splicia da sé, quindi il cleanup
+  resta corretto senza logica dedicata;
+- slug sconosciuto → errore esplicito;
+- gli ordinali si rinumerano sui superstiti (`001`, `002`, …). Un run sliciato è quindi
+  una topologia diversa e il fingerprint fa fallire un `resume` che lo attraversi: è il
+  comportamento giusto, fail-closed.
+
+I plan builder restituiscono un `Workflow` normale, costruito con `add()`.
+
+Conseguenza sulla CLI di nanolab: la selezione passa da `--only cli.function.list` a
+`--only list-functions`. Cambio di sintassi utente, va documentato.
 
 L'hack `acquired_by_selection` in `nanolab/cli/product.py::_slice` — quello che rimappa
 `.delete.` → `.apply.` per preservare il cleanup — **non** si cancella nel primo
@@ -81,18 +112,45 @@ si riusano da `workflow-tasks`. Non si reimplementano. `CommandTaskSpec.task_id`
 valorizza a stringa vuota: l'identità è del compiler (C1), quel campo serve solo a
 popolare `TaskResult.task_id`.
 
+Questo **non** è in tensione con C3: sonata per statuto non prende remote execution né
+VM provider, quindi l'esecuzione di comandi resta a valle. C3 riguarda le capacità di
+orchestrazione — topologia, risorse, selezione, journal — che sono di sonata.
+
+### C6 — Sonata si modifica, non si aggira
+
+Ogni volta che un incremento richiede una capacità di orchestrazione mancante, la si
+aggiunge a sonata con i suoi test, invece di forzarla in nanolab. Durante lo sviluppo
+coordinato `sonata-tasks` punta a sonata via source locale uv (`../sonata`); prima del
+merge si pinna un commit immutabile.
+
+Il boundary resta quello di sonata: nessun import di `nanofaas`, `nanolab`,
+`workflow_tasks`, provider VM, Ansible o load-test — c'è già un test che lo verifica
+(`tests/test_package_boundaries.py`).
+
 ## Incremento 1 — workflow `cli`
 
 Scelto perché è il più piccolo (127 righe) e non tocca VM o risorse cloud: build della
 CLI, apply della function, list, invoke, delete.
+
+L'incremento tocca **due repository**: prima sonata (la selezione), poi nanolab.
+
+### Lavoro su sonata: `Selection`
+
+Checkout locale in `~/Downloads/sonata`, pulito su `f13c830`.
+
+Si implementa `Selection` e i parametri `select=` su `compile()` e `run()`, come da C3.
+È l'unica capacità che l'incremento 1 richiede a sonata. Test: selezione per slug,
+slug sconosciuto, `start`/`until`, e soprattutto che una risorsa i cui consumer sono
+stati parzialmente sliciati venga comunque acquisita e rilasciata attorno a quelli
+superstiti.
 
 ### Nuovo package `packages/sonata-tasks`
 
 Membro del workspace uv. Distribuzione `sonata-tasks`, import `sonata_tasks`.
 
 Dipendenze:
-- `sonata-engine @ git+https://github.com/miciav/sonata@f13c830` — pin per commit, come
-  gli altri SDK del workspace;
+- `sonata-engine` — durante lo sviluppo via source locale uv su `../sonata` (C6);
+  pinnata a un commit immutabile prima del merge;
 - `workflow-tasks` (workspace) — solo per il layer di esecuzione, per C5.
 
 ```
@@ -101,7 +159,7 @@ packages/sonata-tasks/
   src/sonata_tasks/
     __init__.py
     command.py      # CommandTask: base sonata che esegue uno spec via executor
-    cli.py          # CliFunction, CliWorkflowRequest, i task, build_cli_definitions()
+    cli.py          # CliFunction, CliWorkflowRequest, i task, build_cli_workflow()
   tests/
     test_cli.py
 ```
@@ -139,10 +197,11 @@ Workflow compilato atteso, con una function:
 
 ### Wiring in nanolab
 
-- `nanolab/plans/cli.py` — riscritto: `build_cli_definitions(...)` restituisce la lista
-  `(task, requires)` (C3), non un `Workflow` già assemblato.
+- `nanolab/plans/cli.py` — riscritto: `build_cli_workflow(...)` restituisce un
+  `Workflow` sonata costruito con `add()`.
 - `nanolab/cli/product.py` — `_workflow()` acquisisce un ramo per i workflow migrati che
-  slicia le definizioni, compila ed esegue. Il ramo legacy resta invariato.
+  passa `select=Selection(only=..., start=..., until=...)` a `run()` / `compile()`. Il
+  ramo legacy, `_slice` compreso, resta invariato.
 - `nanolab/cli/progress.py` — `ConsoleProgressSink.emit` filtra oggi su
   `task.running`/`task.completed`; sonata emette `task.started`/`task.passed`. Si
   estendono i due set nel sink esistente (~3 righe) invece di scrivere un secondo sink:
@@ -172,6 +231,8 @@ L'ambiente gira già su 3.12, ma uv rifiuterà la risoluzione. Va alzato
 
 ### Verifica
 
+- `uv run pytest && uv run ruff check . && uv run basedpyright` in `~/Downloads/sonata`
+  — la suite di sonata verde, `Selection` inclusa.
 - `uv run --project packages/sonata-tasks pytest` — executor finto, niente Docker né
   k8s. Assert su: ID compilati e loro ordine; apply spliciato prima di `list-functions`
   e delete dopo l'ultimo invoke; delete eseguito anche quando invoke fallisce; invoke
@@ -181,6 +242,21 @@ L'ambiente gira già su 3.12, ma uv rifiuterà la risoluzione. Va alzato
 - `nanolab run scenarios-v2/cli.yaml` contro un control plane reale — validazione finale
   dell'incremento, prima di considerarlo chiuso.
 
+## Gap di sonata già noti, rimandati
+
+Registrati qui perché per C6 vanno colmati **in sonata** quando l'incremento che li
+richiede arriva, non aggirati in nanolab sotto scadenza. Nessuno dei due serve al
+workflow `cli`, quindi nessuno dei due si tocca ora.
+
+- **Risorse che producono un valore.** `Resource.acquire` è `Callable[[], None]`: una
+  risorsa VM non può consegnare il proprio IP ai consumer. Serve a `validate`,
+  `loadtest`, `offload`.
+- **Passaggio di valori tra task.** `TaskOutcome.value` è documentato come canale
+  in-process, ma non esiste un meccanismo perché il task B legga il valore del task A;
+  oggi si passa per riferimenti posseduti dall'assemblatore (closure). Se debba
+  restare così o diventare una capacità dell'engine è una decisione aperta, da
+  prendere quando il primo workflow la richiede davvero — non in astratto.
+
 ## Fuori scope
 
 - TUI: `nanolab/tui/workflow_controller.py` consuma eventi workflow_tasks. Finché
@@ -188,4 +264,4 @@ L'ambiente gira già su 3.12, ma uv rifiuterà la risoluzione. Va alzato
 - Journal e resume di sonata: il workflow `cli` non ne ha bisogno. Si valuteranno sui
   workflow che li giustificano.
 - Gli altri quattro workflow (`validate`, `loadtest`, `offload`, `offload-loadtest`):
-  un incremento e uno spec ciascuno, che ereditano il contratto C1–C5.
+  un incremento e uno spec ciascuno, che ereditano il contratto C1–C6.
