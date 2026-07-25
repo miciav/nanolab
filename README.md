@@ -27,6 +27,14 @@ NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab plan packages/n
 NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab run packages/nanolab/scenarios-v2/validate-container.yaml
 ```
 
+Or use the bundled launcher, which checks for `uv` and forwards all
+arguments — equivalent to `uv run --package nanolab nanolab ...`:
+
+```bash
+export NANOFAAS_ROOT=/path/to/nanofaas
+./nanolab.sh plan packages/nanolab/scenarios-v2/validate-container.yaml
+```
+
 ## CI gate
 
 `.github/workflows/ci.yml` runs on every push and pull request against
