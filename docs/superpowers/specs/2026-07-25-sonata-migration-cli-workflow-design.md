@@ -1,7 +1,8 @@
 # Migrazione a sonata-engine — contratto e primo incremento (workflow `cli`)
 
 **Data:** 2026-07-25
-**Stato:** design approvato, piano da scrivere
+**Ultimo emendamento:** 2026-07-26
+**Stato:** design emendato, piano da scrivere
 
 ## Obiettivo
 
@@ -44,8 +45,14 @@ accanto a `task_id`: niente `operation_id`, niente alias, niente campo stabile
 
 `workflow.cleanup_tasks` non esiste in sonata. Ogni coppia crea/distruggi diventa
 `Resource(acquire=..., release=...)`; il compiler inserisce l'acquire prima del primo
-consumer e il release dopo l'ultimo, ed esegue i release in ordine inverso anche in caso
-di fallimento.
+consumer e il release dopo l'ultimo, ed esegue in ordine inverso i release delle
+risorse acquisite con successo anche in caso di fallimento.
+
+Un acquire è responsabile dell'acquisizione parziale: se può produrre un effetto prima
+di segnalare errore, tenta localmente di compensarlo prima di rilanciare. Un errore
+della compensazione si aggiunge come nota senza mascherare l'errore primario. L'engine
+non esegue il release di un acquire che non ha completato con successo, perché non può
+sapere se la risorsa esiste.
 
 ### C3 — Lo slicing è dell'engine, non del prodotto
 
@@ -76,15 +83,29 @@ workflow.compile(select=...)   # stesso filtro, per il dry-run
 Regole:
 
 - la selezione avviene per **slug** del titolo (`list-functions`), risolto dall'engine;
+- `Selection()` equivale a nessun filtro;
+- `only` è mutuamente esclusivo con `start` e `until`; `start` e `until` possono essere
+  usati insieme e delimitano un intervallo inclusivo;
 - si selezionano solo i task consumer. Le unità acquire/release sono engine-owned e
   seguono i consumer superstiti: il compiler le ri-splicia da sé, quindi il cleanup
   resta corretto senza logica dedicata;
 - slug sconosciuto → errore esplicito;
+- uno slug referenziato da `only`, `start` o `until` che corrisponde a più consumer →
+  errore di ambiguità, non selezione multipla implicita; senza filtro i titoli duplicati
+  restano validi perché l'ordinale disambigua gli ID;
+- `start` successivo a `until` → errore esplicito;
+- un titolo consumer che produce uno slug vuoto → errore di compilazione;
 - gli ordinali si rinumerano sui superstiti (`001`, `002`, …). Un run sliciato è quindi
   una topologia diversa e il fingerprint fa fallire un `resume` che lo attraversi: è il
   comportamento giusto, fail-closed.
 
 I plan builder restituiscono un `Workflow` normale, costruito con `add()`.
+
+La selezione non calcola la chiusura di prerequisiti tra task ordinari: sonata non ha
+un grafo di dipendenze generiche. Preserva solo le `Resource` dichiarate. Per il
+workflow `cli`, selezionare un task successivo a `build-nanofaas-cli` presuppone quindi
+che la distribuzione CLI esista già; la CLI nanolab deve documentarlo nell'help di
+`--only`/`--from`.
 
 Conseguenza sulla CLI di nanolab: la selezione passa da `--only cli.function.list` a
 `--only list-functions`. Cambio di sintassi utente, va documentato.
@@ -121,7 +142,8 @@ orchestrazione — topologia, risorse, selezione, journal — che sono di sonata
 Ogni volta che un incremento richiede una capacità di orchestrazione mancante, la si
 aggiunge a sonata con i suoi test, invece di forzarla in nanolab. Durante lo sviluppo
 coordinato `sonata-tasks` punta a sonata via source locale uv (`../sonata`); prima del
-merge si pinna un commit immutabile.
+merge la source locale viene sostituita con l'URL Git effettivo e un `rev` completo
+immutabile, e il lockfile deve contenere lo stesso commit.
 
 Il boundary resta quello di sonata: nessun import di `nanofaas`, `nanolab`,
 `workflow_tasks`, provider VM, Ansible o load-test — c'è già un test che lo verifica
@@ -140,9 +162,9 @@ Checkout locale in `~/Downloads/sonata`, pulito su `f13c830`.
 
 Si implementa `Selection` e i parametri `select=` su `compile()` e `run()`, come da C3.
 È l'unica capacità che l'incremento 1 richiede a sonata. Test: selezione per slug,
-slug sconosciuto, `start`/`until`, e soprattutto che una risorsa i cui consumer sono
-stati parzialmente sliciati venga comunque acquisita e rilasciata attorno a quelli
-superstiti.
+slug sconosciuto o ambiguo, combinazioni invalide, intervallo inverso, slug vuoto,
+`start`/`until`, e soprattutto che una risorsa i cui consumer sono stati parzialmente
+sliciati venga comunque acquisita e rilasciata attorno a quelli superstiti.
 
 ### Nuovo package `packages/sonata-tasks`
 
@@ -166,7 +188,9 @@ packages/sonata-tasks/
 
 `command.py` — `CommandTask(Task[TaskResult])`: costruisce lo `CommandTaskSpec`, chiama
 l'executor, alza `RuntimeError` se `status != "passed"`, ritorna
-`TaskOutcome(value=result)`.
+`TaskOutcome(value=result)`. Quando un comando è usato come acquire/release, il builder
+lo racchiude in una piccola funzione `() -> None`: `Resource` accetta callable, non
+oggetti `Task`, e il lifecycle esterno resta quello compiler-owned di `ResourceOp`.
 
 `cli.py` — ridefinisce `CliFunction` e `CliWorkflowRequest` come dataclass locali invece
 di importarle da `workflow_tasks.workflows.cli`: quel modulo viene cancellato a fine
@@ -175,45 +199,74 @@ esecuzione (C5).
 
 ### Cosa migliora nel porting
 
-Non è un travaso. Il modello sonata elimina il quoting bash che oggi serve a compensare
-l'assenza di task veri:
+Non è un travaso. Il modello sonata separa la verifica strutturata dal comando shell e
+riduce il quoting bash a dove serve davvero per l'esecuzione remota:
 
 | Oggi | Con sonata |
 |---|---|
-| `cli_cleanup_specs()` in una lista `cleanup_tasks` separata | `Resource(acquire=apply, release=delete)`, splice automatico (C2) |
+| `cli_cleanup_specs()` in una lista `cleanup_tasks` separata | `Resource(acquire=apply_fn, release=delete_fn)`, splice automatico (C2) |
 | invoke verificato con `bash -lc "... \| grep -q '\"status\":\"success\"'"` | `InvokeFunction.run()` parsa il JSON in Python, ritorna `TaskOutcome[str]` |
-| manifest scritto con `mktemp` + `trap` dentro una stringa bash | il task scrive il file temporaneo in Python |
+| apply può produrre un effetto prima di fallire | l'acquire tenta un delete best-effort prima di rilanciare (C2) |
 | `task_id` scritti a mano (`cli.function.apply.X`) | ID generati dal compiler |
+
+Il manifest di `fn apply` resta creato con `mktemp` + `trap` nel comando eseguito sul
+target. Scriverlo con `tempfile` nel processo Python funzionerebbe su host ma non con
+`cli_role="stack"`, perché la CLI remota non vedrebbe il path locale. Trasferimento file
+e stdin nell'executor sono fuori scope.
 
 Workflow compilato atteso, con una function:
 
 ```
 001.build-nanofaas-cli
-002.apply-word-stats-java      <- Resource.acquire, inserito dal compiler
+002.acquire-word-stats-java    <- Resource.acquire, inserito dal compiler
 003.list-functions             requires=(fn,)
 004.invoke-word-stats-java     requires=(fn,)
-005.delete-word-stats-java     <- Resource.release, inserito dal compiler
+005.release-word-stats-java    <- Resource.release, inserito dal compiler
 ```
+
+La `Resource` usa `title="Acquire word-stats-java"`; l'API sonata genera nativamente
+`Release word-stats-java`. Non si aggiunge un secondo titolo configurabile solo per
+ottenere i verbi di prodotto `apply`/`delete`.
 
 ### Wiring in nanolab
 
 - `nanolab/plans/cli.py` — riscritto: `build_cli_workflow(...)` restituisce un
   `Workflow` sonata costruito con `add()`.
-- `nanolab/cli/product.py` — `_workflow()` acquisisce un ramo per i workflow migrati che
-  passa `select=Selection(only=..., start=..., until=...)` a `run()` / `compile()`. Il
-  ramo legacy, `_slice` compreso, resta invariato.
+- `nanolab/cli/product.py` — `_workflow()` continua a costruire e restituire il workflow.
+  `run_command` e `plan_command` hanno un ramo per i workflow migrati: il primo passa
+  `select=Selection(...)` a `run()`, il secondo a `compile()` e renderizza il
+  `CompiledWorkflow`. Il ramo legacy, `_slice` compreso, resta invariato.
+- `_render()` distingue esplicitamente task legacy e `CompiledTask`: per questi ultimi
+  legge il titolo da `compiled_task.task.title`. È logica di presentazione, non un
+  adapter tra engine.
 - `nanolab/cli/progress.py` — `ConsoleProgressSink.emit` filtra oggi su
   `task.running`/`task.completed`; sonata emette `task.started`/`task.passed`. Si
   estendono i due set nel sink esistente (~3 righe) invece di scrivere un secondo sink:
   è un renderer di console, non gli importa quale engine emette. `WorkflowEvent` di
   sonata e di workflow_tasks sono strutturalmente identici, il duck typing regge; va
   allargata solo l'annotazione di tipo.
-- `product.py` lega il sink via `workflow_tasks.workflow.context.bind_workflow_sink`.
-  Sonata ha la propria contextvar: nel ramo migrato va legato **anche**
-  `sonata_engine.workflow.context.bind_workflow_sink`. Durante la migrazione convivono
-  entrambi; alla fine resta solo quello di sonata.
+- `product.py` lega sempre lo stesso sink a entrambe le contextvar durante la
+  migrazione: è più semplice di aprire context diversi per ramo e permette al layer
+  shell legacy riusato dai task sonata di continuare a emettere log. Alla fine resta
+  solo il binding di sonata.
 - Nessuna modifica a `ScenarioConfig`, nessun nuovo scenario: si continua a leggere
   `scenarios-v2/cli.yaml`.
+
+### Compatibilità TUI nell'incremento 1
+
+Il workflow `cli` è raggiungibile anche dalla TUI, quindi la compatibilità minima non
+può essere rimandata:
+
+- `WorkflowEventAggregator` tratta `task.started` come `task.running` e `task.passed`
+  come `task.completed`, mantenendo un solo aggregatore;
+- `TuiWorkflowController` lega il sink sia alla contextvar legacy sia a quella sonata,
+  come `product.py`;
+- preview e plan compilano il workflow sonata e derivano titoli e ID dai
+  `CompiledTask`; i workflow legacy mantengono il percorso attuale. Due punti concreti:
+  `_render_plan` (`tui/app.py:460`) legge `workflow.tasks` con `task.task_id`/`task.title`,
+  e `planned_steps=preview.phase_titles` (`tui/app.py:425`) usa una property che su
+  sonata **non esiste** — l'equivalente è `[ct.task.title for ct in compiled.tasks]`;
+- non si introduce un adapter `Workflow` né si ridisegna la TUI.
 
 ### Cancellazioni a fine incremento (step 3)
 
@@ -235,9 +288,13 @@ L'ambiente gira già su 3.12, ma uv rifiuterà la risoluzione. Va alzato
   — la suite di sonata verde, `Selection` inclusa.
 - `uv run --project packages/sonata-tasks pytest` — executor finto, niente Docker né
   k8s. Assert su: ID compilati e loro ordine; apply spliciato prima di `list-functions`
-  e delete dopo l'ultimo invoke; delete eseguito anche quando invoke fallisce; invoke
-  che fallisce su `{"status":"error"}`; slicing per slug che preserva il delete.
-- `uv run --project packages/nanolab pytest` — suite esistente verde.
+  e release dopo l'ultimo invoke; delete eseguito quando invoke fallisce; compensazione
+  best-effort quando apply fallisce dopo un possibile effetto; invoke che fallisce su
+  JSON malformato, `{"status":"error"}` o senza `output`; slicing per slug che preserva
+  il release; due function con release in ordine corretto; esecuzione con
+  `cli_role="stack"` che crea il manifest sul target.
+- `uv run --project packages/nanolab pytest` — suite esistente verde, inclusi test di
+  `nanolab plan`, run/plan TUI e rendering degli eventi sonata per lo scenario `cli`.
 - `nanolab plan scenarios-v2/cli.yaml` — conferma il wiring senza toccare un cluster.
 - `nanolab run scenarios-v2/cli.yaml` contro un control plane reale — validazione finale
   dell'incremento, prima di considerarlo chiuso.
@@ -259,8 +316,8 @@ workflow `cli`, quindi nessuno dei due si tocca ora.
 
 ## Fuori scope
 
-- TUI: `nanolab/tui/workflow_controller.py` consuma eventi workflow_tasks. Finché
-  esistono workflow legacy continua a funzionare; si adatta quando serve, non ora.
+- Ridisegno della TUI o migrazione dei suoi modelli da workflow_tasks: l'incremento 1
+  aggiunge soltanto il bridge strutturale minimo descritto sopra.
 - Journal e resume di sonata: il workflow `cli` non ne ha bisogno. Si valuteranno sui
   workflow che li giustificano.
 - Gli altri quattro workflow (`validate`, `loadtest`, `offload`, `offload-loadtest`):
