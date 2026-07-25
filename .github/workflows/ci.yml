@@ -25,6 +25,7 @@ jobs:
           repository: miciav/nanofaas
           ref: 4e0aa0751b5f3a5008012994bd4a8843de801316
           path: .nanofaas-source
+          token: ${{ secrets.NANOFAAS_CHECKOUT_TOKEN }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2

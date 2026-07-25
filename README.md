@@ -33,9 +33,12 @@ NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab run packages/na
 `main`. It checks out this repo, checks out the pinned nanoFaaS source
 snapshot (`miciav/nanofaas` at `4e0aa0751b5f3a5008012994bd4a8843de801316`,
 matching the baseline noted above) into `.nanofaas-source`, points
-`NANOFAAS_ROOT` at that checkout, and runs the full gate below. To reproduce
-it locally, run the same commands in the same order against a local nanoFaaS
-checkout:
+`NANOFAAS_ROOT` at that checkout, and runs the full gate below.
+`miciav/nanofaas` is private, so the cross-repo checkout authenticates with
+the repository secret `NANOFAAS_CHECKOUT_TOKEN` (a fine-grained PAT scoped to
+read-only Contents access on `miciav/nanofaas`) rather than the default
+`GITHUB_TOKEN`. To reproduce it locally, run the same commands in the same
+order against a local nanoFaaS checkout:
 
 ```bash
 export NANOFAAS_ROOT=/path/to/nanofaas   # e.g. your working mcFaas checkout
