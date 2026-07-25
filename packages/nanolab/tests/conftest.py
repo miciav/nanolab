@@ -8,6 +8,13 @@ import pytest
 
 from workflow_tasks.workflow.events import WorkflowEvent
 
+# Typer force-enables Rich terminal rendering (ANSI highlighting of option-like
+# tokens such as "--provision") whenever GITHUB_ACTIONS/FORCE_COLOR/PY_COLORS is
+# set, even though CliRunner's output stream isn't a real TTY. That splits the
+# plain-text error substrings CLI tests assert on. Disable it for the whole
+# suite so results don't depend on which CI system runs them.
+os.environ.setdefault("_TYPER_FORCE_DISABLE_TERMINAL", "1")
+
 
 class FakeSink:
     """Shared test double for WorkflowSink — records emitted events and status calls."""
