@@ -27,23 +27,59 @@ NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab plan packages/n
 NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab run packages/nanolab/scenarios-v2/validate-container.yaml
 ```
 
-The root quality gates will be:
+## CI gate
+
+`.github/workflows/ci.yml` runs on every push and pull request against
+`main`. It checks out this repo, checks out the pinned nanoFaaS source
+snapshot (`miciav/nanofaas` at `4e0aa0751b5f3a5008012994bd4a8843de801316`,
+matching the baseline noted above) into `.nanofaas-source`, points
+`NANOFAAS_ROOT` at that checkout, and runs the full gate below. To reproduce
+it locally, run the same commands in the same order against a local nanoFaaS
+checkout:
 
 ```bash
+export NANOFAAS_ROOT=/path/to/nanofaas   # e.g. your working mcFaas checkout
+
 uv lock --check
 uv sync --locked --all-packages --all-groups
+
 uv run --locked --all-packages --all-groups pytest -c packages/nanolab/pyproject.toml packages/nanolab/tests
 uv run --locked --all-packages --all-groups pytest -c packages/workflow-tasks/pyproject.toml packages/workflow-tasks/tests
 uv run --locked --all-packages --all-groups pytest -c packages/tui-toolkit/pyproject.toml packages/tui-toolkit/tests
+
 uv run --locked --all-packages --all-groups ruff check packages
 uv run --locked --all-packages --all-groups basedpyright --project packages/nanolab
 uv run --locked --all-packages --all-groups basedpyright --project packages/workflow-tasks
 uv run --locked --all-packages --all-groups basedpyright --project packages/tui-toolkit
+
 uv run --locked --all-packages --all-groups lint-imports --config packages/nanolab/.importlinter --no-cache
 uv run --locked --all-packages --all-groups lint-imports --config packages/workflow-tasks/.importlinter --no-cache
 uv run --locked --all-packages --all-groups lint-imports --config packages/tui-toolkit/.importlinter --no-cache
+
 uv build --all-packages --out-dir dist --clear
+
+uv venv .wheel-smoke
+uv pip install dist/nanolab-0.1.0-py3-none-any.whl dist/workflow_tasks-0.1.0-py3-none-any.whl dist/tui_toolkit-0.1.0-py3-none-any.whl --python .wheel-smoke/bin/python
+.wheel-smoke/bin/python -c "import nanolab, workflow_tasks, tui_toolkit"
+.wheel-smoke/bin/nanolab --help
+
+uv run --package nanolab nanolab plan packages/nanolab/scenarios-v2/validate-container.yaml --environment packages/nanolab/environments/local.yaml
+uv run --package nanolab nanolab plan packages/nanolab/scenarios-v2/validate-k8s.yaml --environment packages/nanolab/environments/multipass.yaml
 ```
 
-The workspace and shared quality configuration needed by these commands are
-added in the next extraction steps.
+Nothing in this gate should modify `uv.lock`; if it does, run `uv lock` and
+commit the updated lockfile separately.
+
+### Using a newer nanoFaaS checkout
+
+CI always pins `NANOFAAS_ROOT` to the nanoFaaS commit recorded above, so the
+gate stays reproducible. For local development against a newer nanoFaaS
+checkout (e.g. picking up source changes that haven't been re-pinned yet),
+just point `NANOFAAS_ROOT` at that checkout instead:
+
+```bash
+NANOFAAS_ROOT=/path/to/newer/nanofaas uv run --package nanolab nanolab plan packages/nanolab/scenarios-v2/validate-container.yaml
+```
+
+Bumping the pin used by CI means updating both the `ref:` in
+`.github/workflows/ci.yml` and the commit noted in this README.

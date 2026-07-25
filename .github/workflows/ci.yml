@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    env:
+      NANOFAAS_ROOT: ${{ github.workspace }}/.nanofaas-source
+
+    steps:
+      - name: Check out nanolab
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Check out pinned nanoFaaS source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: miciav/nanofaas
+          ref: 4e0aa0751b5f3a5008012994bd4a8843de801316
+          path: .nanofaas-source
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version: "0.11.32"
+          enable-cache: true
+
+      - name: Install Python
+        run: uv python install 3.12
+
+      - name: Verify lock and sync workspace
+        run: |
+          uv lock --check
+          uv sync --locked --all-packages --all-groups
+
+      - name: Run nanolab tests
+        run: uv run --locked --all-packages --all-groups pytest -c packages/nanolab/pyproject.toml packages/nanolab/tests
+
+      - name: Run workflow-tasks tests
+        run: uv run --locked --all-packages --all-groups pytest -c packages/workflow-tasks/pyproject.toml packages/workflow-tasks/tests
+
+      - name: Run tui-toolkit tests
+        run: uv run --locked --all-packages --all-groups pytest -c packages/tui-toolkit/pyproject.toml packages/tui-toolkit/tests
+
+      - name: Run static checks
+        run: |
+          uv run --locked --all-packages --all-groups ruff check packages
+          uv run --locked --all-packages --all-groups basedpyright --project packages/nanolab
+          uv run --locked --all-packages --all-groups basedpyright --project packages/workflow-tasks
+          uv run --locked --all-packages --all-groups basedpyright --project packages/tui-toolkit
+
+      - name: Run import contracts
+        run: |
+          uv run --locked --all-packages --all-groups lint-imports --config packages/nanolab/.importlinter --no-cache
+          uv run --locked --all-packages --all-groups lint-imports --config packages/workflow-tasks/.importlinter --no-cache
+          uv run --locked --all-packages --all-groups lint-imports --config packages/tui-toolkit/.importlinter --no-cache
+
+      - name: Build distributions
+        run: uv build --all-packages --out-dir dist --clear
+
+      - name: Smoke-test installed wheels
+        run: |
+          uv venv .wheel-smoke
+          uv pip install dist/nanolab-0.1.0-py3-none-any.whl dist/workflow_tasks-0.1.0-py3-none-any.whl dist/tui_toolkit-0.1.0-py3-none-any.whl --python .wheel-smoke/bin/python
+          .wheel-smoke/bin/python -c "import nanolab, workflow_tasks, tui_toolkit"
+          .wheel-smoke/bin/nanolab --help
+
+      - name: Generate representative plans
+        run: |
+          uv run --package nanolab nanolab plan packages/nanolab/scenarios-v2/validate-container.yaml --environment packages/nanolab/environments/local.yaml
+          uv run --package nanolab nanolab plan packages/nanolab/scenarios-v2/validate-k8s.yaml --environment packages/nanolab/environments/multipass.yaml
