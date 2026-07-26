@@ -9,6 +9,7 @@ from workflow_tasks.execution.roles import ExecutionRole
 from workflow_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 from sonata_tasks.cli import CliFunction, CliWorkflowRequest, build_cli_workflow
+from sonata_tasks.command import CommandTask
 
 SUCCESS = '{"status":"success","output":{"words":2}}'
 
@@ -316,7 +317,8 @@ def test_keep_infrastructure_skips_the_delete() -> None:
 def test_the_workflow_can_run_entirely_on_the_stack_role() -> None:
     executor = ScriptedExecutor()
     workflow = build_cli_workflow(
-        CliWorkflowRequest(functions=(FUNCTION,), cli_role="stack"), _bindings(executor)
+        CliWorkflowRequest(functions=(FUNCTION,), cli_role="stack", build_role="stack"),
+        _bindings(executor),
     )
 
     workflow.run()
@@ -475,4 +477,229 @@ def test_without_build_argv_nothing_extra_is_emitted() -> None:
 
     assert "002.build-image-word-stats-java" not in [
         task.task_id for task in workflow.compile().tasks
+    ]
+
+
+def test_build_role_is_independent_of_cli_role() -> None:
+    host = ScriptedExecutor()
+    stack = ScriptedExecutor()
+    function = replace(FUNCTION, build_argv=("./gradlew", ":functions:java:word-stats:bootBuildImage"))
+    workflow = build_cli_workflow(
+        CliWorkflowRequest(functions=(function,), cli_role="stack", build_role="host"),
+        RoleBindings(host=host, stack=stack),
+        control_plane_build_argv=("./gradlew", ":control-plane:bootJar"),
+    )
+
+    workflow.run()
+
+    assert [spec.summary for spec in host.seen] == [
+        "Build nanofaas-cli",
+        "Build local control plane",
+        "Build image word-stats-java",
+    ]
+    assert [spec.summary for spec in stack.seen] == [
+        "Apply word-stats-java",
+        "List functions",
+        "Invoke word-stats-java",
+        "Delete word-stats-java",
+    ]
+
+
+@pytest.mark.parametrize("role", ["loadgen", "cloud", "arm-builder"])
+def test_every_non_host_or_stack_build_role_is_rejected(role: ExecutionRole) -> None:
+    with pytest.raises(ValueError, match="host or stack"):
+        CliWorkflowRequest(functions=(FUNCTION,), build_role=role)
+
+
+def test_bootstrap_tasks_run_between_build_and_the_first_resource() -> None:
+    executor = ScriptedExecutor()
+    events: list[str] = []
+    vm = Resource(
+        title="Acquire stack VM",
+        acquire=lambda _inputs: events.append("acquire-vm") or "vm-info",
+        release=lambda _inputs, _value: events.append("release-vm"),
+        infrastructure=True,
+    )
+    bootstrap = (
+        CommandTask(
+            title="Provision base VM dependencies",
+            argv=lambda inputs: ("ansible-playbook", inputs.resource(vm)),
+            executor=executor,
+            role="host",
+        ),
+        CommandTask(
+            title="Sync repository into VM",
+            argv=lambda inputs: ("rsync", inputs.resource(vm)),
+            executor=executor,
+            role="host",
+        ),
+    )
+    workflow = build_cli_workflow(
+        CliWorkflowRequest(functions=(FUNCTION,), cli_role="stack"),
+        _bindings(executor),
+        requires=(vm,),
+        bootstrap=bootstrap,
+        bootstrap_requires=(vm,),
+    )
+
+    assert [task.task_id for task in workflow.compile().tasks] == [
+        "001.build-nanofaas-cli",
+        "002.acquire-stack-vm",
+        "003.provision-base-vm-dependencies",
+        "004.sync-repository-into-vm",
+        "005.acquire-word-stats-java",
+        "006.list-functions",
+        "007.invoke-word-stats-java",
+        "008.release-word-stats-java",
+        "009.release-stack-vm",
+    ]
+
+    workflow.run()
+
+    assert executor.titles == [
+        "Build nanofaas-cli",
+        "Provision base VM dependencies",
+        "Sync repository into VM",
+        "Apply word-stats-java",
+        "List functions",
+        "Invoke word-stats-java",
+        "Delete word-stats-java",
+    ]
+    assert events == ["acquire-vm", "release-vm"]
+    bootstrap_specs = [
+        spec
+        for spec in executor.seen
+        if spec.summary in ("Provision base VM dependencies", "Sync repository into VM")
+    ]
+    assert all(spec.argv[-1] == "vm-info" for spec in bootstrap_specs)
+
+
+def test_readiness_runs_after_apply_and_before_the_function_is_usable() -> None:
+    executor = ScriptedExecutor()
+    workflow = build_cli_workflow(
+        CliWorkflowRequest(functions=(FUNCTION,), cli_role="stack"),
+        _bindings(executor),
+        readiness_timeout_seconds=60,
+    )
+
+    workflow.run()
+
+    assert executor.titles == [
+        "Build nanofaas-cli",
+        "Apply word-stats-java",
+        "Wait for deployment/fn-word-stats-java",
+        "Roll out deployment/fn-word-stats-java",
+        "List functions",
+        "Invoke word-stats-java",
+        "Delete word-stats-java",
+    ]
+    rollout = next(
+        spec for spec in executor.seen if spec.summary.startswith("Roll out")
+    )
+    assert rollout.argv == (
+        "kubectl",
+        "-n",
+        "nanofaas-e2e",
+        "rollout",
+        "status",
+        "deployment/fn-word-stats-java",
+        "--timeout=60s",
+    )
+
+
+def test_a_failed_readiness_wait_deletes_the_function_and_reraises() -> None:
+    executor = ScriptedExecutor(
+        responses={
+            "rollout status": TaskResult(
+                task_id="", status="failed", return_code=1, stderr="rollout timed out"
+            )
+        }
+    )
+    workflow = build_cli_workflow(
+        CliWorkflowRequest(functions=(FUNCTION,)),
+        _bindings(executor),
+        readiness_timeout_seconds=60,
+    )
+
+    with pytest.raises(RuntimeError, match="rollout timed out"):
+        workflow.run()
+
+    assert "Delete word-stats-java" in executor.titles
+    assert "List functions" not in executor.titles
+
+
+def test_function_requires_is_a_real_compiled_edge() -> None:
+    events: list[str] = []
+    helm = Resource(
+        title="Acquire Helm release",
+        acquire=lambda _inputs: events.append("helm-acquire"),
+        release=lambda _inputs, _value: events.append("helm-release"),
+        infrastructure=True,
+    )
+    workflow = build_cli_workflow(
+        CliWorkflowRequest(functions=(FUNCTION,)),
+        _bindings(ScriptedExecutor()),
+        function_requires=(helm,),
+    )
+
+    compiled = workflow.compile()
+    function_acquire = next(
+        task for task in compiled.tasks if task.task_id == "003.acquire-word-stats-java"
+    )
+    assert function_acquire.resource is not None
+    assert function_acquire.resource.requires == (helm,)
+    assert [task.task_id for task in compiled.tasks] == [
+        "001.build-nanofaas-cli",
+        "002.acquire-helm-release",
+        "003.acquire-word-stats-java",
+        "004.list-functions",
+        "005.invoke-word-stats-java",
+        "006.release-word-stats-java",
+        "007.release-helm-release",
+    ]
+
+    workflow.run()
+
+    assert events == ["helm-acquire", "helm-release"]
+
+
+def test_slicing_the_invoke_task_keeps_function_requires_transitively() -> None:
+    events: list[str] = []
+    helm = Resource(
+        title="Acquire Helm release",
+        acquire=lambda _inputs: events.append("helm-acquire"),
+        release=lambda _inputs, _value: events.append("helm-release"),
+        infrastructure=True,
+    )
+    executor = ScriptedExecutor()
+    workflow = build_cli_workflow(
+        CliWorkflowRequest(functions=(FUNCTION,)),
+        _bindings(executor),
+        function_requires=(helm,),
+    )
+
+    workflow.run(select=Selection(only="invoke-word-stats-java"))
+
+    assert events == ["helm-acquire", "helm-release"]
+    assert executor.titles == [
+        "Apply word-stats-java",
+        "Invoke word-stats-java",
+        "Delete word-stats-java",
+    ]
+
+
+def test_without_readiness_timeout_no_extra_commands_are_emitted() -> None:
+    executor = ScriptedExecutor()
+    workflow = build_cli_workflow(
+        CliWorkflowRequest(functions=(FUNCTION,)), _bindings(executor)
+    )
+
+    workflow.run()
+
+    assert executor.titles == [
+        "Build nanofaas-cli",
+        "Apply word-stats-java",
+        "List functions",
+        "Invoke word-stats-java",
+        "Delete word-stats-java",
     ]

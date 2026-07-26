@@ -6,9 +6,11 @@ import pytest
 from sonata_engine import Selection
 from workflow_tasks.execution.bindings import RoleBindings
 from workflow_tasks.tasks.models import CommandTaskSpec, TaskResult
+from workflow_tasks.vm.models import VmRequest
 
+from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
-from nanolab.plans.cli import build_cli_plan
+from nanolab.plans.cli import PROVISIONED_ENDPOINT, build_cli_plan
 
 SUCCESS = '{"status":"success","output":{"words":2}}'
 
@@ -20,6 +22,50 @@ class RecordingExecutor:
     def run(self, task: CommandTaskSpec, *, dry_run: bool = False) -> TaskResult:
         self.seen.append(task)
         return TaskResult(task_id="", status="passed", return_code=0, stdout=SUCCESS)
+
+
+@dataclass
+class FakeMultipassOrchestrator:
+    """A fake VM lifecycle for a Multipass-shaped environment.
+
+    Satisfies the structural protocol `VmLifecycleAdapter` needs from an
+    orchestrator (`ensure_running`/`connection_host`/`teardown`) without ever
+    shelling out to the real `multipass` CLI.
+    """
+
+    host: str = "10.10.10.10"
+    ensured: list[VmRequest] = field(default_factory=list)
+    torn_down: list[VmRequest] = field(default_factory=list)
+
+    def ensure_running(self, request: VmRequest) -> None:
+        self.ensured.append(request)
+
+    def connection_host(self, request: VmRequest) -> str:
+        return self.host
+
+    def teardown(self, request: VmRequest) -> None:
+        self.torn_down.append(request)
+
+
+def _multipass_environment(**role_overrides: object) -> EnvironmentConfig:
+    role = {"name": "nanofaas-e2e-cli", **role_overrides}
+    return EnvironmentConfig.model_validate({"provider": "multipass", "roles": {"stack": role}})
+
+
+def _provisioned_plan(
+    bindings: RoleBindings,
+    *,
+    orchestrator: FakeMultipassOrchestrator | None = None,
+    **overrides: object,
+):
+    fake = orchestrator or FakeMultipassOrchestrator()
+    return build_cli_plan(
+        _scenario(backend="k8s", **overrides),
+        bindings,
+        provision=True,
+        environment=_multipass_environment(),
+        orchestrator_factory=lambda _root: fake,
+    )
 
 
 def _scenario(**overrides: object) -> ScenarioConfig:
@@ -221,4 +267,141 @@ def test_pool_backend_is_rejected() -> None:
         build_cli_plan(
             _scenario(backend="pool"),
             RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor()),
+        )
+
+
+def test_provisioned_k8s_plan_compiles_the_expected_14_task_topology() -> None:
+    plan = _provisioned_plan(RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor()))
+
+    assert [task.task_id for task in plan.compile().tasks] == [
+        "001.build-nanofaas-cli",
+        "002.acquire-stack-vm",
+        "003.provision-base-vm-dependencies",
+        "004.install-k3s",
+        "005.ensure-local-registry-container",
+        "006.configure-k3s-registry-access",
+        "007.sync-repository-into-vm",
+        "008.acquire-control-plane-helm-release",
+        "009.acquire-word-stats-java",
+        "010.list-functions",
+        "011.invoke-word-stats-java",
+        "012.release-word-stats-java",
+        "013.release-control-plane-helm-release",
+        "014.release-stack-vm",
+    ]
+
+
+def test_provisioned_k8s_builds_the_cli_on_host_and_runs_everything_else_on_stack() -> None:
+    host = RecordingExecutor()
+    stack = RecordingExecutor()
+
+    _provisioned_plan(RoleBindings(host=host, stack=stack)).run()
+
+    assert [spec.summary for spec in host.seen] == [
+        "Build nanofaas-cli",
+        "Provision base VM dependencies",
+        "Install k3s",
+        "Ensure local registry container",
+        "Configure k3s registry access",
+        "Sync repository into VM",
+    ]
+    assert [spec.summary for spec in stack.seen] == [
+        "Install Helm release control-plane",
+        "Apply word-stats-java",
+        "Wait for deployment/fn-word-stats-java",
+        "Roll out deployment/fn-word-stats-java",
+        "List functions",
+        "Invoke word-stats-java",
+        "Delete word-stats-java",
+        "Uninstall Helm release control-plane",
+    ]
+
+
+def test_provisioned_k8s_bootstrap_argv_is_resolved_from_the_acquired_vm() -> None:
+    host = RecordingExecutor()
+    orchestrator = FakeMultipassOrchestrator(host="192.0.2.42")
+
+    _provisioned_plan(
+        RoleBindings(host=host, stack=RecordingExecutor()), orchestrator=orchestrator
+    ).run()
+
+    sync = next(spec for spec in host.seen if spec.summary == "Sync repository into VM")
+    assert any("192.0.2.42" in argument for argument in sync.argv)
+    assert orchestrator.ensured, "the VM must actually be ensured running"
+    assert orchestrator.torn_down, "a non-kept run must destroy the VM at the end"
+
+
+def test_provisioned_k8s_endpoint_is_the_incluster_node_port() -> None:
+    stack = RecordingExecutor()
+
+    _provisioned_plan(RoleBindings(host=RecordingExecutor(), stack=stack)).run()
+
+    invoke = next(spec for spec in stack.seen if spec.summary.startswith("Invoke"))
+    assert PROVISIONED_ENDPOINT == "http://127.0.0.1:30080"
+    assert PROVISIONED_ENDPOINT in " ".join(invoke.argv)
+
+
+def test_provisioned_k8s_helm_requires_the_vm_and_the_function_requires_helm() -> None:
+    plan = _provisioned_plan(RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor()))
+
+    tasks = {task.task_id: task for task in plan.compile().tasks}
+    helm_acquire = tasks["008.acquire-control-plane-helm-release"]
+    function_acquire = tasks["009.acquire-word-stats-java"]
+    assert helm_acquire.resource is not None
+    assert function_acquire.resource is not None
+    assert [resource.title for resource in helm_acquire.resource.requires] == ["Acquire stack VM"]
+    assert [resource.title for resource in function_acquire.resource.requires] == [
+        "Acquire control-plane Helm release"
+    ]
+
+
+def test_provisioned_k8s_slice_keeps_the_vm_helm_and_function() -> None:
+    stack = RecordingExecutor()
+
+    _provisioned_plan(RoleBindings(host=RecordingExecutor(), stack=stack)).run(
+        select=Selection(only="invoke-word-stats-java")
+    )
+
+    assert [spec.summary for spec in stack.seen] == [
+        "Install Helm release control-plane",
+        "Apply word-stats-java",
+        "Wait for deployment/fn-word-stats-java",
+        "Roll out deployment/fn-word-stats-java",
+        "Invoke word-stats-java",
+        "Delete word-stats-java",
+        "Uninstall Helm release control-plane",
+    ]
+
+
+def test_provisioned_k8s_keep_preserves_the_vm_helm_and_function() -> None:
+    stack = RecordingExecutor()
+    orchestrator = FakeMultipassOrchestrator()
+
+    plan = _provisioned_plan(
+        RoleBindings(host=RecordingExecutor(), stack=stack), orchestrator=orchestrator
+    )
+    plan.keep_infrastructure = True
+    plan.run()
+
+    summaries = [spec.summary for spec in stack.seen]
+    assert "Uninstall Helm release control-plane" not in summaries
+    assert "Delete word-stats-java" not in summaries
+    assert orchestrator.torn_down == []
+
+
+def test_container_backend_still_rejects_provision() -> None:
+    with pytest.raises(ValueError, match="--provision"):
+        build_cli_plan(
+            _scenario(backend="container"),
+            RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor()),
+            provision=True,
+        )
+
+
+def test_provisioned_k8s_requires_an_environment() -> None:
+    with pytest.raises(ValueError, match="environment"):
+        build_cli_plan(
+            _scenario(backend="k8s"),
+            RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor()),
+            provision=True,
         )
