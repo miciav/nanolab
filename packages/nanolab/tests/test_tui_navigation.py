@@ -12,7 +12,7 @@ EXPECTED_SCENARIOS = {
     ("validation", "container"): "validate-container.yaml",
     ("validation", "kubernetes"): "validate-k8s.yaml",
     ("validation", "offload"): "validate-offload.yaml",
-    ("cli", "validate"): "cli.yaml",
+    ("cli", "validate"): "cli-container.yaml",
     ("loadtest", "run"): "loadtest.yaml",
     ("loadtest", "offload"): "offload-loadtest.yaml",
 }

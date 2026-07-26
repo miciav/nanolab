@@ -20,7 +20,6 @@ def _run_from_project_root(monkeypatch):
     monkeypatch.chdir(_PROJECT_ROOT)
 
 from nanolab.app.main import app
-from nanolab.cli.preflight import PreflightError
 from nanolab.cli.product import _git_provenance, _slice, _workflow
 import nanolab.cli.product as product_module
 from nanolab.config import EnvironmentConfig, ScenarioConfig
@@ -103,57 +102,46 @@ def test_run_renders_normalized_task_progress(monkeypatch) -> None:
     assert "[test.task] passed" in result.stdout
 
 
-def test_run_aborts_local_cli_before_building_workflow_when_preflight_fails(
-    monkeypatch,
+def test_run_requires_an_explicit_url_for_k8s_cli(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    error = (
-        "Control plane unavailable; "
-        "start it with './gradlew :control-plane:bootRun'."
-    )
-    preflight = MagicMock(side_effect=PreflightError(error))
-    build_cli_plan = MagicMock()
-    monkeypatch.setattr(
-        product_module, "preflight_control_plane", preflight, raising=False
-    )
-    monkeypatch.setattr(product_module, "build_cli_plan", build_cli_plan)
+    build = MagicMock()
+    monkeypatch.setattr(product_module, "_workflow", build)
 
     result = CliRunner().invoke(app, ["run", "scenarios-v2/cli.yaml"])
 
-    assert result.exit_code == 1
-    assert result.stderr == f"Error: {error}\n"
+    assert result.exit_code != 0
+    assert "--control-plane-url is required for a k8s cli scenario" in result.output
     assert "Traceback" not in result.output
-    scenario, environment = preflight.call_args.args
-    assert scenario.workflow == "cli"
-    assert environment.provider == "local"
-    assert preflight.call_args.kwargs == {"base_url": "http://127.0.0.1:8080"}
-    build_cli_plan.assert_not_called()
+    build.assert_not_called()
 
 
-def test_plan_does_not_run_preflight(monkeypatch) -> None:
-    preflight = MagicMock(side_effect=AssertionError("plan must remain offline"))
-    monkeypatch.setattr(
-        product_module, "preflight_control_plane", preflight, raising=False
+def test_run_container_cli_builds_and_runs_without_an_endpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workflow = MagicMock()
+    build = MagicMock(return_value=workflow)
+    monkeypatch.setattr(product_module, "_workflow", build)
+
+    result = CliRunner().invoke(
+        app,
+        ["run", "scenarios-v2/cli-container.yaml"],
     )
 
-    result = CliRunner().invoke(app, ["plan", "scenarios-v2/cli.yaml"])
+    assert result.exit_code == 0, result.output
+    assert build.call_args.kwargs["control_plane_url"] is None
+    workflow.run.assert_called_once()
 
-    assert result.exit_code == 0
-    preflight.assert_not_called()
 
-
-def test_run_uses_custom_control_plane_url_for_preflight_and_cli_plan(
+def test_run_passes_custom_control_plane_url_to_cli_plan(
     monkeypatch,
 ) -> None:
-    preflight = MagicMock()
     # The cli scenario is now built and run by Sonata (a real sonata_engine.Workflow),
     # not the legacy workflow_tasks.core.workflow.Workflow this test used to fake.
-    # This test only cares about the args build_cli_plan/preflight were called with,
+    # This test only cares about the args build_cli_plan was called with,
     # so a mock of the Sonata API (keep_infrastructure assignment + run(select=...))
     # stands in without adding any compatibility shim.
     build_cli_plan = MagicMock(return_value=MagicMock())
-    monkeypatch.setattr(
-        product_module, "preflight_control_plane", preflight, raising=False
-    )
     monkeypatch.setattr(product_module, "build_cli_plan", build_cli_plan)
 
     result = CliRunner().invoke(
@@ -167,9 +155,6 @@ def test_run_uses_custom_control_plane_url_for_preflight_and_cli_plan(
     )
 
     assert result.exit_code == 0
-    assert preflight.call_args.kwargs == {
-        "base_url": "http://control-plane.example:8181"
-    }
     assert build_cli_plan.call_args.kwargs["endpoint"] == (
         "http://control-plane.example:8181"
     )
@@ -376,23 +361,25 @@ def test_plan_builds_loadtest_with_operational_defaults(tmp_path: Path) -> None:
 
 
 def test_plan_renders_the_compiled_cli_workflow() -> None:
-    result = CliRunner().invoke(app, ["plan", "scenarios-v2/cli.yaml"])
+    result = CliRunner().invoke(app, ["plan", "scenarios-v2/cli-container.yaml"])
 
     assert result.exit_code == 0, result.output
     assert "001.build-nanofaas-cli" in result.stdout
-    assert "005.release-word-stats-java" in result.stdout
+    assert "009.release-local-control-plane" in result.stdout
 
 
 def test_plan_slices_the_cli_workflow_by_sonata_slug() -> None:
     result = CliRunner().invoke(
         app,
-        ["plan", "scenarios-v2/cli.yaml", "--only", "list-functions"],
+        ["plan", "scenarios-v2/cli-container.yaml", "--only", "list-functions"],
     )
 
     assert result.exit_code == 0, result.output
-    assert "001.acquire-word-stats-java" in result.stdout
-    assert "002.list-functions" in result.stdout
-    assert "003.release-word-stats-java" in result.stdout
+    assert "acquire-local-control-plane" in result.stdout
+    assert "acquire-word-stats-java" in result.stdout
+    assert "list-functions" in result.stdout
+    assert "release-word-stats-java" in result.stdout
+    assert "release-local-control-plane" in result.stdout
     assert "build-nanofaas-cli" not in result.stdout
 
 
@@ -400,12 +387,11 @@ def test_run_passes_the_requested_selection_to_sonata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     workflow = MagicMock()
-    monkeypatch.setattr(product_module, "preflight_control_plane", MagicMock())
     monkeypatch.setattr(product_module, "_workflow", MagicMock(return_value=workflow))
 
     result = CliRunner().invoke(
         app,
-        ["run", "scenarios-v2/cli.yaml", "--only", "list-functions"],
+        ["run", "scenarios-v2/cli-container.yaml", "--only", "list-functions"],
     )
 
     assert result.exit_code == 0, result.output
@@ -417,7 +403,7 @@ def test_run_passes_the_requested_selection_to_sonata(
 def test_plan_reports_an_invalid_sonata_slug_without_a_traceback() -> None:
     result = CliRunner().invoke(
         app,
-        ["plan", "scenarios-v2/cli.yaml", "--only", "cli.function.list"],
+        ["plan", "scenarios-v2/cli-container.yaml", "--only", "cli.function.list"],
     )
 
     assert result.exit_code != 0

@@ -13,7 +13,6 @@ from rich.text import Text
 
 from nanolab.cli import diagnostics
 from nanolab.cli.execution import resolve_loadtest_urls
-from nanolab.cli.preflight import PreflightError, preflight_control_plane
 from nanolab.cli.product import _environment, _scenario, _workflow, uses_sonata
 from nanolab.cli.provisioning import provision_environment
 from nanolab.config import ScenarioConfig
@@ -83,7 +82,7 @@ _SCENARIO_FILES = {
     ("validation", "container"): "validate-container.yaml",
     ("validation", "kubernetes"): "validate-k8s.yaml",
     ("validation", "offload"): "validate-offload.yaml",
-    ("cli", "validate"): "cli.yaml",
+    ("cli", "validate"): "cli-container.yaml",
     ("loadtest", "run"): "loadtest.yaml",
     ("loadtest", "offload"): "offload-loadtest.yaml",
 }
@@ -375,20 +374,6 @@ class NanofaasTUI:
         except Exception as exc:
             self._show_static(
                 title="Preview error",
-                breadcrumb=f"Main / {title}",
-                body=str(exc),
-            )
-            return
-
-        try:
-            preflight_control_plane(
-                scenario,
-                environment,
-                base_url="http://127.0.0.1:8080",
-            )
-        except PreflightError as exc:
-            self._show_static(
-                title="Preflight error",
                 breadcrumb=f"Main / {title}",
                 body=str(exc),
             )

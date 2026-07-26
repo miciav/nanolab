@@ -16,7 +16,6 @@ from workflow_tasks import WorkflowEvent, bind_workflow_sink, step, workflow_log
 
 import nanolab.tui.app as tui_app
 import nanolab.tui.workflow_controller as workflow_controller_module
-from nanolab.cli.preflight import PreflightError
 from nanolab.tui import NanofaasTUI
 from nanolab.tui.workflow import TuiWorkflowSink
 from nanolab.tui.workflow_controller import TuiWorkflowController
@@ -168,11 +167,12 @@ def _install_workflow_helpers(
     # FakeWorkflow is legacy-shaped (`.tasks`, no `.compile()`); default to a
     # legacy scenario so uses_sonata() routes through it correctly.
     scenario_kind: str = "validate",
+    backend: str = "container",
     provider: str = "local",
     calls: list[tuple[Any, ...]] | None = None,
 ) -> None:
     call_log = calls if calls is not None else []
-    scenario = SimpleNamespace(workflow=scenario_kind)
+    scenario = SimpleNamespace(workflow=scenario_kind, backend=backend)
     environment = SimpleNamespace(provider=provider)
 
     def load_scenario(path: Path) -> object:
@@ -195,11 +195,6 @@ def _install_workflow_helpers(
     monkeypatch.setattr(tui_app, "_scenario", load_scenario)
     monkeypatch.setattr(tui_app, "_environment", load_environment)
     monkeypatch.setattr(tui_app, "_workflow", build_workflow)
-    monkeypatch.setattr(
-        tui_app,
-        "preflight_control_plane",
-        lambda *_args, **_kwargs: None,
-    )
 
 
 def test_tui_exits_from_the_main_menu() -> None:
@@ -224,7 +219,7 @@ def test_tui_dispatches_a_stable_scenario_filename() -> None:
     dispatch: Callable[[str], None] = dispatched.append
     NanofaasTUI(choose=choose, dispatch_scenario=dispatch).run()
 
-    assert dispatched == ["cli.yaml"]
+    assert dispatched == ["cli-container.yaml"]
 
 
 def test_tools_inspect_selects_only_stable_scenarios_and_renders_validated_json(
@@ -279,7 +274,7 @@ def test_tools_inspect_selects_only_stable_scenarios_and_renders_validated_json(
         "validate-container.yaml",
         "validate-k8s.yaml",
         "validate-offload.yaml",
-        "cli.yaml",
+        "cli-container.yaml",
         "loadtest.yaml",
         "offload-loadtest.yaml",
     ]
@@ -423,10 +418,10 @@ def test_plan_uses_cli_helpers_and_renders_without_running(
         controller=RecordingController(),
         console=console,
         input_stream=input_stream,
-    )._workflow_menu("cli.yaml")
+    )._workflow_menu("cli-container.yaml")
 
     assert [call[0] for call in helper_calls] == ["scenario", "environment", "workflow"]
-    assert helper_calls[0] == ("scenario", tmp_path / "scenarios-v2" / "cli.yaml")
+    assert helper_calls[0] == ("scenario", tmp_path / "scenarios-v2" / "cli-container.yaml")
     assert workflow.run_calls == 0
     assert len(frame_calls) == 1
     assert frame_calls[0]["title"] == "CLI"
@@ -460,7 +455,7 @@ def test_static_plan_acknowledges_only_for_an_input_tty(
         controller=RecordingController(),
         console=console,
         input_stream=input_stream,
-    )._workflow_menu("cli.yaml")
+    )._workflow_menu("cli-container.yaml")
 
     assert console.calls == [("clear", None), ("print", frame), ("clear", None)]
     assert frame_calls[0]["footer_hint"] == "Press Enter to continue"
@@ -489,7 +484,7 @@ def test_configuration_error_uses_the_shared_branded_static_view(
         choose=ScriptedChooser(iter([str(environment_path), "plan"])),
         console=console,
         input_stream=RecordingInput(tty=False),
-    )._workflow_menu("cli.yaml")
+    )._workflow_menu("cli-container.yaml")
 
     assert frame_calls[0]["title"] == "Configuration error"
     assert frame_calls[0]["breadcrumb"] == "Main / CLI"
@@ -526,63 +521,11 @@ def test_run_preview_error_uses_static_view_without_starting_live_dashboard(
         controller=controller,
         console=console,
         input_stream=RecordingInput(tty=False),
-    )._workflow_menu("cli.yaml")
+    )._workflow_menu("cli-container.yaml")
 
     assert frame_calls[0]["title"] == "Preview error"
     assert str(frame_calls[0]["body"]) == "preview failed"
     assert controller.calls == []
-    assert console.calls == [("clear", None), ("print", frame), ("clear", None)]
-
-
-def test_failed_cli_preflight_uses_static_view_without_starting_workflow(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    environment_path = _install_paths(monkeypatch, tmp_path)
-    workflow = FakeWorkflow()
-    _install_workflow_helpers(
-        monkeypatch,
-        environment_path=environment_path,
-        workflow=workflow,
-    )
-    preflight_calls: list[tuple[object, object, str]] = []
-
-    def fail_preflight(
-        scenario: object,
-        environment: object,
-        *,
-        base_url: str,
-    ) -> None:
-        preflight_calls.append((scenario, environment, base_url))
-        raise PreflightError("control plane unavailable")
-
-    monkeypatch.setattr(
-        tui_app,
-        "preflight_control_plane",
-        fail_preflight,
-    )
-    frame = object()
-    frame_calls: list[dict[str, object]] = []
-    monkeypatch.setattr(
-        tui_app,
-        "render_screen_frame",
-        lambda **kwargs: frame_calls.append(kwargs) or frame,
-    )
-    console = RecordingConsole()
-    controller = RecordingController()
-
-    NanofaasTUI(
-        choose=ScriptedChooser(iter([str(environment_path), "run", "cleanup"])),
-        controller=controller,
-        console=console,
-        input_stream=RecordingInput(tty=False),
-    )._workflow_menu("cli.yaml")
-
-    assert len(preflight_calls) == 1
-    assert preflight_calls[0][2] == "http://127.0.0.1:8080"
-    assert frame_calls[0]["title"] == "Preflight error"
-    assert str(frame_calls[0]["body"]) == "control plane unavailable"
-    assert controller.calls == []
-    assert workflow.run_calls == 0
     assert console.calls == [("clear", None), ("print", frame), ("clear", None)]
 
 
@@ -591,28 +534,32 @@ def test_run_passes_phase_titles_and_exact_summary_to_live_controller(
 ) -> None:
     environment_path = _install_paths(monkeypatch, tmp_path)
     workflow = FakeWorkflow()
+    helper_calls: list[tuple[Any, ...]] = []
     _install_workflow_helpers(
         monkeypatch,
         environment_path=environment_path,
         workflow=workflow,
+        calls=helper_calls,
     )
     controller = RecordingController()
 
     NanofaasTUI(
         choose=ScriptedChooser(iter([str(environment_path), "run", "cleanup"])),
         controller=controller,
-    )._workflow_menu("cli.yaml")
+    )._workflow_menu("cli-container.yaml")
 
     assert len(controller.calls) == 1
     assert controller.calls[0]["title"] == "CLI"
     assert controller.calls[0]["planned_steps"] == [task.title for task in workflow.tasks]
     assert controller.calls[0]["summary_lines"] == [
-        "Scenario: cli.yaml",
+        "Scenario: cli-container.yaml",
         "Environment: local.yaml",
         "Provision: no",
         "Cleanup: cleanup",
     ]
     assert workflow.run_calls == 1
+    loaded_scenario = next(call[1] for call in helper_calls if call[0] == "workflow")
+    assert loaded_scenario.backend == "container"
 
 
 def test_legacy_run_planned_steps_include_cleanup_titles(
@@ -658,7 +605,7 @@ def test_sonata_run_planned_steps_come_from_compiled_workflow(
     NanofaasTUI(
         choose=ScriptedChooser(iter([str(environment_path), "run", "cleanup"])),
         controller=controller,
-    )._workflow_menu("cli.yaml")
+    )._workflow_menu("cli-container.yaml")
 
     assert controller.calls[0]["planned_steps"] == [
         "Build nanofaas-cli",
@@ -717,7 +664,7 @@ def test_local_run_never_offers_or_enters_provisioning(
     )
     chooser = ScriptedChooser(iter([str(environment_path), "run", "cleanup"]))
 
-    NanofaasTUI(choose=chooser, controller=RecordingController())._workflow_menu("cli.yaml")
+    NanofaasTUI(choose=chooser, controller=RecordingController())._workflow_menu("cli-container.yaml")
 
     assert "Provision environment?" not in [message for message, _ in chooser.calls]
     assert provision_calls == []
@@ -749,7 +696,7 @@ def test_non_local_run_enters_existing_provisioning_context(
             iter([str(environment_path), "run", "provision", "cleanup"])
         ),
         controller=RecordingController(),
-    )._workflow_menu("cli.yaml")
+    )._workflow_menu("cli-container.yaml")
 
     assert [event[0] for event in lifecycle] == ["enter", "exit"]
     assert workflow.run_calls == 1
@@ -889,7 +836,7 @@ def test_provision_cleanup_error_reaches_real_controller_dashboard_and_acknowled
             iter([str(environment_path), "run", "provision", "cleanup"])
         ),
         controller=controller,
-    )._workflow_menu("cli.yaml")
+    )._workflow_menu("cli-container.yaml")
 
     assert [(event.kind, event.title, event.line) for event in emitted[:2]] == [
         ("task.running", "Provision stack", ""),
@@ -927,7 +874,7 @@ def test_keep_applies_to_provisioning_and_workflow_cleanup(
     NanofaasTUI(
         choose=ScriptedChooser(iter([str(environment_path), "run", "provision", "keep"])),
         controller=RecordingController(),
-    )._workflow_menu("cli.yaml")
+    )._workflow_menu("cli-container.yaml")
 
     assert provision_kwargs[0]["keep"] is True
     assert preview.keep_infrastructure is False
@@ -954,11 +901,6 @@ def test_reselecting_local_environment_resets_remote_provisioning_choice(
         ),
     )
     monkeypatch.setattr(tui_app, "_workflow", lambda *args, **kwargs: workflow)
-    monkeypatch.setattr(
-        tui_app,
-        "preflight_control_plane",
-        lambda *_args, **_kwargs: None,
-    )
     provision_calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
     monkeypatch.setattr(
         tui_app,
@@ -982,12 +924,12 @@ def test_reselecting_local_environment_resets_remote_provisioning_choice(
         )
     )
 
-    NanofaasTUI(choose=chooser, controller=controller)._workflow_menu("cli.yaml")
+    NanofaasTUI(choose=chooser, controller=controller)._workflow_menu("cli-container.yaml")
 
     assert provision_calls == []
     assert workflow.run_calls == 1
     assert controller.calls[0]["summary_lines"] == [
-        "Scenario: cli.yaml",
+        "Scenario: cli-container.yaml",
         "Environment: local.yaml",
         "Provision: no",
         "Cleanup: cleanup",
@@ -1196,7 +1138,7 @@ def test_provider_setup_never_loads_template_as_executable_yaml(
     tui = NanofaasTUI(choose=chooser)
     monkeypatch.setattr(tui, "_show_static", lambda *args, **kwargs: None)
 
-    tui._workflow_menu("cli.yaml")
+    tui._workflow_menu("cli-container.yaml")
 
     assert loaded_paths == [environment_path]
     assert all(not path.name.endswith(".yaml.example") for path in loaded_paths)
@@ -1262,7 +1204,7 @@ def test_workflow_back_navigation_returns_to_exact_parent(
     )
     chooser = ScriptedChooser(resolved_answers)
 
-    NanofaasTUI(choose=chooser, controller=RecordingController())._workflow_menu("cli.yaml")
+    NanofaasTUI(choose=chooser, controller=RecordingController())._workflow_menu("cli-container.yaml")
 
     assert [message for message, _ in chooser.calls] == expected_messages
     assert all(kwargs["include_back"] is True for _, kwargs in chooser.calls)

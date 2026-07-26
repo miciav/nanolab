@@ -19,7 +19,6 @@ from workflow_tasks.workflow.context import bind_workflow_sink
 from nanolab.cli import diagnostics
 from nanolab.config import EnvironmentConfig, ScenarioConfig
 from nanolab.cli.execution import build_role_bindings, resolve_loadtest_urls
-from nanolab.cli.preflight import PreflightError, preflight_control_plane
 from nanolab.cli.progress import ConsoleProgressSink
 from nanolab.cli.provisioning import provision_environment
 from nanolab.plans.offload import build_offload_plan
@@ -58,7 +57,7 @@ def _workflow(
     scenario: ScenarioConfig,
     environment: EnvironmentConfig,
     *,
-    control_plane_url: str = "http://127.0.0.1:8080",
+    control_plane_url: str | None = None,
     prometheus_url: str = "http://127.0.0.1:9090",
     run_dir: Path | None = None,
     dry_run: bool = False,
@@ -96,13 +95,27 @@ def _workflow(
         scenario,
         environment,
         bindings,
-        control_plane_url=control_plane_url,
+        control_plane_url=control_plane_url or "http://127.0.0.1:8080",
         prometheus_client=HttpPrometheusClient(prometheus_url),
         run_dir=run_dir or paths.runs_dir / "latest",
         fetcher=fetcher,
         repo_root=paths.nanofaas_root,
         tool_root=paths.tool_root,
     )
+
+
+def _require_cli_endpoint(
+    scenario: ScenarioConfig,
+    control_plane_url: str | None,
+) -> None:
+    if (
+        scenario.workflow == "cli"
+        and scenario.backend == "k8s"
+        and control_plane_url is None
+    ):
+        raise typer.BadParameter(
+            "--control-plane-url is required for a k8s cli scenario"
+        )
 
 
 def _render(workflow) -> None:
@@ -274,6 +287,7 @@ def install_product_commands(app: typer.Typer) -> None:
         environment_config = _environment(environment)
         if provision and environment_config.provider == "local":
             raise typer.BadParameter("--provision requires a non-local environment")
+        _require_cli_endpoint(scenario_config, control_plane_url)
         paths = default_tool_paths()
         effective_run_dir = run_dir
         if (
@@ -309,22 +323,10 @@ def install_product_commands(app: typer.Typer) -> None:
                             control_plane_url=control_plane_url,
                             prometheus_url=prometheus_url,
                         )
-                    effective_control_plane_url = (
-                        control_plane_url or "http://127.0.0.1:8080"
-                    )
-                    try:
-                        preflight_control_plane(
-                            scenario_config,
-                            environment_config,
-                            base_url=effective_control_plane_url,
-                        )
-                    except PreflightError as exc:
-                        typer.echo(f"Error: {exc}", err=True)
-                        raise typer.Exit(1) from None
                     workflow = _workflow(
                         scenario_config,
                         environment_config,
-                        control_plane_url=effective_control_plane_url,
+                        control_plane_url=control_plane_url,
                         prometheus_url=prometheus_url or "http://127.0.0.1:9090",
                         run_dir=effective_run_dir,
                     )
@@ -402,6 +404,7 @@ def install_product_commands(app: typer.Typer) -> None:
     ) -> None:
         scenario_config = _scenario(scenario)
         environment_config = _environment(environment)
+        _require_cli_endpoint(scenario_config, control_plane_url)
         if scenario_config.workflow == "loadtest":
             control_plane_url, prometheus_url = resolve_loadtest_urls(
                 environment_config,
@@ -412,7 +415,7 @@ def install_product_commands(app: typer.Typer) -> None:
         workflow = _workflow(
             scenario_config,
             environment_config,
-            control_plane_url=control_plane_url or "http://127.0.0.1:8080",
+            control_plane_url=control_plane_url,
             prometheus_url=prometheus_url or "http://127.0.0.1:9090",
             run_dir=run_dir,
             dry_run=True,

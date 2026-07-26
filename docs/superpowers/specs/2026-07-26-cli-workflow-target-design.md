@@ -51,8 +51,9 @@ Quindi questo incremento è per la maggior parte **riuso**, non codice nuovo.
 - **`backend: container`** → control plane locale su Docker, avviato dal workflow.
   Diventa il caso normale: nessuna VM, nessun k8s, uno smoke test che gira in una
   ventina di secondi. Endpoint `http://127.0.0.1:18080`, calcolato, non passato a mano.
-- **`backend: k8s`** → richiede un `--control-plane-url` esplicito, come oggi. Il
-  provisioning di VM e piattaforma è **fuori scope** (vedi "Rimandato").
+- **`backend: k8s`** → richiede un `--control-plane-url` esplicito: la sua assenza è un
+  errore (`--control-plane-url is required for a k8s cli scenario`). Il provisioning di VM
+  e piattaforma è **fuori scope** (vedi "Rimandato").
 - **`backend: pool`** → non supportato da `cli`; errore esplicito.
 
 ### D2 — Il control plane locale è una `Resource` sonata
@@ -78,32 +79,35 @@ Ordine compilato atteso con `backend: container` e una function:
 
 ```
 001.build-nanofaas-cli
-002.acquire-local-control-plane   <- Resource.acquire (avvia + attende readiness)
+002.build-local-control-plane
 003.build-image-word-stats-java
-004.acquire-word-stats-java       <- Resource.acquire (fn apply)
-005.list-functions
-006.invoke-word-stats-java
-007.release-word-stats-java
-008.release-local-control-plane   <- Resource.release (termina il processo)
+004.acquire-local-control-plane
+005.acquire-word-stats-java
+006.list-functions
+007.invoke-word-stats-java
+008.release-word-stats-java
+009.release-local-control-plane
 ```
+
+I build restano fuori dal lifetime della risorsa: costruire il jar del control plane e
+l'immagine della function non è parte dell'acquire/release, è un passo a monte. Il jar
+del control plane viene costruito dal workflow stesso (`control_plane_build_argv`), non
+preparato a mano prima di eseguire `nanolab run`.
 
 Le due risorse si annidano correttamente da sole: il control plane viene rilasciato per
 ultimo perché è il primo acquisito, e sonata rilascia in ordine inverso.
 
-### D3 — Il preflight sparisce dal percorso sonata
+### D3 — Nessun preflight separato nel percorso `cli`
 
-Con D2 la readiness del control plane è garantita dall'acquire della `Resource`, che è il
-posto giusto: chi acquisisce la risorsa è responsabile di consegnarla pronta.
-`preflight_control_plane` diventa ridondante per `backend: container` e va rimosso dal
-percorso `cli`.
+Per `backend: container`, l'acquire del control plane attende la porta di management
+e consegna la risorsa pronta.
 
-Per `backend: k8s` resta un controllo di raggiungibilità, ma **corretto**: deve sondare la
-porta di management, che in k8s è un service distinto e quindi va indicata
-esplicitamente, non dedotta dall'URL dell'API.
+Per `backend: k8s`, `--control-plane-url` è obbligatorio e la prima chiamata CLI è la
+verifica di raggiungibilità. Non si introduce un secondo URL di management per
+duplicare la stessa richiesta pochi secondi prima.
 
-Qualunque cosa resti, deve avere **almeno un test che parla con un control plane vero**.
-La lezione di questo bug è che una guardia di rete testata solo con `urlopen` simulata
-non è testata.
+Il gate contro un control plane vero è lo smoke test `cli-container` in CI: parte a
+porte libere, esegue il workflow completo e verifica lo spegnimento finale.
 
 ### D4 — L'attesa dopo `fn apply`: niente da fare (verificato)
 
@@ -139,7 +143,8 @@ va aggiunta quando si affronta quell'incremento, non ora.
 
 - Suite `sonata-tasks` con executor finti: ordine compilato con `backend: container`,
   annidamento delle due risorse, control plane fermato anche quando un consumer fallisce.
-- Un test che sonda la salute di un control plane vero, non simulato (vedi D3).
+- Smoke test CI a freddo contro un control plane vero, con verifica delle porte e
+  dei container prima e dopo il run.
 - `nanolab run scenarios-v2/cli-container.yaml` a freddo, su una macchina con Docker e
   senza niente in ascolto: deve passare senza argomenti aggiuntivi. È il criterio di
   chiusura — lo stesso errore di prima non deve poter tornare.
