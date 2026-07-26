@@ -27,7 +27,7 @@ def spec() -> HelmReleaseSpec:
         release="example-service",
         chart="oci://registry.example/charts/service",
         namespace="example",
-        values={"image.tag": "v1", "feature.enabled": "true"},
+        values=("--set", "image.tag=v1", "--set", "feature.enabled=true"),
     )
 
 
@@ -35,7 +35,7 @@ def test_acquire_installs_and_waits_with_values_as_separate_arguments(
     spec: HelmReleaseSpec,
 ) -> None:
     executor = RecordingExecutor()
-    resource = helm_release_resource(spec, executor)
+    resource = helm_release_resource(spec, executor=executor)
 
     acquired = resource.acquire(TaskInputs.empty())
 
@@ -62,7 +62,7 @@ def test_acquire_installs_and_waits_with_values_as_separate_arguments(
 
 def test_release_uninstalls_the_acquired_release(spec: HelmReleaseSpec) -> None:
     executor = RecordingExecutor()
-    resource = helm_release_resource(spec, executor)
+    resource = helm_release_resource(spec, executor=executor)
 
     resource.release(TaskInputs.empty(), spec)
 
@@ -80,7 +80,7 @@ def test_release_uninstalls_the_acquired_release(spec: HelmReleaseSpec) -> None:
 def test_resource_requires_its_vm_and_is_infrastructure(spec: HelmReleaseSpec) -> None:
     vm = Resource(title="Acquire VM", acquire=lambda _inputs: None, release=lambda *_: None)
 
-    resource = helm_release_resource(spec, RecordingExecutor(), requires=(vm,))
+    resource = helm_release_resource(spec, executor=RecordingExecutor(), requires=(vm,))
 
     assert resource.requires == (vm,)
     assert resource.infrastructure is True
@@ -89,7 +89,7 @@ def test_resource_requires_its_vm_and_is_infrastructure(spec: HelmReleaseSpec) -
 def test_failed_acquire_best_effort_uninstalls_before_reraising(spec: HelmReleaseSpec) -> None:
     failure = TaskResult(task_id="", status="failed", return_code=1, stderr="install failed")
     executor = RecordingExecutor(results=[failure])
-    resource = helm_release_resource(spec, executor)
+    resource = helm_release_resource(spec, executor=executor)
 
     with pytest.raises(RuntimeError, match="install failed"):
         resource.acquire(TaskInputs.empty())
@@ -101,7 +101,7 @@ def test_failed_cleanup_is_noted_without_masking_acquire_failure(spec: HelmRelea
     failure = TaskResult(task_id="", status="failed", return_code=1, stderr="install failed")
     cleanup_failure = TaskResult(task_id="", status="failed", return_code=1, stderr="uninstall failed")
     executor = RecordingExecutor(results=[failure, cleanup_failure])
-    resource = helm_release_resource(spec, executor)
+    resource = helm_release_resource(spec, executor=executor)
 
     with pytest.raises(RuntimeError, match="install failed") as caught:
         resource.acquire(TaskInputs.empty())

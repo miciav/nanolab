@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -18,20 +17,14 @@ class HelmReleaseSpec:
     release: str
     chart: str
     namespace: str
-    values: Mapping[str, str]
+    values: tuple[str, ...]
     role: ExecutionRole = "stack"
     timeout: str = "5m"
 
 
-def _set_args(values: Mapping[str, str]) -> tuple[str, ...]:
-    args: list[str] = []
-    for key, value in values.items():
-        args.extend(("--set", f"{key}={value}"))
-    return tuple(args)
-
-
 def helm_release_resource(
     spec: HelmReleaseSpec,
+    *,
     executor: CommandTaskExecutor,
     requires: tuple[Resource[Any], ...] = (),
 ) -> Resource[HelmReleaseSpec]:
@@ -52,7 +45,7 @@ def helm_release_resource(
                 "--wait",
                 "--timeout",
                 current.timeout,
-                *_set_args(current.values),
+                *current.values,
             ),
             executor=executor,
             role=current.role,
