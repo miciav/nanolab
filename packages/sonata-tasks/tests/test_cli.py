@@ -340,8 +340,8 @@ def test_an_external_resource_wraps_the_whole_workflow() -> None:
     events: list[str] = []
     control_plane = Resource(
         title="Acquire local control plane",
-        acquire=lambda: events.append("start"),
-        release=lambda: events.append("stop"),
+        acquire=lambda _inputs: events.append("start"),
+        release=lambda _inputs, _value: events.append("stop"),
     )
     workflow = build_cli_workflow(
         CliWorkflowRequest(functions=(FUNCTION,)),
@@ -367,8 +367,8 @@ def test_build_only_selection_does_not_acquire_the_external_resource() -> None:
     events: list[str] = []
     control_plane = Resource(
         title="Acquire local control plane",
-        acquire=lambda: events.append("start"),
-        release=lambda: events.append("stop"),
+        acquire=lambda _inputs: events.append("start"),
+        release=lambda _inputs, _value: events.append("stop"),
     )
     workflow = build_cli_workflow(
         CliWorkflowRequest(functions=(FUNCTION,)),
@@ -392,8 +392,8 @@ def test_the_external_resource_is_released_when_a_task_fails() -> None:
     events: list[str] = []
     control_plane = Resource(
         title="Acquire local control plane",
-        acquire=lambda: events.append("start"),
-        release=lambda: events.append("stop"),
+        acquire=lambda _inputs: events.append("start"),
+        release=lambda _inputs, _value: events.append("stop"),
     )
     workflow = build_cli_workflow(
         CliWorkflowRequest(functions=(FUNCTION,)),
@@ -427,8 +427,8 @@ def test_a_function_with_build_argv_gets_an_image_build_task() -> None:
 def test_the_control_plane_build_runs_before_images_and_acquire() -> None:
     control_plane = Resource(
         title="Acquire local control plane",
-        acquire=lambda: None,
-        release=lambda: None,
+        acquire=lambda _inputs: None,
+        release=lambda _inputs, _value: None,
     )
     function = replace(
         FUNCTION,

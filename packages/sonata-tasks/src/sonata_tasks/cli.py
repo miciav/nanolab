@@ -4,8 +4,9 @@ import json
 import shlex
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
-from sonata_engine import Resource, Workflow
+from sonata_engine import Resource, TaskInputs, Workflow
 from workflow_tasks.execution.bindings import (
     CommandTaskExecutor,
     RoleBindings,
@@ -111,7 +112,7 @@ def _function_resource(
     function: CliFunction,
     executor: CommandTaskExecutor,
     cwd: Path | None,
-) -> Resource:
+) -> Resource[None]:
     """The registered function as an acquire/release pair.
 
     Sonata splices the apply before the first task that needs the function and
@@ -133,21 +134,21 @@ def _function_resource(
         cwd=cwd,
     )
 
-    def acquire() -> None:
+    def acquire(_inputs: TaskInputs) -> None:
         try:
-            apply_task.run()
+            _ = apply_task.run(TaskInputs.empty())
         except BaseException as error:
             # The apply may have registered the function before failing. The
             # engine will not release an acquire that did not pass, so the
             # compensation has to happen here, best-effort.
             try:
-                delete_task.run()
+                _ = delete_task.run(TaskInputs.empty())
             except BaseException as cleanup_error:
                 error.add_note(f"Best-effort delete after a failed apply failed: {cleanup_error}")
             raise
 
-    def release() -> None:
-        delete_task.run()
+    def release(_inputs: TaskInputs, _value: None) -> None:
+        _ = delete_task.run(TaskInputs.empty())
 
     return Resource(
         title=f"Acquire {function.name}",
@@ -164,7 +165,7 @@ def build_cli_workflow(
     workflow_id: str = "cli",
     cwd: Path | None = None,
     control_plane_build_argv: tuple[str, ...] | None = None,
-    requires: tuple[Resource, ...] = (),
+    requires: tuple[Resource[Any], ...] = (),
 ) -> Workflow:
     """Build the CLI end-to-end workflow: build, register, list, invoke, remove.
 
