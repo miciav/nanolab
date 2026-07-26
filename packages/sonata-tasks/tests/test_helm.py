@@ -1,0 +1,109 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+import pytest
+from sonata_engine import Resource, TaskInputs
+from workflow_tasks.tasks.models import CommandTaskSpec, TaskResult
+
+from sonata_tasks.helm import HelmReleaseSpec, helm_release_resource
+
+
+@dataclass
+class RecordingExecutor:
+    results: list[TaskResult] = field(default_factory=list)
+    seen: list[CommandTaskSpec] = field(default_factory=list)
+
+    def run(self, task: CommandTaskSpec, *, dry_run: bool = False) -> TaskResult:
+        self.seen.append(task)
+        return self.results.pop(0) if self.results else TaskResult(
+            task_id="", status="passed", return_code=0
+        )
+
+
+@pytest.fixture
+def spec() -> HelmReleaseSpec:
+    return HelmReleaseSpec(
+        release="example-service",
+        chart="oci://registry.example/charts/service",
+        namespace="example",
+        values={"image.tag": "v1", "feature.enabled": "true"},
+    )
+
+
+def test_acquire_installs_and_waits_with_values_as_separate_arguments(
+    spec: HelmReleaseSpec,
+) -> None:
+    executor = RecordingExecutor()
+    resource = helm_release_resource(spec, executor)
+
+    acquired = resource.acquire(TaskInputs.empty())
+
+    assert acquired is spec
+    assert executor.seen[0].argv == (
+        "helm",
+        "upgrade",
+        "--install",
+        "example-service",
+        "oci://registry.example/charts/service",
+        "--namespace",
+        "example",
+        "--create-namespace",
+        "--wait",
+        "--timeout",
+        "5m",
+        "--set",
+        "image.tag=v1",
+        "--set",
+        "feature.enabled=true",
+    )
+    assert executor.seen[0].execution_role == "stack"
+
+
+def test_release_uninstalls_the_acquired_release(spec: HelmReleaseSpec) -> None:
+    executor = RecordingExecutor()
+    resource = helm_release_resource(spec, executor)
+
+    resource.release(TaskInputs.empty(), spec)
+
+    assert executor.seen[0].argv == (
+        "helm",
+        "uninstall",
+        "example-service",
+        "--namespace",
+        "example",
+        "--ignore-not-found",
+        "--wait",
+    )
+
+
+def test_resource_requires_its_vm_and_is_infrastructure(spec: HelmReleaseSpec) -> None:
+    vm = Resource(title="Acquire VM", acquire=lambda _inputs: None, release=lambda *_: None)
+
+    resource = helm_release_resource(spec, RecordingExecutor(), requires=(vm,))
+
+    assert resource.requires == (vm,)
+    assert resource.infrastructure is True
+
+
+def test_failed_acquire_best_effort_uninstalls_before_reraising(spec: HelmReleaseSpec) -> None:
+    failure = TaskResult(task_id="", status="failed", return_code=1, stderr="install failed")
+    executor = RecordingExecutor(results=[failure])
+    resource = helm_release_resource(spec, executor)
+
+    with pytest.raises(RuntimeError, match="install failed"):
+        resource.acquire(TaskInputs.empty())
+
+    assert executor.seen[1].argv[:3] == ("helm", "uninstall", "example-service")
+
+
+def test_failed_cleanup_is_noted_without_masking_acquire_failure(spec: HelmReleaseSpec) -> None:
+    failure = TaskResult(task_id="", status="failed", return_code=1, stderr="install failed")
+    cleanup_failure = TaskResult(task_id="", status="failed", return_code=1, stderr="uninstall failed")
+    executor = RecordingExecutor(results=[failure, cleanup_failure])
+    resource = helm_release_resource(spec, executor)
+
+    with pytest.raises(RuntimeError, match="install failed") as caught:
+        resource.acquire(TaskInputs.empty())
+
+    assert "uninstall failed" in "\n".join(caught.value.__notes__)
