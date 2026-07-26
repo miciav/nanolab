@@ -295,6 +295,24 @@ def test_delete_keeps_real_cli_failures_visible() -> None:
     assert delete_spec.expected_exit_codes == frozenset({0})
 
 
+def test_keep_infrastructure_skips_the_delete() -> None:
+    executor = ScriptedExecutor()
+    workflow = build_cli_workflow(
+        CliWorkflowRequest(functions=(FUNCTION,)), _bindings(executor)
+    )
+    workflow.keep_infrastructure = True
+
+    workflow.run()
+
+    assert "Delete word-stats-java" not in executor.titles
+    assert executor.titles == [
+        "Build nanofaas-cli",
+        "Apply word-stats-java",
+        "List functions",
+        "Invoke word-stats-java",
+    ]
+
+
 def test_the_workflow_can_run_entirely_on_the_stack_role() -> None:
     executor = ScriptedExecutor()
     workflow = build_cli_workflow(

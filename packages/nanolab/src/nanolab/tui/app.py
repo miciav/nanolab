@@ -423,9 +423,11 @@ class NanofaasTUI:
                     f"Provision: {'yes' if provision else 'no'}",
                     f"Cleanup: {'keep' if keep else 'cleanup'}",
                 ],
-                planned_steps=[
-                    task_title for _task_id, task_title in self._plan_rows(scenario, preview)
-                ],
+                planned_steps=(
+                    [title for _task_id, title in self._plan_rows(scenario, preview)]
+                    if uses_sonata(scenario)
+                    else preview.phase_titles
+                ),
                 action=run_current_workflow,
             )
         except Exception:

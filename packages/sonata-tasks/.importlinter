@@ -19,3 +19,4 @@ source_modules = sonata_tasks
 forbidden_modules =
     workflow_tasks.core
     workflow_tasks.workflows
+    workflow_tasks.workflow

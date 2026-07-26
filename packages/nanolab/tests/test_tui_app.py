@@ -41,15 +41,21 @@ class FakeWorkflow:
         *,
         error: Exception | None = None,
         on_run: Callable[[], None] | None = None,
+        cleanup_tasks: list[Any] | None = None,
     ) -> None:
         self.tasks = [
             SimpleNamespace(task_id="prepare", title="Prepare environment"),
             SimpleNamespace(task_id="verify", title="Run checks"),
         ]
+        self.cleanup_tasks = cleanup_tasks if cleanup_tasks is not None else []
         self.keep_infrastructure = False
         self.run_calls = 0
         self._error = error
         self._on_run = on_run
+
+    @property
+    def phase_titles(self) -> list[str]:
+        return [task.title for task in self.tasks + self.cleanup_tasks]
 
     def run(self) -> None:
         self.run_calls += 1
@@ -57,6 +63,30 @@ class FakeWorkflow:
             self._on_run()
         if self._error is not None:
             raise self._error
+
+
+class FakeSonataWorkflow:
+    """Sonata-shaped fake: no `.tasks`, only `.compile().tasks`."""
+
+    def __init__(self) -> None:
+        self.keep_infrastructure = False
+        self.run_calls = 0
+        self._compiled_tasks = [
+            SimpleNamespace(
+                task_id="001.build-nanofaas-cli",
+                task=SimpleNamespace(title="Build nanofaas-cli"),
+            ),
+            SimpleNamespace(
+                task_id="002.list-functions",
+                task=SimpleNamespace(title="List functions"),
+            ),
+        ]
+
+    def compile(self) -> SimpleNamespace:
+        return SimpleNamespace(tasks=self._compiled_tasks)
+
+    def run(self) -> None:
+        self.run_calls += 1
 
 
 class RecordingSink:
@@ -134,7 +164,7 @@ def _install_workflow_helpers(
     monkeypatch: pytest.MonkeyPatch,
     *,
     environment_path: Path,
-    workflow: FakeWorkflow,
+    workflow: object,
     # FakeWorkflow is legacy-shaped (`.tasks`, no `.compile()`); default to a
     # legacy scenario so uses_sonata() routes through it correctly.
     scenario_kind: str = "validate",
@@ -158,7 +188,7 @@ def _install_workflow_helpers(
         loaded_scenario: object,
         loaded_environment: object,
         **kwargs: object,
-    ) -> FakeWorkflow:
+    ) -> object:
         call_log.append(("workflow", loaded_scenario, loaded_environment, kwargs))
         return workflow
 
@@ -583,6 +613,57 @@ def test_run_passes_phase_titles_and_exact_summary_to_live_controller(
         "Cleanup: cleanup",
     ]
     assert workflow.run_calls == 1
+
+
+def test_legacy_run_planned_steps_include_cleanup_titles(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    environment_path = _install_paths(monkeypatch, tmp_path)
+    workflow = FakeWorkflow(
+        cleanup_tasks=[SimpleNamespace(task_id="cleanup", title="Delete function")]
+    )
+    _install_workflow_helpers(
+        monkeypatch,
+        environment_path=environment_path,
+        workflow=workflow,
+        scenario_kind="validate",
+    )
+    controller = RecordingController()
+
+    NanofaasTUI(
+        choose=ScriptedChooser(iter([str(environment_path), "run", "cleanup"])),
+        controller=controller,
+    )._workflow_menu("validate-container.yaml")
+
+    assert controller.calls[0]["planned_steps"] == [
+        "Prepare environment",
+        "Run checks",
+        "Delete function",
+    ]
+
+
+def test_sonata_run_planned_steps_come_from_compiled_workflow(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    environment_path = _install_paths(monkeypatch, tmp_path)
+    workflow = FakeSonataWorkflow()
+    _install_workflow_helpers(
+        monkeypatch,
+        environment_path=environment_path,
+        workflow=workflow,
+        scenario_kind="cli",
+    )
+    controller = RecordingController()
+
+    NanofaasTUI(
+        choose=ScriptedChooser(iter([str(environment_path), "run", "cleanup"])),
+        controller=controller,
+    )._workflow_menu("cli.yaml")
+
+    assert controller.calls[0]["planned_steps"] == [
+        "Build nanofaas-cli",
+        "List functions",
+    ]
 
 
 def test_loadtest_resolves_urls_before_building_workflow(

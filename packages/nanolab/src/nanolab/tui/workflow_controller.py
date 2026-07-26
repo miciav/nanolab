@@ -59,8 +59,12 @@ class TuiWorkflowController:
             refresh()
             try:
                 listener.start()
-                # Both engines are live during the migration; each reads its own
-                # contextvar, so the one sink is bound to both.
+                # Both binds are required, and not just during the migration: the
+                # legacy contextvar is read directly by SubprocessShell._emit_output
+                # (workflow_tasks/shell.py), which every command execution goes
+                # through regardless of which engine's workflow issued it. Drop the
+                # legacy bind only if that execution layer itself stops routing
+                # through workflow_log.
                 with bind_workflow_sink(sink), bind_sonata_sink(sink):
                     try:
                         result = action(dashboard, sink)

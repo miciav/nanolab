@@ -152,6 +152,7 @@ def _function_resource(
         title=f"Acquire {function.name}",
         acquire=acquire,
         release=release,
+        infrastructure=True,
     )
 
 

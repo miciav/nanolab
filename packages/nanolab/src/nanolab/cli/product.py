@@ -111,8 +111,8 @@ def _render(workflow) -> None:
 
 
 def _render_compiled(compiled: CompiledWorkflow) -> None:
-    for index, compiled_task in enumerate(compiled.tasks, start=1):
-        typer.echo(f"{index:02d}  {compiled_task.task_id}  {compiled_task.task.title}")
+    for compiled_task in compiled.tasks:
+        typer.echo(f"{compiled_task.task_id}  {compiled_task.task.title}")
 
 
 def _slice(workflow, *, only: str | None, start: str | None, until: str | None):
@@ -137,7 +137,6 @@ def _slice(workflow, *, only: str | None, start: str | None, until: str | None):
             cleanup_id = task.task_id
             candidates = {
                 cleanup_id.replace(".delete.", ".register."),
-                cleanup_id.replace(".delete.", ".apply."),
                 cleanup_id.replace(".uninstall.", ".deploy."),
             }
             return not candidates.isdisjoint(selected_set)
@@ -286,8 +285,12 @@ def install_product_commands(app: typer.Typer) -> None:
         started_at = datetime.now(UTC)
         provenance = _git_provenance(paths.nanofaas_root)
         try:
-            # Both engines are live during the migration and each reads its own
-            # contextvar, so the one sink is bound to both.
+            # Both binds are required, and not just during the migration: the
+            # legacy contextvar is read directly by SubprocessShell._emit_output
+            # (workflow_tasks/shell.py), which every command execution goes
+            # through regardless of which engine's workflow issued it. Drop the
+            # legacy bind only if that execution layer itself stops routing
+            # through workflow_log.
             with bind_workflow_sink(sink), bind_sonata_sink(sink):
                 provisioning = (
                     provision_environment(
