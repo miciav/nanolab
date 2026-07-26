@@ -1,0 +1,21 @@
+[importlinter]
+root_packages =
+    sonata_tasks
+    workflow_tasks
+include_external_packages = True
+
+[importlinter:contract:no_product_deps]
+name = sonata_tasks must not import nanolab or tui_toolkit
+type = forbidden
+source_modules = sonata_tasks
+forbidden_modules =
+    nanolab
+    tui_toolkit
+
+[importlinter:contract:no_legacy_workflows]
+name = sonata_tasks must not import the legacy workflow engine or workflow builders
+type = forbidden
+source_modules = sonata_tasks
+forbidden_modules =
+    workflow_tasks.core
+    workflow_tasks.workflows

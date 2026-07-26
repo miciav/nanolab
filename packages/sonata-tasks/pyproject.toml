@@ -1,23 +1,12 @@
 [project]
-name = "nanolab"
+name = "sonata-tasks"
 version = "0.1.0"
-description = "Control-plane orchestration product for build, test, and reporting"
+description = "nanoFaaS workflow tasks built on the Sonata engine."
 requires-python = ">=3.12"
 dependencies = [
-    "typer>=0.12.5",
-    "questionary>=2.1.1",
-    "pydantic>=2.9.2",
-    "pyyaml>=6.0.2",
-    "rich>=13.8",
-    "sonata-tasks",
-    "tui-toolkit",
+    "sonata-engine @ git+https://github.com/miciav/sonata.git@0bafb9ab3778b54ca3f08a75c1f3ccd0ed3e017b",
     "workflow-tasks",
 ]
-
-[project.scripts]
-nanolab = "nanolab.app.main:main"
-nanolab-package-report = "nanolab.devtools.package_report:main"
-nanolab-quality = "nanolab.devtools.quality:main"
 
 [build-system]
 requires = ["setuptools>=61.0"]
@@ -29,40 +18,39 @@ package-dir = {"" = "src"}
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+sonata_tasks = ["py.typed"]
+
 [dependency-groups]
 dev = [
     "basedpyright>=1.39.3",
     "grimp>=3.14",
     "import-linter>=2.11",
-    "pydeps>=3.0.6",
     "pytest>=9.0.3",
+    "pytest-cov>=6.0",
     "ruff>=0.15.12",
 ]
 
 [tool.uv.sources]
-sonata-tasks = { workspace = true }
-tui-toolkit = { workspace = true }
+sonata-engine = { path = "../../../sonata", editable = true }
 workflow-tasks = { workspace = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--import-mode=importlib"
+addopts = "-q --cov=sonata_tasks --cov-report=term-missing --cov-fail-under=90"
 
 [tool.ruff]
-target-version = "py311"
+target-version = "py312"
 line-length = 100
 
 [tool.ruff.lint]
 select = ["F", "SLF"]
 
 [tool.ruff.lint.per-file-ignores]
-"src/nanolab/tui/app.py" = ["SLF001"]
 "tests/**/*.py" = ["F841", "SLF001"]
 
 [tool.basedpyright]
-include = [
-    "src/nanolab",
-]
+include = ["src/sonata_tasks"]
 typeCheckingMode = "basic"
 reportMissingTypeStubs = false
 reportPrivateUsage = false

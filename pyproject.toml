@@ -1,7 +1,7 @@
 [project]
 name = "nanolab-workspace"
 version = "0.0.0"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = []
 
 [tool.uv]
@@ -10,6 +10,7 @@ package = false
 [tool.uv.workspace]
 members = [
     "packages/nanolab",
+    "packages/sonata-tasks",
     "packages/workflow-tasks",
     "packages/tui-toolkit",
 ]
