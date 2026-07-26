@@ -2,10 +2,12 @@
 
 from sonata_tasks.cli import CliFunction, CliWorkflowRequest, build_cli_workflow
 from sonata_tasks.command import CommandTask
+from sonata_tasks.process import managed_process_resource
 
 __all__ = [
     "CliFunction",
     "CliWorkflowRequest",
     "CommandTask",
     "build_cli_workflow",
+    "managed_process_resource",
 ]
