@@ -87,10 +87,19 @@ jobs:
 
       - name: Generate representative plans
         run: |
+          set -euo pipefail
           uv run --package nanolab nanolab plan packages/nanolab/scenarios-v2/validate-container.yaml --environment packages/nanolab/environments/local.yaml
           uv run --package nanolab nanolab plan packages/nanolab/scenarios-v2/validate-k8s.yaml --environment packages/nanolab/environments/multipass.yaml
           uv run --package nanolab nanolab plan packages/nanolab/scenarios-v2/cli.yaml --control-plane-url http://control-plane.example:30080
           uv run --package nanolab nanolab plan packages/nanolab/scenarios-v2/cli-container.yaml | grep -q '009.release-local-control-plane'
+          provisioned_plan="$(mktemp)"
+          trap 'rm -f "$provisioned_plan"' EXIT
+          uv run --package nanolab nanolab plan packages/nanolab/scenarios-v2/cli.yaml \
+            --environment packages/nanolab/environments/multipass.yaml \
+            --provision >"$provisioned_plan"
+          grep -Fq '002.acquire-stack-vm' "$provisioned_plan"
+          grep -Fq '008.acquire-control-plane-helm-release' "$provisioned_plan"
+          grep -Fq '014.release-stack-vm' "$provisioned_plan"
 
       - name: Run cli-container smoke test
         timeout-minutes: 15
