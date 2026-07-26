@@ -128,8 +128,9 @@ va aggiunta quando si affronta quell'incremento, non ora.
 ## Fuori scope
 
 - **Legacy.** Si tocca solo il percorso sonata. I workflow `validate`, `loadtest`,
-  `offload`, `offload-loadtest` restano invariati, `preflight_control_plane` incluso per
-  quanto li riguarda.
+  `offload`, `offload-loadtest` restano invariati nel comportamento.
+  `preflight_control_plane` sparisce del tutto: riguardava solo `cli`, e con quella
+  guardia rimossa non le resta nessun chiamante, legacy incluso.
 - **Provisioning di VM e piattaforma per `backend: k8s`.** Vale la pena farlo — oggi
   bisogna alzare lo stack a mano con `validate --provision` e passare l'URL — ma è un
   incremento a sé. Nota: la chart helm **supporta già** NodePort su entrambe le porte
