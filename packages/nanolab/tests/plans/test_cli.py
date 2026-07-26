@@ -14,10 +14,12 @@ from workflow_tasks.vm.models import VmRequest
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.functions.catalog import list_functions
-from nanolab.images.plan import build_image_plan
 from nanolab.plans import cli
 from nanolab.plans.cli import PROVISIONED_ENDPOINT, build_cli_plan
-from nanolab.release.publish import GHCR_REPOSITORY
+from nanolab.release.publish import (
+    GHCR_REPOSITORY,
+    build_publish_plan,
+)
 from nanolab.release.versioning import normalize_version, read_project_version
 from nanolab.workspace.paths import default_tool_paths
 
@@ -324,12 +326,17 @@ def test_provisioned_k8s_uses_the_published_release_images() -> None:
     assert "localhost:5000/nanofaas" not in " ".join((*helm.argv, *apply.argv))
 
 
-def test_published_image_maps_every_catalog_function_to_a_release_target() -> None:
+def test_published_image_maps_every_catalog_function_to_a_published_reference() -> None:
     product_root = default_tool_paths().nanofaas_root
     _, version_tag = normalize_version(read_project_version(product_root))
-    release_targets = build_image_plan(
-        product_root, version_tag, registry=GHCR_REPOSITORY
-    ).target_names
+    publish_plan = build_publish_plan(
+        product_root,
+        version_tag,
+        local_registry="localhost:5000/nanofaas",
+    )
+    published_references = {
+        item.reference for item in (*publish_plan.manifests, *publish_plan.aliases)
+    }
     helm_values = yaml.safe_load(
         (product_root / "deploy/helm/nanofaas/values.yaml").read_text(encoding="utf-8")
     )
@@ -342,9 +349,9 @@ def test_published_image_maps_every_catalog_function_to_a_release_target() -> No
     for function in publishable:
         assert function.default_image is not None
         target = function.default_image.rsplit("/", 1)[-1].split(":", 1)[0]
-        assert target in release_targets
         mapped[function.key] = cli._published_image(function.default_image, version_tag)
         assert mapped[function.key] == f"{GHCR_REPOSITORY}/{target}:{version_tag}"
+        assert mapped[function.key] in published_references
 
     assert "word-stats-python" in mapped  # non-Java
     assert "roman-numeral-go" in mapped  # absent from Helm defaults
