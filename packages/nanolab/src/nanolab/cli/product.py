@@ -6,9 +6,13 @@ from contextlib import nullcontext
 from datetime import UTC, datetime
 from pathlib import Path
 import subprocess
+from typing import cast
 
 import typer
 import yaml
+from sonata_engine import CompiledWorkflow, Selection, SelectionError
+from sonata_engine import Workflow as SonataWorkflow
+from sonata_engine.workflow.context import bind_workflow_sink as bind_sonata_sink
 from workflow_tasks.loadtest.adapters import HttpPrometheusClient
 from workflow_tasks.workflow.context import bind_workflow_sink
 
@@ -24,6 +28,11 @@ from nanolab.plans.cli import build_cli_plan
 from nanolab.plans.loadtest import build_loadtest_plan
 from nanolab.plans.validate import build_validate_plan
 from nanolab.workspace.paths import default_tool_paths, discover_tool_root
+
+
+def uses_sonata(scenario: ScenarioConfig) -> bool:
+    """Whether this scenario is already executed by Sonata."""
+    return scenario.workflow == "cli"
 
 
 def _read(path: Path) -> dict[str, object]:
@@ -99,6 +108,11 @@ def _workflow(
 def _render(workflow) -> None:
     for index, task in enumerate(workflow.tasks, start=1):
         typer.echo(f"{index:02d}  {task.task_id}  {task.title}")
+
+
+def _render_compiled(compiled: CompiledWorkflow) -> None:
+    for index, compiled_task in enumerate(compiled.tasks, start=1):
+        typer.echo(f"{index:02d}  {compiled_task.task_id}  {compiled_task.task.title}")
 
 
 def _slice(workflow, *, only: str | None, start: str | None, until: str | None):
@@ -235,9 +249,24 @@ def install_product_commands(app: typer.Typer) -> None:
         environment: Path | None = typer.Option(None, "--environment", exists=True),
         provision: bool = typer.Option(False, "--provision"),
         keep: bool = typer.Option(False, "--keep"),
-        only: str | None = typer.Option(None, "--only"),
-        start: str | None = typer.Option(None, "--from"),
-        until: str | None = typer.Option(None, "--until"),
+        only: str | None = typer.Option(
+            None,
+            "--only",
+            help=(
+                "Run a single task. Migrated workflows address tasks by title slug "
+                "(e.g. list-functions) and do not run their prerequisites for you."
+            ),
+        ),
+        start: str | None = typer.Option(
+            None,
+            "--from",
+            help="Start from this task, inclusive. Same addressing as --only.",
+        ),
+        until: str | None = typer.Option(
+            None,
+            "--until",
+            help="Stop after this task, inclusive. Same addressing as --only.",
+        ),
         control_plane_url: str | None = typer.Option(None, "--control-plane-url"),
         prometheus_url: str | None = typer.Option(None, "--prometheus-url"),
         run_dir: Path | None = typer.Option(None, "--run-dir"),
@@ -257,7 +286,9 @@ def install_product_commands(app: typer.Typer) -> None:
         started_at = datetime.now(UTC)
         provenance = _git_provenance(paths.nanofaas_root)
         try:
-            with bind_workflow_sink(sink):
+            # Both engines are live during the migration and each reads its own
+            # contextvar, so the one sink is bound to both.
+            with bind_workflow_sink(sink), bind_sonata_sink(sink):
                 provisioning = (
                     provision_environment(
                         scenario_config,
@@ -287,20 +318,26 @@ def install_product_commands(app: typer.Typer) -> None:
                     except PreflightError as exc:
                         typer.echo(f"Error: {exc}", err=True)
                         raise typer.Exit(1) from None
-                    workflow = _slice(
-                        _workflow(
-                            scenario_config,
-                            environment_config,
-                            control_plane_url=effective_control_plane_url,
-                            prometheus_url=prometheus_url or "http://127.0.0.1:9090",
-                            run_dir=effective_run_dir,
-                        ),
-                        only=only,
-                        start=start,
-                        until=until,
+                    workflow = _workflow(
+                        scenario_config,
+                        environment_config,
+                        control_plane_url=effective_control_plane_url,
+                        prometheus_url=prometheus_url or "http://127.0.0.1:9090",
+                        run_dir=effective_run_dir,
                     )
-                    workflow.keep_infrastructure = keep
-                    workflow.run()
+                    if uses_sonata(scenario_config):
+                        sonata_workflow = cast(SonataWorkflow, workflow)
+                        sonata_workflow.keep_infrastructure = keep
+                        try:
+                            sonata_workflow.run(
+                                select=Selection(only=only, start=start, until=until)
+                            )
+                        except SelectionError as error:
+                            raise typer.BadParameter(str(error)) from None
+                    else:
+                        workflow = _slice(workflow, only=only, start=start, until=until)
+                        workflow.keep_infrastructure = keep
+                        workflow.run()
         except BaseException as exc:
             if effective_run_dir is not None:
                 try:
@@ -338,9 +375,24 @@ def install_product_commands(app: typer.Typer) -> None:
     def plan_command(
         scenario: Path = typer.Argument(..., exists=True),
         environment: Path | None = typer.Option(None, "--environment", exists=True),
-        only: str | None = typer.Option(None, "--only"),
-        start: str | None = typer.Option(None, "--from"),
-        until: str | None = typer.Option(None, "--until"),
+        only: str | None = typer.Option(
+            None,
+            "--only",
+            help=(
+                "Run a single task. Migrated workflows address tasks by title slug "
+                "(e.g. list-functions) and do not run their prerequisites for you."
+            ),
+        ),
+        start: str | None = typer.Option(
+            None,
+            "--from",
+            help="Start from this task, inclusive. Same addressing as --only.",
+        ),
+        until: str | None = typer.Option(
+            None,
+            "--until",
+            help="Stop after this task, inclusive. Same addressing as --only.",
+        ),
         control_plane_url: str | None = typer.Option(None, "--control-plane-url"),
         prometheus_url: str | None = typer.Option(None, "--prometheus-url"),
         run_dir: Path | None = typer.Option(None, "--run-dir"),
@@ -354,21 +406,25 @@ def install_product_commands(app: typer.Typer) -> None:
                 prometheus_url=prometheus_url,
                 dry_run=True,
             )
-        _render(
-            _slice(
-                _workflow(
-                    scenario_config,
-                    environment_config,
-                    control_plane_url=control_plane_url or "http://127.0.0.1:8080",
-                    prometheus_url=prometheus_url or "http://127.0.0.1:9090",
-                    run_dir=run_dir,
-                    dry_run=True,
-                ),
-                only=only,
-                start=start,
-                until=until,
-            )
+        workflow = _workflow(
+            scenario_config,
+            environment_config,
+            control_plane_url=control_plane_url or "http://127.0.0.1:8080",
+            prometheus_url=prometheus_url or "http://127.0.0.1:9090",
+            run_dir=run_dir,
+            dry_run=True,
         )
+        if uses_sonata(scenario_config):
+            sonata_workflow = cast(SonataWorkflow, workflow)
+            try:
+                compiled = sonata_workflow.compile(
+                    select=Selection(only=only, start=start, until=until)
+                )
+            except SelectionError as error:
+                raise typer.BadParameter(str(error)) from None
+            _render_compiled(compiled)
+        else:
+            _render(_slice(workflow, only=only, start=start, until=until))
 
     @app.command("list")
     def list_command() -> None:

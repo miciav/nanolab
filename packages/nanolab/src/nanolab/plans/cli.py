@@ -1,18 +1,12 @@
 import json
 from pathlib import Path
 
-from workflow_tasks.core.workflow import Workflow
+from sonata_engine import Workflow
+from sonata_tasks.cli import CliFunction, CliWorkflowRequest, build_cli_workflow
 from workflow_tasks.execution.bindings import RoleBindings
 from workflow_tasks.execution.roles import ExecutionRole
-from workflow_tasks.workflows.cli import (
-    CliFunction,
-    CliWorkflowRequest,
-    cli_cleanup_specs,
-    cli_task_specs,
-)
 
 from nanolab.config.scenario import ScenarioConfig
-from nanolab.plans._assembly import workflow_from_specs
 from nanolab.plans.validate import _resolve_function
 
 
@@ -43,9 +37,4 @@ def build_cli_plan(
         endpoint=endpoint,
         namespace=namespace,
     )
-    root = repo_root or Path.cwd()
-    workflow = workflow_from_specs(cli_task_specs(request), bindings, cwd=root)
-    workflow.cleanup_tasks = workflow_from_specs(
-        cli_cleanup_specs(request), bindings, cwd=root
-    ).tasks
-    return workflow
+    return build_cli_workflow(request, bindings, cwd=repo_root or Path.cwd())

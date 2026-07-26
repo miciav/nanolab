@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from sonata_engine import Selection
 
 # These tests pass repo-relative paths (scenarios-v2/..., environments/...) to the
 # CLI, so they must run from the project root regardless of pytest's cwd.
@@ -144,7 +145,12 @@ def test_run_uses_custom_control_plane_url_for_preflight_and_cli_plan(
     monkeypatch,
 ) -> None:
     preflight = MagicMock()
-    build_cli_plan = MagicMock(return_value=Workflow(tasks=[]))
+    # The cli scenario is now built and run by Sonata (a real sonata_engine.Workflow),
+    # not the legacy workflow_tasks.core.workflow.Workflow this test used to fake.
+    # This test only cares about the args build_cli_plan/preflight were called with,
+    # so a mock of the Sonata API (keep_infrastructure assignment + run(select=...))
+    # stands in without adding any compatibility shim.
+    build_cli_plan = MagicMock(return_value=MagicMock())
     monkeypatch.setattr(
         product_module, "preflight_control_plane", preflight, raising=False
     )
@@ -367,3 +373,53 @@ def test_plan_builds_loadtest_with_operational_defaults(tmp_path: Path) -> None:
     assert result.exit_code == 0
     assert "loadgen.run_k6" in result.stdout
     assert "metrics.prometheus_snapshot" in result.stdout
+
+
+def test_plan_renders_the_compiled_cli_workflow() -> None:
+    result = CliRunner().invoke(app, ["plan", "scenarios-v2/cli.yaml"])
+
+    assert result.exit_code == 0, result.output
+    assert "001.build-nanofaas-cli" in result.stdout
+    assert "005.release-word-stats-java" in result.stdout
+
+
+def test_plan_slices_the_cli_workflow_by_sonata_slug() -> None:
+    result = CliRunner().invoke(
+        app,
+        ["plan", "scenarios-v2/cli.yaml", "--only", "list-functions"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "001.acquire-word-stats-java" in result.stdout
+    assert "002.list-functions" in result.stdout
+    assert "003.release-word-stats-java" in result.stdout
+    assert "build-nanofaas-cli" not in result.stdout
+
+
+def test_run_passes_the_requested_selection_to_sonata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workflow = MagicMock()
+    monkeypatch.setattr(product_module, "preflight_control_plane", MagicMock())
+    monkeypatch.setattr(product_module, "_workflow", MagicMock(return_value=workflow))
+
+    result = CliRunner().invoke(
+        app,
+        ["run", "scenarios-v2/cli.yaml", "--only", "list-functions"],
+    )
+
+    assert result.exit_code == 0, result.output
+    workflow.run.assert_called_once_with(
+        select=Selection(only="list-functions", start=None, until=None)
+    )
+
+
+def test_plan_reports_an_invalid_sonata_slug_without_a_traceback() -> None:
+    result = CliRunner().invoke(
+        app,
+        ["plan", "scenarios-v2/cli.yaml", "--only", "cli.function.list"],
+    )
+
+    assert result.exit_code != 0
+    assert "no task matches slug 'cli.function.list'" in result.output
+    assert "Traceback" not in result.output
