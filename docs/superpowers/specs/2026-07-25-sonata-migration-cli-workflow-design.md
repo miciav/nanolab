@@ -140,10 +140,11 @@ orchestrazione — topologia, risorse, selezione, journal — che sono di sonata
 ### C6 — Sonata si modifica, non si aggira
 
 Ogni volta che un incremento richiede una capacità di orchestrazione mancante, la si
-aggiunge a sonata con i suoi test, invece di forzarla in nanolab. Durante lo sviluppo
-coordinato `sonata-tasks` punta a sonata via source locale uv (`../sonata`); prima del
-merge la source locale viene sostituita con l'URL Git effettivo e un `rev` completo
-immutabile, e il lockfile deve contenere lo stesso commit.
+aggiunge a sonata con i suoi test, invece di forzarla in nanolab. La branch Sonata viene
+pubblicata prima di creare `sonata-tasks`: il metadata del package contiene da subito
+l'URL Git effettivo e un `rev` completo immutabile. Durante lo sviluppo coordinato
+`[tool.uv.sources]` sovrascrive quella dipendenza con il checkout locale; prima del
+merge si rimuove soltanto l'override e il lockfile deve contenere lo stesso commit.
 
 Il boundary resta quello di sonata: nessun import di `nanofaas`, `nanolab`,
 `workflow_tasks`, provider VM, Ansible o load-test — c'è già un test che lo verifica
@@ -171,8 +172,8 @@ sliciati venga comunque acquisita e rilasciata attorno a quelli superstiti.
 Membro del workspace uv. Distribuzione `sonata-tasks`, import `sonata_tasks`.
 
 Dipendenze:
-- `sonata-engine` — durante lo sviluppo via source locale uv su `../sonata` (C6);
-  pinnata a un commit immutabile prima del merge;
+- `sonata-engine` — URL Git con commit immutabile nel metadata, sovrascritto durante lo
+  sviluppo dalla source locale uv su `../../../sonata` rispetto al package (C6);
 - `workflow-tasks` (workspace) — solo per il layer di esecuzione, per C5.
 
 ```
@@ -205,7 +206,7 @@ riduce il quoting bash a dove serve davvero per l'esecuzione remota:
 | Oggi | Con sonata |
 |---|---|
 | `cli_cleanup_specs()` in una lista `cleanup_tasks` separata | `Resource(acquire=apply_fn, release=delete_fn)`, splice automatico (C2) |
-| invoke verificato con `bash -lc "... \| grep -q '\"status\":\"success\"'"` | `InvokeFunction.run()` parsa il JSON in Python, ritorna `TaskOutcome[str]` |
+| invoke verificato con `bash -lc "... \| grep -q '\"status\":\"success\"'"` | l'hook `verify` di `CommandTask` parsa il JSON in Python; il task conserva `TaskOutcome[TaskResult]` perché nessun consumer usa un risultato trasformato |
 | apply può produrre un effetto prima di fallire | l'acquire tenta un delete best-effort prima di rilanciare (C2) |
 | `task_id` scritti a mano (`cli.function.apply.X`) | ID generati dal compiler |
 
@@ -249,6 +250,8 @@ ottenere i verbi di prodotto `apply`/`delete`.
   migrazione: è più semplice di aprire context diversi per ramo e permette al layer
   shell legacy riusato dai task sonata di continuare a emettere log. Alla fine resta
   solo il binding di sonata.
+- `SelectionError` viene convertita al boundary Typer in un errore di parametro
+  leggibile, senza traceback.
 - Nessuna modifica a `ScenarioConfig`, nessun nuovo scenario: si continua a leggere
   `scenarios-v2/cli.yaml`.
 

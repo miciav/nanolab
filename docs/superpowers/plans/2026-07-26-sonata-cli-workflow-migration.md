@@ -12,16 +12,20 @@
 
 ## Global Constraints
 
-- **Due repository.** Sonata: `~/Downloads/sonata` (branch `main`, parte da `f13c830`). nanolab: `~/Downloads/nanolab` (branch `main`). I task 1–3 sono in sonata, i task 4–9 in nanolab.
+- **Due repository, due branch dedicate.** Sonata: `~/Downloads/sonata`, branch `codex/sonata-selection` creata dal commit di partenza `f13c830`. nanolab: `~/Downloads/nanolab`, branch `codex/sonata-cli-migration` creata dall'attuale `main`. I task 1–3 sono in sonata, i task 4–10 in nanolab. Non committare né pushare direttamente `main`.
 - **C1 — l'identità del task è del compiler.** Nessun task dichiara un `task_id`. Non si introduce una seconda identità (niente `operation_id`, alias, o campo stabile "per lo slicing"). `CommandTaskSpec.task_id` si valorizza a `""`.
 - **C2 — il cleanup è una `Resource`.** Niente liste `cleanup_tasks`. Un acquire che può produrre un effetto prima di fallire compensa localmente best-effort prima di rilanciare; l'errore della compensazione si aggiunge come nota senza mascherare il primario.
 - **C3 — lo slicing è dell'engine.** Il filtro sta in sonata, non in nanolab. I plan builder restituiscono un `Workflow` costruito con `add()`.
 - **C4 — convivenza breve.** Nessuno scenario `cli-sonata.yaml`, nessun comando `nanolab sonata run`, nessun adapter che faccia sembrare un `Workflow` sonata un `Workflow` legacy.
 - **C5 — riuso del layer di esecuzione.** `CommandTaskSpec`, `HostCommandTaskExecutor`, `VmCommandTaskExecutor`, `RoleBindings` si riusano da `workflow-tasks`, non si reimplementano.
-- **C6 — sonata si modifica, non si aggira.** Durante lo sviluppo `sonata-tasks` punta a sonata via source locale uv; il Task 9 sostituisce il pin con `rev` completo immutabile e allinea il lockfile.
+- **C6 — sonata si modifica, non si aggira.** Il Task 3 pubblica la branch Sonata e
+  produce lo SHA immutabile. Dal Task 4 il metadata di `sonata-tasks` contiene già il
+  pin Git completo; durante lo sviluppo `[tool.uv.sources]` lo sovrascrive con il
+  checkout locale. Il Task 9 rimuove soltanto quell'override e riallinea il lockfile.
 - **Boundary di sonata:** nessun import di `nanofaas`, `nanolab`, `workflow_tasks`, provider VM, Ansible, load-test. Verificato da `tests/test_package_boundaries.py`.
 - **Python 3.12:** `sonata-engine` richiede `>=3.12`. Il Task 4 alza `requires-python` a `>=3.12` sul workspace root e su `packages/nanolab`.
 - **Messaggi di commit: NIENTE trailer `Co-Authored-By`** (requisito utente, sovrascrive il default dell'harness).
+- **Staging esplicito.** Prima di ogni commit esegui `git status --short` e aggiungi soltanto i file elencati dal task; non usare `git add -A` né aggiungere intere directory che possono contenere modifiche estranee.
 - **Comandi di test (verificati funzionanti prima di scrivere questo piano):**
 
   Sonata, da `~/Downloads/sonata`:
@@ -78,12 +82,39 @@
 | `packages/nanolab/src/nanolab/cli/product.py` | ramo migrato in `run`/`plan`, doppio bind del sink | modify |
 | `packages/nanolab/src/nanolab/cli/progress.py` | accetta il vocabolario eventi di sonata | modify |
 | `packages/nanolab/src/nanolab/tui/event_aggregator.py` | idem, lato TUI | modify |
+| `packages/nanolab/src/nanolab/tui/workflow.py` | sink tipizzato per gli eventi di entrambi gli engine | modify |
 | `packages/nanolab/src/nanolab/tui/workflow_controller.py` | doppio bind del sink | modify |
 | `packages/nanolab/src/nanolab/tui/app.py` | preview/plan dal `CompiledWorkflow` | modify |
 | `packages/nanolab/tests/plans/test_cli.py` | **rewrite** contro il nuovo builder |
+| `packages/nanolab/tests/cli/test_command_surface.py` | wiring CLI, slicing ed errori leggibili | modify |
+| `packages/nanolab/tests/cli/test_progress.py` | rendering eventi Sonata | modify |
+| `packages/nanolab/tests/test_tui_event_aggregator.py` | vocabolario eventi Sonata | modify |
+| `packages/nanolab/tests/test_tui_workflow.py` | compatibilità del sink TUI con Sonata | modify |
+| `packages/nanolab/tests/test_tui_app.py` | righe piano e passi pianificati dal workflow compilato | modify |
 | `packages/workflow-tasks/src/workflow_tasks/workflows/cli.py` | | **delete** (Task 9) |
 | `packages/workflow-tasks/tests/workflows/test_cli.py` | | **delete** (Task 9) |
 | `.github/workflows/ci.yml` | gate per `sonata-tasks` | modify |
+
+---
+
+## Preparazione una tantum
+
+Prima del Task 1 verifica lo stato dei due repository e crea le branch dedicate senza
+toccare le modifiche già presenti:
+
+```bash
+cd ~/Downloads/sonata
+git status --short --branch
+git switch -c codex/sonata-selection
+
+cd ~/Downloads/nanolab
+git status --short --branch
+git switch -c codex/sonata-cli-migration
+```
+
+Se una branch esiste già, usa `git switch <branch>` invece di ricrearla. Se lo stato
+mostra file non tracciati o modificati, lasciali intatti e assicurati che nessun comando
+di staging del piano li includa.
 
 ---
 
@@ -218,6 +249,7 @@ Expected: PASS.
 
 ```bash
 cd ~/Downloads/sonata
+git status --short
 git add src/sonata_engine/core/selection.py src/sonata_engine/errors.py tests/core/test_selection.py
 git commit -m "Add the Selection model for workflow slicing"
 ```
@@ -575,6 +607,7 @@ Expected: PASS.
 
 ```bash
 cd ~/Downloads/sonata
+git status --short
 git add src/sonata_engine/core/workflow.py tests/core/test_compile_selection.py
 git commit -m "Filter consumers by slug before compiling resource lifecycles"
 ```
@@ -756,7 +789,7 @@ Expected: PASS, 5 test.
 
 In `README.md`, subito prima della sezione `## Journal and resume`, inserisci:
 
-```markdown
+````markdown
 ## Selecting a slice
 
 `Selection` narrows a run to some of its consumer tasks, addressed by title slug.
@@ -772,7 +805,7 @@ Resources are not selectable: the compiler re-splices acquire and release around
 whichever consumers survive, so a slice keeps its cleanup. Ordinals renumber over
 the survivors, which makes a sliced run a different topology — `resume` across one
 fails closed.
-```
+````
 
 - [ ] **Step 7: Suite completa e controlli statici**
 
@@ -787,14 +820,30 @@ Expected: PASS.
 
 ```bash
 cd ~/Downloads/sonata
-git add src/sonata_engine tests/core/test_run_selection.py README.md
+git status --short
+git add src/sonata_engine/core/workflow.py \
+        src/sonata_engine/core/__init__.py \
+        src/sonata_engine/__init__.py \
+        tests/core/test_run_selection.py \
+        README.md
 git commit -m "Run a selected slice of a workflow"
 ```
 
-- [ ] **Step 9: Annotare il commit per il pin**
+- [ ] **Step 9: Pubblicare la branch Sonata e annotare il commit per il pin**
 
-Run: `cd ~/Downloads/sonata && git rev-parse HEAD`
-Annota lo SHA completo: serve al Task 9. Da qui in poi non fare altri commit in sonata senza aggiornare quel pin.
+Run:
+```bash
+cd ~/Downloads/sonata
+git status --short
+git push -u origin codex/sonata-selection
+git rev-parse HEAD
+```
+
+Expected: lo stato contiene soltanto eventuali file preesistenti già annotati nella
+preparazione; nessun file dell'incremento è rimasto fuori dal commit. La branch remota
+è raggiungibile e `git rev-parse` stampa lo SHA completo di 40 caratteri. Annotalo:
+viene usato dal Task 4 nel metadata pubblicabile di `sonata-tasks`. Da qui in poi non
+fare altri commit in Sonata senza aggiornare il pin e ripubblicare la branch.
 
 ---
 
@@ -827,7 +876,7 @@ version = "0.1.0"
 description = "nanoFaaS workflow tasks built on the Sonata engine."
 requires-python = ">=3.12"
 dependencies = [
-    "sonata-engine",
+    "sonata-engine @ git+https://github.com/miciav/sonata.git@<SHA-COMPLETO-DAL-TASK-3>",
     "workflow-tasks",
 ]
 
@@ -879,7 +928,10 @@ reportMissingTypeStubs = false
 reportPrivateUsage = false
 ```
 
-`path = "../../../sonata"` è relativo a `packages/sonata-tasks/`, quindi risolve a `~/Downloads/sonata`. È la source locale temporanea richiesta da C6; il Task 9 la sostituisce.
+`path = "../../../sonata"` è relativo a `packages/sonata-tasks/`, quindi risolve a
+`~/Downloads/sonata`. La dipendenza diretta Git resta nel metadata del wheel; questa
+source uv la sovrascrive soltanto durante lo sviluppo locale. Il Task 9 rimuove
+l'override, non riscrive la dipendenza pubblicabile.
 
 Crea `packages/sonata-tasks/.importlinter`:
 
@@ -908,12 +960,9 @@ forbidden_modules =
 
 Il secondo contratto è il guardrail di C5: `sonata_tasks` può usare il layer di esecuzione di `workflow_tasks` ma mai il suo engine né i suoi workflow.
 
-Crea `packages/sonata-tasks/src/sonata_tasks/py.typed` come file vuoto:
-
-```bash
-mkdir -p packages/sonata-tasks/src/sonata_tasks packages/sonata-tasks/tests
-touch packages/sonata-tasks/src/sonata_tasks/py.typed
-```
+Crea `packages/sonata-tasks/src/sonata_tasks/py.typed` come marker vuoto (una singola
+newline è sufficiente) insieme agli altri file tramite editor/apply-patch. La creazione
+dei file genera automaticamente le directory mancanti; non usare redirezioni shell.
 
 - [ ] **Step 2: Registrare il package nel workspace e alzare a Python 3.12**
 
@@ -1207,7 +1256,16 @@ Expected: PASS.
 
 ```bash
 cd ~/Downloads/nanolab
-git add pyproject.toml uv.lock packages/nanolab/pyproject.toml packages/sonata-tasks
+git status --short
+git add pyproject.toml \
+        uv.lock \
+        packages/nanolab/pyproject.toml \
+        packages/sonata-tasks/pyproject.toml \
+        packages/sonata-tasks/.importlinter \
+        packages/sonata-tasks/src/sonata_tasks/__init__.py \
+        packages/sonata-tasks/src/sonata_tasks/py.typed \
+        packages/sonata-tasks/src/sonata_tasks/command.py \
+        packages/sonata-tasks/tests/test_command.py
 git commit -m "Add the sonata-tasks package with a Sonata command task"
 ```
 
@@ -1241,6 +1299,7 @@ from dataclasses import dataclass, field, replace
 import pytest
 from sonata_engine import Selection
 from workflow_tasks.execution.bindings import RoleBindings
+from workflow_tasks.execution.roles import ExecutionRole
 from workflow_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 from sonata_tasks.cli import CliFunction, CliWorkflowRequest, build_cli_workflow
@@ -1365,6 +1424,30 @@ def test_a_failed_apply_compensates_best_effort_before_propagating() -> None:
         "Apply word-stats-java",
         "Delete word-stats-java",
     ]
+
+
+def test_a_failed_compensation_is_noted_without_masking_the_apply_error() -> None:
+    executor = ScriptedExecutor(
+        responses={
+            "mktemp": TaskResult(
+                task_id="", status="failed", return_code=1, stderr="apply conflict"
+            ),
+            "fn delete word-stats-java": TaskResult(
+                task_id="", status="failed", return_code=1, stderr="cleanup unavailable"
+            ),
+        }
+    )
+    workflow = build_cli_workflow(
+        CliWorkflowRequest(functions=(FUNCTION,)), _bindings(executor)
+    )
+
+    with pytest.raises(RuntimeError, match="apply conflict") as captured:
+        workflow.run()
+
+    notes = getattr(captured.value, "__notes__", [])
+    assert len(notes) == 1
+    assert "Best-effort delete after a failed apply failed" in notes[0]
+    assert "cleanup unavailable" in notes[0]
 
 
 def test_invoke_rejects_a_non_success_status() -> None:
@@ -1492,7 +1575,7 @@ def test_apply_builds_the_manifest_on_the_target_not_in_this_process() -> None:
     assert '"memoryMiB":512' in script
 
 
-def test_delete_tolerates_an_already_absent_function() -> None:
+def test_delete_keeps_real_cli_failures_visible() -> None:
     executor = ScriptedExecutor()
     workflow = build_cli_workflow(
         CliWorkflowRequest(functions=(FUNCTION,)), _bindings(executor)
@@ -1501,7 +1584,9 @@ def test_delete_tolerates_an_already_absent_function() -> None:
     workflow.run()
 
     delete_spec = next(spec for spec in executor.seen if spec.summary.startswith("Delete"))
-    assert delete_spec.expected_exit_codes == frozenset({0, 1})
+    # The nanoFaaS CLI already exits 0 when DELETE returns 404. Accepting 1
+    # would also hide network, server, and other real cleanup failures.
+    assert delete_spec.expected_exit_codes == frozenset({0})
 
 
 def test_the_workflow_can_run_entirely_on_the_stack_role() -> None:
@@ -1515,9 +1600,10 @@ def test_the_workflow_can_run_entirely_on_the_stack_role() -> None:
     assert all(spec.execution_role == "stack" for spec in executor.seen)
 
 
-def test_a_loadgen_role_is_rejected() -> None:
+@pytest.mark.parametrize("role", ["loadgen", "cloud", "arm-builder"])
+def test_every_non_host_or_stack_role_is_rejected(role: ExecutionRole) -> None:
     with pytest.raises(ValueError, match="host or stack"):
-        CliWorkflowRequest(functions=(FUNCTION,), cli_role="loadgen")
+        CliWorkflowRequest(functions=(FUNCTION,), cli_role=role)
 
 
 def test_at_least_one_function_is_required() -> None:
@@ -1580,7 +1666,7 @@ class CliWorkflowRequest:
     binary: str = "clients/cli/build/install/nanofaas-cli/bin/nanofaas-cli"
 
     def __post_init__(self) -> None:
-        if self.cli_role == "loadgen":
+        if self.cli_role not in ("host", "stack"):
             raise ValueError("CLI workflow can run only on host or stack")
         if not self.functions:
             raise ValueError("CLI workflow requires at least one function")
@@ -1682,7 +1768,6 @@ def _function_resource(
         executor=executor,
         role=request.cli_role,
         cwd=cwd,
-        expected_exit_codes=frozenset({0, 1}),
     )
 
     def acquire() -> None:
@@ -1786,7 +1871,8 @@ cd ~/Downloads/nanolab
 uv run --all-packages --all-groups \
     pytest -c packages/sonata-tasks/pyproject.toml packages/sonata-tasks/tests -q
 ```
-Expected: PASS, 23 test in totale (8 di `test_command.py`, 15 di `test_cli.py`), copertura sopra il 90%.
+Expected: PASS, 26 casi in totale (8 di `test_command.py`, 18 di `test_cli.py`),
+copertura sopra il 90%.
 
 - [ ] **Step 8: Controlli statici e contratti**
 
@@ -1803,7 +1889,10 @@ Expected: PASS.
 
 ```bash
 cd ~/Downloads/nanolab
-git add packages/sonata-tasks
+git status --short
+git add packages/sonata-tasks/src/sonata_tasks/cli.py \
+        packages/sonata-tasks/src/sonata_tasks/__init__.py \
+        packages/sonata-tasks/tests/test_cli.py
 git commit -m "Reimplement the CLI workflow on the Sonata engine"
 ```
 
@@ -1818,12 +1907,14 @@ git commit -m "Reimplement the CLI workflow on the Sonata engine"
 - Modify: `packages/nanolab/src/nanolab/cli/product.py`
 - Modify: `packages/nanolab/src/nanolab/cli/progress.py`
 - Rewrite: `packages/nanolab/tests/plans/test_cli.py`
+- Modify: `packages/nanolab/tests/cli/test_command_surface.py`
+- Modify: `packages/nanolab/tests/cli/test_progress.py`
 
 **Interfaces:**
 - Consumes: `build_cli_workflow`, `CliFunction`, `CliWorkflowRequest` (Task 5); `Selection` (Task 3).
 - Produces:
   - `nanolab.plans.cli.build_cli_plan(config: ScenarioConfig, bindings: RoleBindings, *, cli_role: ExecutionRole = "host", endpoint: str = "http://127.0.0.1:8080", namespace: str = "nanofaas-e2e", repo_root: Path | None = None) -> Workflow` (`Workflow` di sonata)
-  - `nanolab.cli.product.MIGRATED_WORKFLOWS: frozenset[str]` e `nanolab.cli.product.is_migrated(scenario: ScenarioConfig) -> bool`, consumati dal Task 7.
+  - `nanolab.cli.product.uses_sonata(scenario: ScenarioConfig) -> bool`, consumata dal Task 7. Non introdurre un registro per un solo workflow.
 
 - [ ] **Step 1: Scrivere i test che falliscono**
 
@@ -1959,15 +2050,115 @@ def test_cli_plan_rejects_a_non_cli_scenario() -> None:
         )
 ```
 
+In `packages/nanolab/tests/cli/test_progress.py`, aggiungi l'import:
+
+```python
+from sonata_engine.workflow.events import WorkflowEvent as SonataWorkflowEvent
+```
+
+e il test:
+
+```python
+def test_console_progress_reports_sonata_task_events() -> None:
+    lines: list[str] = []
+    times = iter((10.0, 12.5))
+    sink = ConsoleProgressSink(write=lines.append, clock=lambda: next(times))
+
+    sink.emit(
+        SonataWorkflowEvent(
+            kind="task.started",
+            flow_id="cli",
+            task_id="001.build-nanofaas-cli",
+            title="Build nanofaas-cli",
+        )
+    )
+    sink.emit(
+        SonataWorkflowEvent(
+            kind="task.passed",
+            flow_id="cli",
+            task_id="001.build-nanofaas-cli",
+            title="Build nanofaas-cli",
+        )
+    )
+
+    assert lines == [
+        "[001.build-nanofaas-cli] running  Build nanofaas-cli",
+        "[001.build-nanofaas-cli] passed   2.5s",
+    ]
+```
+
+In `packages/nanolab/tests/cli/test_command_surface.py`, importa:
+
+```python
+from sonata_engine import Selection
+```
+
+e aggiungi:
+
+```python
+def test_plan_renders_the_compiled_cli_workflow() -> None:
+    result = CliRunner().invoke(app, ["plan", "scenarios-v2/cli.yaml"])
+
+    assert result.exit_code == 0, result.output
+    assert "001.build-nanofaas-cli" in result.stdout
+    assert "005.release-word-stats-java" in result.stdout
+
+
+def test_plan_slices_the_cli_workflow_by_sonata_slug() -> None:
+    result = CliRunner().invoke(
+        app,
+        ["plan", "scenarios-v2/cli.yaml", "--only", "list-functions"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "001.acquire-word-stats-java" in result.stdout
+    assert "002.list-functions" in result.stdout
+    assert "003.release-word-stats-java" in result.stdout
+    assert "build-nanofaas-cli" not in result.stdout
+
+
+def test_run_passes_the_requested_selection_to_sonata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workflow = MagicMock()
+    monkeypatch.setattr(product_module, "preflight_control_plane", MagicMock())
+    monkeypatch.setattr(product_module, "_workflow", MagicMock(return_value=workflow))
+
+    result = CliRunner().invoke(
+        app,
+        ["run", "scenarios-v2/cli.yaml", "--only", "list-functions"],
+    )
+
+    assert result.exit_code == 0, result.output
+    workflow.run.assert_called_once_with(
+        select=Selection(only="list-functions", start=None, until=None)
+    )
+
+
+def test_plan_reports_an_invalid_sonata_slug_without_a_traceback() -> None:
+    result = CliRunner().invoke(
+        app,
+        ["plan", "scenarios-v2/cli.yaml", "--only", "cli.function.list"],
+    )
+
+    assert result.exit_code != 0
+    assert "no task matches slug 'cli.function.list'" in result.output
+    assert "Traceback" not in result.output
+```
+
 - [ ] **Step 2: Eseguire i test e verificare che falliscano**
 
 Run:
 ```bash
 cd ~/Downloads/nanolab
 NANOFAAS_ROOT=~/Downloads/mcFaas uv run --all-packages --all-groups \
-    pytest -c packages/nanolab/pyproject.toml packages/nanolab/tests/plans/test_cli.py -q
+    pytest -c packages/nanolab/pyproject.toml \
+    packages/nanolab/tests/plans/test_cli.py \
+    packages/nanolab/tests/cli/test_progress.py \
+    packages/nanolab/tests/cli/test_command_surface.py -q
 ```
-Expected: FAIL. `build_cli_plan` restituisce ancora il `Workflow` legacy, che non ha `compile()` né `run(select=...)`.
+Expected: FAIL. Il builder restituisce ancora il `Workflow` legacy, il renderer non
+conosce gli eventi Sonata e la command surface non passa una `Selection`.
 
 - [ ] **Step 3: Riscrivere il plan builder**
 
@@ -2083,20 +2274,16 @@ In `packages/nanolab/src/nanolab/cli/product.py`:
 Aggiungi agli import in cima:
 
 ```python
-from sonata_engine import CompiledWorkflow, Selection
+from sonata_engine import CompiledWorkflow, Selection, SelectionError
 from sonata_engine.workflow.context import bind_workflow_sink as bind_sonata_sink
 ```
 
 Subito dopo gli import, prima di `def _read`:
 
 ```python
-# Workflows already ported to Sonata. The legacy branch below (and `_slice`)
-# disappears when this set covers every workflow.
-MIGRATED_WORKFLOWS = frozenset({"cli"})
-
-
-def is_migrated(scenario: ScenarioConfig) -> bool:
-    return scenario.workflow in MIGRATED_WORKFLOWS
+def uses_sonata(scenario: ScenarioConfig) -> bool:
+    """Whether this scenario is already executed by Sonata."""
+    return scenario.workflow == "cli"
 ```
 
 Aggiungi accanto a `_render`:
@@ -2150,9 +2337,14 @@ con:
                         prometheus_url=prometheus_url or "http://127.0.0.1:9090",
                         run_dir=effective_run_dir,
                     )
-                    if is_migrated(scenario_config):
+                    if uses_sonata(scenario_config):
                         workflow.keep_infrastructure = keep
-                        workflow.run(select=Selection(only=only, start=start, until=until))
+                        try:
+                            workflow.run(
+                                select=Selection(only=only, start=start, until=until)
+                            )
+                        except SelectionError as error:
+                            raise typer.BadParameter(str(error)) from None
                     else:
                         workflow = _slice(workflow, only=only, start=start, until=until)
                         workflow.keep_infrastructure = keep
@@ -2190,10 +2382,14 @@ con:
             run_dir=run_dir,
             dry_run=True,
         )
-        if is_migrated(scenario_config):
-            _render_compiled(
-                workflow.compile(select=Selection(only=only, start=start, until=until))
-            )
+        if uses_sonata(scenario_config):
+            try:
+                compiled = workflow.compile(
+                    select=Selection(only=only, start=start, until=until)
+                )
+            except SelectionError as error:
+                raise typer.BadParameter(str(error)) from None
+            _render_compiled(compiled)
         else:
             _render(_slice(workflow, only=only, start=start, until=until))
 ```
@@ -2239,7 +2435,10 @@ cd ~/Downloads/nanolab
 NANOFAAS_ROOT=~/Downloads/mcFaas uv run --all-packages --all-groups \
     pytest -c packages/nanolab/pyproject.toml packages/nanolab/tests -q
 ```
-Expected: PASS. Se i test in `packages/nanolab/tests/cli/test_command_surface.py` che montano `build_cli_plan` con `MagicMock(return_value=Workflow(tasks=[]))` falliscono, aggiornali per restituire un `Workflow` di sonata: `Workflow(workflow_id="cli")`. Non aggiungere adapter per farli passare.
+Expected: PASS, inclusi i test del piano completo, della slice, del passaggio di
+`Selection`, del rendering degli eventi e dell'errore senza traceback. I test
+preesistenti che fingono il piano `cli` devono restituire un `Workflow` Sonata o un
+mock della sua API reale; non aggiungere adapter di compatibilità.
 
 - [ ] **Step 9: Verificare il piano a mano**
 
@@ -2283,7 +2482,13 @@ Expected: PASS.
 
 ```bash
 cd ~/Downloads/nanolab
-git add packages/nanolab/src packages/nanolab/tests/plans/test_cli.py
+git status --short
+git add packages/nanolab/src/nanolab/plans/cli.py \
+        packages/nanolab/src/nanolab/cli/product.py \
+        packages/nanolab/src/nanolab/cli/progress.py \
+        packages/nanolab/tests/plans/test_cli.py \
+        packages/nanolab/tests/cli/test_command_surface.py \
+        packages/nanolab/tests/cli/test_progress.py
 git commit -m "Run the cli scenario through the Sonata workflow"
 ```
 
@@ -2295,50 +2500,87 @@ git commit -m "Run the cli scenario through the Sonata workflow"
 
 **Files:**
 - Modify: `packages/nanolab/src/nanolab/tui/event_aggregator.py`
+- Modify: `packages/nanolab/src/nanolab/tui/workflow.py`
 - Modify: `packages/nanolab/src/nanolab/tui/workflow_controller.py`
 - Modify: `packages/nanolab/src/nanolab/tui/app.py`
-- Test: `packages/nanolab/tests/test_workflow_events.py`
+- Modify: `packages/nanolab/tests/test_tui_event_aggregator.py`
+- Modify: `packages/nanolab/tests/test_tui_workflow.py`
+- Modify: `packages/nanolab/tests/test_tui_app.py`
 
 **Interfaces:**
-- Consumes: `is_migrated` e `MIGRATED_WORKFLOWS` da `nanolab.cli.product` (Task 6).
+- Consumes: `uses_sonata` da `nanolab.cli.product` (Task 6).
 - Produces: nessuna nuova API pubblica. La TUI accetta il vocabolario eventi di sonata e deriva i passi pianificati da un `CompiledWorkflow`.
 
 - [ ] **Step 1: Scrivere il test che fallisce**
 
-Aggiungi in fondo a `packages/nanolab/tests/test_workflow_events.py`:
+Aggiungi in fondo a `packages/nanolab/tests/test_tui_event_aggregator.py`:
 
 ```python
-def test_the_aggregator_reads_the_sonata_task_vocabulary() -> None:
+def test_the_tui_sink_binds_to_sonata_and_reads_its_task_vocabulary() -> None:
+    from sonata_engine.workflow.context import active_sink
+    from sonata_engine.workflow.context import bind_workflow_sink as bind_sonata_sink
     from sonata_engine.workflow.events import WorkflowEvent as SonataEvent
 
     from nanolab.tui.event_aggregator import WorkflowEventAggregator
+    from nanolab.tui.workflow import TuiWorkflowSink
 
     aggregator = WorkflowEventAggregator(planned_steps=["Build nanofaas-cli"])
+    sink = TuiWorkflowSink(aggregator)
 
-    aggregator.handle_event(
-        SonataEvent(
-            kind="task.started",
-            flow_id="interactive.console",
-            task_id="001.build-nanofaas-cli",
-            title="Build nanofaas-cli",
+    with bind_sonata_sink(sink):
+        bound_sink = active_sink()
+        assert bound_sink is sink
+        bound_sink.emit(
+            SonataEvent(
+                kind="task.started",
+                flow_id="interactive.console",
+                task_id="001.build-nanofaas-cli",
+                title="Build nanofaas-cli",
+            )
         )
-    )
-    running = aggregator.snapshot().phases[0].status
+        running = aggregator.snapshot().phases[0].status
 
-    aggregator.handle_event(
-        SonataEvent(
-            kind="task.passed",
-            flow_id="interactive.console",
-            task_id="001.build-nanofaas-cli",
-            title="Build nanofaas-cli",
+        bound_sink.emit(
+            SonataEvent(
+                kind="task.passed",
+                flow_id="interactive.console",
+                task_id="001.build-nanofaas-cli",
+                title="Build nanofaas-cli",
+            )
         )
-    )
     passed = aggregator.snapshot().phases[0].status
 
     assert (running, passed) == ("running", "success")
 ```
 
-I valori attesi sono quelli che `_mark_phase_running` e `_mark_phase_success` assegnano oggi in `event_aggregator.py` (`"running"` e `"success"`): l'asserzione è che `task.started` porti la fase nello stesso stato di `task.running`, e `task.passed` nello stesso di `task.completed`.
+In `packages/nanolab/tests/test_tui_app.py`, aggiungi:
+
+```python
+def test_cli_plan_rows_come_from_the_compiled_sonata_workflow() -> None:
+    workflow = MagicMock()
+    workflow.compile.return_value.tasks = [
+        SimpleNamespace(
+            task_id="001.build-nanofaas-cli",
+            task=SimpleNamespace(title="Build nanofaas-cli"),
+        ),
+        SimpleNamespace(
+            task_id="002.list-functions",
+            task=SimpleNamespace(title="List functions"),
+        ),
+    ]
+    scenario = SimpleNamespace(workflow="cli")
+
+    rows = NanofaasTUI(controller=RecordingController())._plan_rows(scenario, workflow)
+
+    assert rows == [
+        ("001.build-nanofaas-cli", "Build nanofaas-cli"),
+        ("002.list-functions", "List functions"),
+    ]
+```
+
+I test verificano insieme il protocollo del sink, il vocabolario Sonata e la derivazione
+del piano compilato. `task.started` deve equivalere a `task.running`; `task.passed` a
+`task.completed`.
 
 - [ ] **Step 2: Eseguire il test e verificare che fallisca**
 
@@ -2347,13 +2589,26 @@ Run:
 cd ~/Downloads/nanolab
 NANOFAAS_ROOT=~/Downloads/mcFaas uv run --all-packages --all-groups \
     pytest -c packages/nanolab/pyproject.toml \
-    packages/nanolab/tests/test_workflow_events.py -k sonata -q
+    packages/nanolab/tests/test_tui_event_aggregator.py \
+    packages/nanolab/tests/test_tui_app.py -k "sonata or compiled_sonata" -q
 ```
-Expected: FAIL. La fase resta nel suo stato iniziale perché `task.started` e `task.passed` non corrispondono a nessun ramo di `handle_event`.
+Expected: FAIL. Il sink non soddisfa ancora il protocollo Sonata, i nuovi kind non
+sono gestiti e `_plan_rows` non esiste.
 
 - [ ] **Step 3: Accettare il vocabolario di sonata nell'aggregatore**
 
-In `packages/nanolab/src/nanolab/tui/event_aggregator.py`, sostituisci le due righe di confronto dentro `handle_event`. Da:
+In `packages/nanolab/src/nanolab/tui/event_aggregator.py`, importa anche l'evento
+Sonata e amplia l'annotazione:
+
+```python
+from sonata_engine.workflow.events import WorkflowEvent as SonataWorkflowEvent
+from workflow_tasks.workflow.events import WorkflowEvent
+
+# ...
+    def handle_event(self, event: WorkflowEvent | SonataWorkflowEvent) -> None:
+```
+
+Poi sostituisci le due righe di confronto dentro `handle_event`. Da:
 
 ```python
         if event.kind == "task.running":
@@ -2384,6 +2639,24 @@ Aggiungi il commento sopra `handle_event`:
     # aggregator reads both for as long as the migration lasts.
 ```
 
+In `packages/nanolab/src/nanolab/tui/workflow.py`, importa anche l'evento Sonata:
+
+```python
+from sonata_engine.workflow.events import WorkflowEvent as SonataWorkflowEvent
+from workflow_tasks.workflow.events import WorkflowEvent
+```
+
+e amplia il metodo del sink:
+
+```python
+    def emit(self, event: WorkflowEvent | SonataWorkflowEvent) -> None:
+        self._aggregator.handle_event(event)
+        self._refresh()
+```
+
+La union è intenzionalmente locale e temporanea: non introdurre un adapter o una
+gerarchia eventi comune soltanto per la migrazione.
+
 - [ ] **Step 4: Eseguire il test e verificare che passi**
 
 Run:
@@ -2391,7 +2664,8 @@ Run:
 cd ~/Downloads/nanolab
 NANOFAAS_ROOT=~/Downloads/mcFaas uv run --all-packages --all-groups \
     pytest -c packages/nanolab/pyproject.toml \
-    packages/nanolab/tests/test_workflow_events.py -q
+    packages/nanolab/tests/test_tui_event_aggregator.py \
+    packages/nanolab/tests/test_tui_workflow.py -q
 ```
 Expected: PASS.
 
@@ -2429,10 +2703,10 @@ con:
 In `packages/nanolab/src/nanolab/tui/app.py`, aggiungi agli import:
 
 ```python
-from nanolab.cli.product import is_migrated
+from nanolab.cli.product import uses_sonata
 ```
 
-(`app.py` importa già da `nanolab.cli.product`; aggiungi `is_migrated` alla lista se l'import esiste già.)
+(`app.py` importa già da `nanolab.cli.product`; aggiungi `uses_sonata` alla lista.)
 
 Aggiungi un helper accanto a `_render_plan`:
 
@@ -2443,7 +2717,7 @@ Aggiungi un helper accanto a `_render_plan`:
         A Sonata `Workflow` has no task list until it is compiled, and its
         compiled units carry the title on the task, not on themselves.
         """
-        if is_migrated(scenario):
+        if uses_sonata(scenario):
             return [
                 (compiled_task.task_id, compiled_task.task.title)
                 for compiled_task in workflow.compile().tasks
@@ -2507,7 +2781,10 @@ cd ~/Downloads/nanolab
 NANOFAAS_ROOT=~/Downloads/mcFaas uv run --all-packages --all-groups \
     pytest -c packages/nanolab/pyproject.toml packages/nanolab/tests -q
 ```
-Expected: PASS. Se `packages/nanolab/tests/test_tui_workflow.py` o `test_tui_workflow_controller.py` falliscono perché passavano un finto workflow con attributo `.tasks`, aggiornali a uno scenario non migrato o a un `Workflow` sonata reale — non aggiungere un attributo di compatibilità.
+Expected: PASS, inclusi il binding del sink Sonata e il piano TUI compilato. I test
+preesistenti devono usare uno scenario legacy quando forniscono un fake legacy, oppure
+un `Workflow` Sonata reale/mock della sua API quando usano lo scenario `cli`; non
+aggiungere attributi di compatibilità.
 
 - [ ] **Step 8: Controlli statici**
 
@@ -2524,7 +2801,14 @@ Expected: PASS.
 
 ```bash
 cd ~/Downloads/nanolab
-git add packages/nanolab/src/nanolab/tui packages/nanolab/tests/test_workflow_events.py
+git status --short
+git add packages/nanolab/src/nanolab/tui/event_aggregator.py \
+        packages/nanolab/src/nanolab/tui/workflow.py \
+        packages/nanolab/src/nanolab/tui/workflow_controller.py \
+        packages/nanolab/src/nanolab/tui/app.py \
+        packages/nanolab/tests/test_tui_event_aggregator.py \
+        packages/nanolab/tests/test_tui_workflow.py \
+        packages/nanolab/tests/test_tui_app.py
 git commit -m "Render Sonata workflows in the TUI"
 ```
 
@@ -2618,31 +2902,41 @@ uv lock --check
 ```
 Expected: PASS. Se fallisce, esegui `uv lock` e includi `uv.lock` nel commit.
 
-- [ ] **Step 5: Verificare la build delle distribuzioni**
+- [ ] **Step 5: Verificare build e installazione dei wheel come in CI**
 
 Run:
 ```bash
 cd ~/Downloads/nanolab
+test ! -e .wheel-smoke
 uv build --all-packages --out-dir dist --clear
-ls dist
+uv venv .wheel-smoke
+uv pip install dist/nanolab-0.1.0-py3-none-any.whl \
+    dist/sonata_tasks-0.1.0-py3-none-any.whl \
+    dist/workflow_tasks-0.1.0-py3-none-any.whl \
+    dist/tui_toolkit-0.1.0-py3-none-any.whl \
+    --python .wheel-smoke/bin/python
+.wheel-smoke/bin/python -c "import nanolab, sonata_tasks, workflow_tasks, tui_toolkit"
+.wheel-smoke/bin/nanolab --help
+rm -rf .wheel-smoke dist
 ```
-Expected: fra i wheel prodotti compare `sonata_tasks-0.1.0-py3-none-any.whl`.
-
-Nota: lo smoke del wheel in CI installa i wheel dalla cartella `dist`; `sonata-tasks` dipende da `sonata-engine`, che il Task 9 pinnerà a un commit Git. Finché il pin è una source locale, quello step fallisce in CI: è previsto, e il Task 9 lo risolve. Non introdurre un pin fittizio per farlo passare adesso.
+Expected: build, installazione, import e `nanolab --help` passano. Il wheel recupera
+`sonata-engine` dal pin Git inserito nel Task 4; l'override path di
+`[tool.uv.sources]` non entra nel metadata pubblicato.
 
 - [ ] **Step 6: Commit**
 
 ```bash
 cd ~/Downloads/nanolab
+git status --short
 git add .github/workflows/ci.yml packages/nanolab/.importlinter uv.lock
 git commit -m "Gate sonata-tasks in CI"
 ```
 
 ---
 
-### Task 9: Cancellare il workflow `cli` legacy e pinnare sonata
+### Task 9: Cancellare il workflow `cli` legacy e rimuovere l'override Sonata
 
-**Repository:** `~/Downloads/nanolab` (e uno push in `~/Downloads/sonata`)
+**Repository:** `~/Downloads/nanolab`
 
 **Files:**
 - Delete: `packages/workflow-tasks/src/workflow_tasks/workflows/cli.py`
@@ -2652,14 +2946,17 @@ git commit -m "Gate sonata-tasks in CI"
 
 **Interfaces:**
 - Consumes: tutto quanto sopra.
-- Produces: nessuna API. `workflow_tasks.workflows.cli` cessa di esistere; `sonata-engine` è pinnata a un commit immutabile.
+- Produces: nessuna API. `workflow_tasks.workflows.cli` cessa di esistere;
+  `sonata-engine` continua a provenire dal commit immutabile pubblicato nel Task 3,
+  senza override path locale.
 
 - [ ] **Step 1: Verificare che il workflow legacy sia davvero orfano**
 
 Run:
 ```bash
 cd ~/Downloads/nanolab
-grep -rn "workflows.cli\|workflows import cli\|cli_task_specs\|cli_cleanup_specs" packages --include="*.py" | grep -v __pycache__
+rg -n "workflows\\.cli|workflows import cli|cli_task_specs|cli_cleanup_specs" \
+    packages --glob '*.py' --glob '!**/__pycache__/**'
 ```
 Expected: gli unici riscontri sono in `packages/workflow-tasks/src/workflow_tasks/workflows/cli.py` e `packages/workflow-tasks/tests/workflows/test_cli.py`. Se compare qualcos'altro, quel consumer va migrato prima: non cancellare.
 
@@ -2680,46 +2977,45 @@ cd ~/Downloads/nanolab
 uv run --all-packages --all-groups \
     pytest -c packages/workflow-tasks/pyproject.toml packages/workflow-tasks/tests -q
 ```
-Expected: PASS, con la copertura ancora sopra la soglia del 90%. Se la copertura scende sotto soglia perché è sparito codice ben coperto, non abbassare la soglia: verifica quali moduli sono ora scoperti e segnalalo nel messaggio di commit.
+Expected: PASS, con la copertura ancora sopra la soglia del 90%. Se scende sotto
+soglia, il task non è completo: non abbassare la soglia, individua i moduli scoperti e
+aggiungi o riequilibra i test prima di proseguire.
 
-- [ ] **Step 4: Pushare sonata e ottenere il commit immutabile**
+- [ ] **Step 4: Rimuovere soltanto l'override path locale**
 
-Run:
-```bash
-cd ~/Downloads/sonata
-git push origin main
-git rev-parse HEAD
-```
-Annota lo SHA completo di 40 caratteri.
-
-- [ ] **Step 5: Sostituire la source locale con il pin Git**
-
-In `packages/sonata-tasks/pyproject.toml`, sostituisci la sezione `[tool.uv.sources]`:
+In `packages/sonata-tasks/pyproject.toml`, lascia invariata la dipendenza diretta Git
+in `[project.dependencies]` e sostituisci:
 
 ```toml
 [tool.uv.sources]
-sonata-engine = { git = "https://github.com/miciav/sonata.git", rev = "<SHA-COMPLETO-DALLO-STEP-4>" }
+sonata-engine = { path = "../../../sonata", editable = true }
 workflow-tasks = { workspace = true }
 ```
 
-E nella lista `dependencies` sostituisci `"sonata-engine",` con:
+con:
 
 ```toml
-    "sonata-engine @ git+https://github.com/miciav/sonata.git@<SHA-COMPLETO-DALLO-STEP-4>",
+[tool.uv.sources]
+workflow-tasks = { workspace = true }
 ```
 
-- [ ] **Step 6: Rigenerare e verificare il lockfile**
+- [ ] **Step 5: Rigenerare e verificare il lockfile**
 
 Run:
 ```bash
 cd ~/Downloads/nanolab
 uv lock
 uv sync --all-packages --all-groups
-grep -n "sonata" uv.lock | head -20
+rg -n "sonata" uv.lock
+if rg -Fq "../../../sonata" uv.lock; then
+    echo "local Sonata path is still present in uv.lock" >&2
+    exit 1
+fi
 ```
-Expected: `uv.lock` contiene lo stesso SHA dello step 4, e non contiene più un riferimento al path locale `../../../sonata`.
+Expected: `uv.lock` contiene lo SHA annotato nel Task 3 e non contiene più un
+riferimento al path locale `../../../sonata`.
 
-- [ ] **Step 7: Eseguire tutte e tre le suite**
+- [ ] **Step 6: Eseguire tutte e tre le suite**
 
 Run:
 ```bash
@@ -2733,7 +3029,7 @@ uv run --all-packages --all-groups \
 ```
 Expected: PASS tutte e tre.
 
-- [ ] **Step 8: Eseguire tutti i controlli statici e i contratti**
+- [ ] **Step 7: Eseguire tutti i controlli statici e i contratti**
 
 Run:
 ```bash
@@ -2751,11 +3047,12 @@ uv run --all-packages --all-groups lint-imports --config packages/tui-toolkit/.i
 ```
 Expected: PASS tutti.
 
-- [ ] **Step 9: Verificare lo smoke dei wheel come in CI**
+- [ ] **Step 8: Verificare lo smoke dei wheel come in CI**
 
 Run:
 ```bash
 cd ~/Downloads/nanolab
+test ! -e .wheel-smoke
 uv build --all-packages --out-dir dist --clear
 uv venv .wheel-smoke
 uv pip install dist/nanolab-0.1.0-py3-none-any.whl dist/sonata_tasks-0.1.0-py3-none-any.whl \
@@ -2767,13 +3064,16 @@ rm -rf .wheel-smoke dist
 ```
 Expected: install e import riescono; `sonata-engine` viene scaricata dal pin Git.
 
-- [ ] **Step 10: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
 cd ~/Downloads/nanolab
-git add -A packages .github uv.lock
-git status
-git commit -m "Delete the legacy cli workflow and pin sonata-engine"
+git status --short
+git add packages/workflow-tasks/src/workflow_tasks/workflows/cli.py \
+        packages/workflow-tasks/tests/workflows/test_cli.py \
+        packages/sonata-tasks/pyproject.toml \
+        uv.lock
+git commit -m "Delete the legacy cli workflow and use pinned sonata-engine"
 ```
 
 Controlla l'output di `git status` prima di committare: devono comparire solo le cancellazioni previste, `packages/sonata-tasks/pyproject.toml` e `uv.lock`.
@@ -2822,17 +3122,27 @@ NANOFAAS_ROOT=~/Downloads/mcFaas uv run --package nanolab \
 ```
 Expected: le cinque fasi passano in ordine e la console mostra una riga `running` e una `passed` per ognuna, con gli ID compilati.
 
-- [ ] **Step 4: Verificare che la function venga rimossa anche dopo un fallimento**
+- [ ] **Step 4: Verificare il lifecycle completo di una slice**
 
-Registra a mano una function con lo stesso nome per far fallire l'apply, poi rilancia e verifica che il control plane non resti sporco:
+Esegui soltanto il consumer `invoke`: Sonata deve inserire acquire e release anche se
+gli altri consumer non fanno parte della slice.
 
 ```bash
 cd ~/Downloads/nanolab
 NANOFAAS_ROOT=~/Downloads/mcFaas uv run --package nanolab \
     nanolab run packages/nanolab/scenarios-v2/cli.yaml --only invoke-word-stats-java
-curl -s http://127.0.0.1:8080/v1/functions | grep -c word-stats-java
+if curl -sS http://127.0.0.1:8080/v1/functions | rg -q "word-stats-java"; then
+    echo "word-stats-java was not released" >&2
+    exit 1
+fi
 ```
-Expected: il run passa e il conteggio finale è `0` — la risorsa ha rilasciato la function anche essendo stata acquisita solo per la slice.
+Expected: il run passa e il controllo non trova `word-stats-java`: la risorsa ha
+rilasciato la function anche essendo stata acquisita solo per la slice.
+
+Non tentare di provocare un acquire fallito registrando prima la stessa function:
+`fn apply` è create-or-replace e gestisce il conflitto. Il failed-acquire e il fallimento
+della sua compensazione sono coperti deterministicamente dagli executor fault-injected
+del Task 5.
 
 - [ ] **Step 5: Verificare la TUI**
 
@@ -2849,7 +3159,8 @@ Se gli step 1–5 hanno richiesto correzioni, ognuna deve avere il proprio test 
 
 ```bash
 cd ~/Downloads/nanolab
-git add -A packages
+git status --short
+git add <solo-i-file-della-correzione-e-del-test>
 git commit -m "Fix <cosa> found validating the migrated cli workflow"
 ```
 
@@ -2876,6 +3187,27 @@ uv run --all-packages --all-groups \
 uv run --all-packages --all-groups \
     pytest -c packages/sonata-tasks/pyproject.toml packages/sonata-tasks/tests -q
 uv run --all-packages --all-groups ruff check packages
+uv run --all-packages --all-groups basedpyright --project packages/nanolab
+uv run --all-packages --all-groups basedpyright --project packages/sonata-tasks
+uv run --all-packages --all-groups basedpyright --project packages/workflow-tasks
+uv run --all-packages --all-groups basedpyright --project packages/tui-toolkit
+uv run --all-packages --all-groups lint-imports --config packages/nanolab/.importlinter --no-cache
+uv run --all-packages --all-groups lint-imports --config packages/sonata-tasks/.importlinter --no-cache
+uv run --all-packages --all-groups lint-imports --config packages/workflow-tasks/.importlinter --no-cache
+uv run --all-packages --all-groups lint-imports --config packages/tui-toolkit/.importlinter --no-cache
+
+# Wheel smoke: deve usare il pin Git, non il checkout Sonata adiacente.
+test ! -e .wheel-smoke
+uv build --all-packages --out-dir dist --clear
+uv venv .wheel-smoke
+uv pip install dist/nanolab-0.1.0-py3-none-any.whl \
+    dist/sonata_tasks-0.1.0-py3-none-any.whl \
+    dist/workflow_tasks-0.1.0-py3-none-any.whl \
+    dist/tui_toolkit-0.1.0-py3-none-any.whl \
+    --python .wheel-smoke/bin/python
+.wheel-smoke/bin/python -c "import nanolab, sonata_tasks, workflow_tasks, tui_toolkit"
+.wheel-smoke/bin/nanolab --help
+rm -rf .wheel-smoke dist
 ```
 
 E la conferma qualitativa: `packages/workflow-tasks/src/workflow_tasks/workflows/` contiene un workflow in meno, `packages/sonata-tasks/` uno in più, e nessun adapter fra i due engine è stato aggiunto da nessuna parte.
