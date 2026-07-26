@@ -35,6 +35,8 @@ from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.plans import _local_control_plane
 from nanolab.plans.validate import _resolve_function
+from nanolab.release.publish import GHCR_REPOSITORY
+from nanolab.release.versioning import normalize_version, read_project_version
 
 LOCAL_ENDPOINT = _local_control_plane.ENDPOINT
 LOCAL_CONTROL_PLANE_BUILD_ARGV = (
@@ -169,19 +171,28 @@ def _set_args(values: dict[str, str]) -> tuple[str, ...]:
     return tuple(args)
 
 
+def _published_image(image: str, version_tag: str) -> str:
+    target = image.rsplit("/", 1)[-1].split(":", 1)[0]
+    return f"{GHCR_REPOSITORY}/{target}:{version_tag}"
+
+
 def _control_plane_helm_resource(
-    *, namespace: str, executor: RoleBoundCommandTaskExecutor, vm: Resource[VmInfo]
+    *,
+    namespace: str,
+    control_plane_image: str,
+    executor: RoleBoundCommandTaskExecutor,
+    vm: Resource[VmInfo],
 ) -> Resource[HelmReleaseSpec]:
     """The control plane Helm release, deployed inside the VM.
 
     This workflow verifies the CLI end-to-end, not the control plane build: it
-    reuses the same registry/image configuration already used to deploy the
-    control plane onto k3s elsewhere (`validate`/`loadtest`), but does not build
-    or push that image itself.
+    uses the official image release matching the product checkout. A freshly
+    provisioned VM's local registry is empty, and this workflow deliberately
+    has no image build/push phase.
     """
     values = control_plane_helm_values(
         namespace=namespace,
-        control_plane_image=control_image(_LOCAL_REGISTRY),
+        control_plane_image=control_plane_image,
         expose_node_port=True,
     )
     spec = HelmReleaseSpec(
@@ -253,16 +264,22 @@ def _build_provisioned_k8s_plan(
     bootstrap = _bootstrap_tasks(
         repo_root=repo_root, vm_request=vm_request, vm=vm, executor=executor
     )
-    helm = _control_plane_helm_resource(namespace=namespace, executor=executor, vm=vm)
+    _, version_tag = normalize_version(read_project_version(repo_root))
+    helm = _control_plane_helm_resource(
+        namespace=namespace,
+        control_plane_image=_published_image(control_image(_LOCAL_REGISTRY), version_tag),
+        executor=executor,
+        vm=vm,
+    )
 
     functions = tuple(
         CliFunction(
             name=resolved.name,
-            image=resolved.image,
+            image=_published_image(resolved.image, version_tag),
             payload=json.dumps(json.loads(resolved.payload)["input"], separators=(",", ":")),
             resources=resolved.resources,
-            # Function images are not (re)built by this workflow either — see
-            # `_control_plane_helm_resource`'s docstring for why.
+            # Function images use the same published release as the control
+            # plane; this workflow deliberately has no image build/push phase.
             build_argv=None,
         )
         for key in config.functions

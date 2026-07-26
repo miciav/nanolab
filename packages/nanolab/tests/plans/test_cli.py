@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 import pytest
+import yaml
 from sonata_engine import Selection
 from workflow_tasks.components import bootstrap
 from workflow_tasks.execution.bindings import RoleBindings
@@ -14,6 +15,7 @@ from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.plans import cli
 from nanolab.plans.cli import PROVISIONED_ENDPOINT, build_cli_plan
+from nanolab.workspace.paths import default_tool_paths
 
 SUCCESS = '{"status":"success","output":{"words":2}}'
 
@@ -65,6 +67,7 @@ def _provisioned_plan(
     return build_cli_plan(
         _scenario(backend="k8s", **overrides),
         bindings,
+        repo_root=default_tool_paths().nanofaas_root,
         provision=True,
         environment=_multipass_environment(),
         orchestrator_factory=lambda _root: fake,
@@ -294,6 +297,29 @@ def test_provisioned_k8s_plan_compiles_the_expected_14_task_topology() -> None:
     ]
 
 
+def test_provisioned_k8s_uses_the_published_release_images() -> None:
+    product_root = default_tool_paths().nanofaas_root
+    values = yaml.safe_load(
+        (product_root / "deploy/helm/nanofaas/values.yaml").read_text(encoding="utf-8")
+    )
+    control_plane = values["controlPlane"]["image"]
+    function_image = next(
+        function["image"]
+        for function in values["demos"]["functions"]
+        if function["name"] == "word-stats-java"
+    )
+    stack = RecordingExecutor()
+
+    _provisioned_plan(RoleBindings(host=RecordingExecutor(), stack=stack)).run()
+
+    helm = next(spec for spec in stack.seen if spec.summary.startswith("Install Helm"))
+    apply = next(spec for spec in stack.seen if spec.summary.startswith("Apply"))
+    assert f"controlPlane.image.repository={control_plane['repository']}" in helm.argv
+    assert f"controlPlane.image.tag={control_plane['tag']}" in helm.argv
+    assert function_image in apply.argv[-1]
+    assert "localhost:5000/nanofaas" not in " ".join((*helm.argv, *apply.argv))
+
+
 def test_provisioned_k8s_plan_compilation_does_not_discover_ssh_credentials(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -307,6 +333,7 @@ def test_provisioned_k8s_plan_compilation_does_not_discover_ssh_credentials(
     plan = build_cli_plan(
         _scenario(backend="k8s"),
         RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor()),
+        repo_root=default_tool_paths().nanofaas_root,
         provision=True,
         environment=_multipass_environment(),
     )
