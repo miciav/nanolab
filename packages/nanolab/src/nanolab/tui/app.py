@@ -13,7 +13,13 @@ from rich.text import Text
 
 from nanolab.cli import diagnostics
 from nanolab.cli.execution import resolve_loadtest_urls
-from nanolab.cli.product import _environment, _scenario, _workflow, uses_sonata
+from nanolab.cli.product import (
+    _environment,
+    _scenario,
+    _validate_cli_container_options,
+    _workflow,
+    uses_sonata,
+)
 from nanolab.cli.provisioning import provision_environment
 from nanolab.config import ScenarioConfig
 from nanolab.tui.workflow_controller import TuiWorkflowController
@@ -303,6 +309,7 @@ class NanofaasTUI:
                 try:
                     scenario = _scenario(scenario_path)
                     environment = _environment(environment_path)
+                    _validate_cli_container_options(scenario, environment)
                 except Exception as exc:
                     self._show_static(
                         title="Configuration error",
@@ -345,6 +352,19 @@ class NanofaasTUI:
                 state = "action" if environment.provider == "local" else "provision"
                 continue
             keep = cleanup_choice == "keep"
+            try:
+                _validate_cli_container_options(
+                    scenario,
+                    environment,
+                    keep=keep,
+                )
+            except Exception as exc:
+                self._show_static(
+                    title="Configuration error",
+                    breadcrumb=f"Main / {title}",
+                    body=str(exc),
+                )
+                return
             break
 
         assert environment_path is not None

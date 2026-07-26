@@ -133,6 +133,45 @@ def test_run_container_cli_builds_and_runs_without_an_endpoint(
     workflow.run.assert_called_once()
 
 
+def test_run_container_cli_requires_local_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    build = MagicMock()
+    monkeypatch.setattr(product_module, "_workflow", build)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "run",
+            "scenarios-v2/cli-container.yaml",
+            "--environment",
+            "environments/multipass.yaml",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "cli container scenario requires a local environment" in result.output
+    assert "Traceback" not in result.output
+    build.assert_not_called()
+
+
+def test_run_container_cli_rejects_keep(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    build = MagicMock()
+    monkeypatch.setattr(product_module, "_workflow", build)
+
+    result = CliRunner().invoke(
+        app,
+        ["run", "scenarios-v2/cli-container.yaml", "--keep"],
+    )
+
+    assert result.exit_code != 0
+    assert "--keep is not supported for a cli container scenario" in result.output
+    assert "Traceback" not in result.output
+    build.assert_not_called()
+
+
 def test_run_passes_custom_control_plane_url_to_cli_plan(
     monkeypatch,
 ) -> None:

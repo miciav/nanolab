@@ -670,6 +670,77 @@ def test_local_run_never_offers_or_enters_provisioning(
     assert provision_calls == []
 
 
+def test_container_cli_rejects_non_local_environment(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    environment_path = _install_paths(monkeypatch, tmp_path)
+    helper_calls: list[tuple[Any, ...]] = []
+    _install_workflow_helpers(
+        monkeypatch,
+        environment_path=environment_path,
+        workflow=FakeSonataWorkflow(),
+        scenario_kind="cli",
+        provider="multipass",
+        calls=helper_calls,
+    )
+    frame_calls: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        tui_app,
+        "render_screen_frame",
+        lambda **kwargs: frame_calls.append(kwargs) or object(),
+    )
+    controller = RecordingController()
+
+    NanofaasTUI(
+        choose=ScriptedChooser(iter([str(environment_path), "run"])),
+        controller=controller,
+        console=RecordingConsole(),
+        input_stream=RecordingInput(tty=False),
+    )._workflow_menu("cli-container.yaml")
+
+    assert [call[0] for call in helper_calls] == ["scenario", "environment"]
+    assert frame_calls[0]["title"] == "Configuration error"
+    assert str(frame_calls[0]["body"]) == (
+        "cli container scenario requires a local environment"
+    )
+    assert controller.calls == []
+
+
+def test_container_cli_rejects_keep(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    environment_path = _install_paths(monkeypatch, tmp_path)
+    helper_calls: list[tuple[Any, ...]] = []
+    _install_workflow_helpers(
+        monkeypatch,
+        environment_path=environment_path,
+        workflow=FakeSonataWorkflow(),
+        scenario_kind="cli",
+        calls=helper_calls,
+    )
+    frame_calls: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        tui_app,
+        "render_screen_frame",
+        lambda **kwargs: frame_calls.append(kwargs) or object(),
+    )
+    controller = RecordingController()
+
+    NanofaasTUI(
+        choose=ScriptedChooser(iter([str(environment_path), "run", "keep"])),
+        controller=controller,
+        console=RecordingConsole(),
+        input_stream=RecordingInput(tty=False),
+    )._workflow_menu("cli-container.yaml")
+
+    assert [call[0] for call in helper_calls] == ["scenario", "environment"]
+    assert frame_calls[0]["title"] == "Configuration error"
+    assert str(frame_calls[0]["body"]) == (
+        "--keep is not supported for a cli container scenario"
+    )
+    assert controller.calls == []
+
+
 def test_non_local_run_enters_existing_provisioning_context(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

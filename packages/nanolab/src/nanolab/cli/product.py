@@ -118,6 +118,24 @@ def _require_cli_endpoint(
         )
 
 
+def _validate_cli_container_options(
+    scenario: ScenarioConfig,
+    environment: EnvironmentConfig,
+    *,
+    keep: bool = False,
+) -> None:
+    if scenario.workflow != "cli" or scenario.backend != "container":
+        return
+    if environment.provider != "local":
+        raise typer.BadParameter(
+            "cli container scenario requires a local environment"
+        )
+    if keep:
+        raise typer.BadParameter(
+            "--keep is not supported for a cli container scenario"
+        )
+
+
 def _render(workflow) -> None:
     for index, task in enumerate(workflow.tasks, start=1):
         typer.echo(f"{index:02d}  {task.task_id}  {task.title}")
@@ -287,6 +305,11 @@ def install_product_commands(app: typer.Typer) -> None:
         environment_config = _environment(environment)
         if provision and environment_config.provider == "local":
             raise typer.BadParameter("--provision requires a non-local environment")
+        _validate_cli_container_options(
+            scenario_config,
+            environment_config,
+            keep=keep,
+        )
         _require_cli_endpoint(scenario_config, control_plane_url)
         paths = default_tool_paths()
         effective_run_dir = run_dir
@@ -404,6 +427,7 @@ def install_product_commands(app: typer.Typer) -> None:
     ) -> None:
         scenario_config = _scenario(scenario)
         environment_config = _environment(environment)
+        _validate_cli_container_options(scenario_config, environment_config)
         _require_cli_endpoint(scenario_config, control_plane_url)
         if scenario_config.workflow == "loadtest":
             control_plane_url, prometheus_url = resolve_loadtest_urls(
