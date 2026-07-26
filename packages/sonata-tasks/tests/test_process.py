@@ -61,6 +61,15 @@ def test_it_builds_a_sonata_resource() -> None:
     assert resource.release_title == "Release thing"
 
 
+def test_the_resource_keeps_the_spawner_process_type() -> None:
+    process = FakeProcess()
+    resource: Resource[FakeProcess] = managed_process_resource(
+        title="Acquire thing", argv=("run",), ready=_ready_once_spawned(), spawn=_spawner(process, [])
+    )
+
+    assert resource.acquire(TaskInputs.empty()) is process
+
+
 def test_acquire_spawns_with_argv_and_cwd() -> None:
     seen: list[dict[str, object]] = []
     resource = managed_process_resource(
