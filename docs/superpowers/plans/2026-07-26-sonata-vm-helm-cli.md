@@ -945,7 +945,7 @@ git commit -m "build: pin Sonata resource support"
 - Modify: `docs/superpowers/specs/2026-07-26-sonata-vm-helm-cli-design.md`
 - Modify: `docs/superpowers/plans/2026-07-26-sonata-vm-helm-cli.md`
 
-- [ ] **Step 1: aggiungere un contratto CI statico**
+- [x] **Step 1: aggiungere un contratto CI statico**
 
 Aggiungi alla CI un piano rappresentativo provisioned con un environment
 Multipass di fixture, senza avviare la VM. Il comando deve verificare almeno:
@@ -959,7 +959,7 @@ Multipass di fixture, senza avviare la VM. Il comando deve verificare almeno:
 Mantieni anche i smoke esistenti per `cli.yaml` non provisioned e
 `cli-container.yaml`.
 
-- [ ] **Step 2: eseguire tutte le verifiche nanolab**
+- [x] **Step 2: eseguire tutte le verifiche nanolab**
 
 Esegui tutti i comandi della sezione “Comandi di verifica”, poi:
 
@@ -980,7 +980,7 @@ Controlla esplicitamente:
 - cleanup UI visibile sugli eventi Sonata;
 - nessun import/uso del wrapper legacy nel percorso CLI provisioned.
 
-- [ ] **Step 3: validare dal vivo contro Multipass**
+- [x] **Step 3: validare dal vivo contro Multipass**
 
 Con una VM disposable:
 
@@ -1008,7 +1008,7 @@ CLI
 Verifica che la preview mostri i 14 task e il dashboard riceva eventi reali
 Sonata per acquire, bootstrap, Helm, function e release.
 
-- [ ] **Step 4: aggiornare il ledger di validazione**
+- [x] **Step 4: aggiornare il ledger di validazione**
 
 Nella spec registra:
 
@@ -1020,6 +1020,10 @@ Nella spec registra:
 Marca i checkbox di questo piano soltanto con evidenza eseguita.
 
 - [ ] **Step 5: commit finale e review**
+
+Il commit documentale viene creato dopo i gate statici e live. La review finale del
+diff completo `9878efe...HEAD` resta l'unico gate pendente e questo checkbox non può
+essere marcato finché non è conclusa.
 
 ```bash
 git status --short

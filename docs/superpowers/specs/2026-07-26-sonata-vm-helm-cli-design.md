@@ -4,6 +4,8 @@
 **Stato:** design approvato
 **Baseline nanolab:** `9878efe`
 **Baseline sonata:** `0bafb9ab3778b54ca3f08a75c1f3ccd0ed3e017b`
+**Sonata validata:** `527d042a83ed55b6cc6334885121241146204fcf`
+(`origin/main`, versione `0.2.0`)
 **Precede:**
 [migrazione del workflow CLI](2026-07-25-sonata-migration-cli-workflow-design.md) e
 [bersaglio del workflow CLI](2026-07-26-cli-workflow-target-design.md)
@@ -335,3 +337,83 @@ Su Multipass, partendo da VM assente:
 3. slice invoke sulla VM trattenuta: acquire/release transitivi e cleanup finale;
 4. fallimento consumer: cleanup function → Helm → VM;
 5. TUI Kubernetes provisioned: preview di 14 fasi ed eventi Sonata reali.
+
+## Ledger di validazione
+
+### Baseline statica
+
+La candidata Sonata integrata è il commit
+`527d042a83ed55b6cc6334885121241146204fcf`, presente in `origin/main`, versione
+`0.2.0`: 171 test passati.
+
+Prima delle correzioni emerse durante Task 12, nanolab aveva questa baseline:
+
+- 687 test nanolab passati;
+- `sonata-tasks` al 99,55% di coverage;
+- `workflow-tasks` al 93,14%;
+- `tui-toolkit` al 93,67%;
+- Ruff, basedpyright sui quattro package, 11 contratti di import, lock e build verdi.
+
+Dopo le correzioni Task 12:
+
+- 689/689 test nanolab e 25/25 test del planner CLI passati;
+- suite focalizzate interessate verdi;
+- Ruff, basedpyright per nanolab e workflow-tasks, contratti di import e
+  `git diff --check` verdi.
+
+La CI compila inoltre un vero piano `plan --provision` con un environment Multipass
+di fixture, senza avviare alcuna VM. Il contratto verifica il piano di 14 task e gli
+ID `002.acquire-stack-vm`, `008.acquire-control-plane-helm-release` e
+`014.release-stack-vm`, preservando gli smoke non provisioned e container.
+
+### Difetti dell'incremento emersi durante la validazione
+
+La review ha rilevato che la costruzione del piano cercava credenziali in `~/.ssh`.
+La discovery delle credenziali è ora differita al provisioning effettivo: compilare
+un piano non scandisce più `~/.ssh`, mentre restano invariati i default del planner
+legacy.
+
+Il primo run live, partito da una VM pulita, è fallito deterministicamente in Helm:
+il registry localhost vuoto non conteneva le immagini control-plane e function. Era
+un difetto dell'incremento, non un difetto preesistente. La configurazione usa ora
+le immagini ufficiali GHCR corrispondenti alla versione Gradle del prodotto. I
+manifest sono stati verificati per `amd64` e `arm64`; tutte le mappature pubblicabili
+del catalogo sono coperte rispetto ai riferimenti effettivi di `PublishPlan`.
+
+Non restano difetti live irrisolti emersi da Task 12. Rimane aperta soltanto la
+review finale dell'intero branch.
+
+### Validazione live
+
+Il rerun CLI finale sul commit nanolab
+`2ef60637b1e8e68d141326859659bd772bb48790` ha superato tutti i controlli Task 12
+da 1 a 10:
+
+- il run completo con cleanup è terminato con codice 0; list e invoke sono passati,
+  poi function, Helm e VM sono stati rilasciati in quest'ordine;
+- la slice `--only invoke-word-stats-java` ha compilato ed eseguito le sette unità
+  della closure delle risorse;
+- l'invoke forzato con JSON `status=error` ha restituito il reale codice 1 dopo
+  tutti gli acquire e ha comunque completato il cleanup nell'ordine esatto
+  function → Helm → VM;
+- il run con `--keep` ha conservato VM, Helm e function;
+- il cleanup manuale esplicito è terminato con codice 0 e senza istanze residue.
+
+I log della validazione CLI sono in
+`/private/tmp/nanolab-task12-live-fixed.EtihhD/`.
+
+La walkthrough TUI è stata eseguita sullo stesso commit tramite:
+
+```text
+CLI
+→ Kubernetes (provisioned)
+→ multipass
+→ Run
+→ Cleanup
+```
+
+Il dashboard finale mostrava esattamente 14 fasi, tutte `success`, con righe evento
+e log Sonata reali per VM, bootstrap, Helm, function, list, invoke e release. La VM
+ha raggiunto lo stato `Deleted`, l'unica istanza esatta è stata eliminata e
+`multipass list` ha restituito `No instances found`. La sessione TUI è stata
+osservata nel PTY di controllo; non è stato prodotto un file transcript persistente.
