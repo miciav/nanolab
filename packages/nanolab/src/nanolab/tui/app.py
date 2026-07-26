@@ -14,6 +14,7 @@ from rich.text import Text
 from nanolab.cli import diagnostics
 from nanolab.cli.execution import resolve_loadtest_urls
 from nanolab.cli.product import (
+    _cli_provisioned,
     _environment,
     _scenario,
     _validate_cli_container_options,
@@ -57,7 +58,12 @@ VALIDATION_MENU = [
     Choice("Offload", "offload", "Validate edge-to-cloud offload with two local instances."),
 ]
 CLI_MENU = [
-    Choice("Validate CLI", "validate", "Validate the nanofaas CLI workflow."),
+    Choice("Container", "container", "Validate the nanofaas CLI against a local container."),
+    Choice(
+        "Kubernetes (provisioned)",
+        "kubernetes",
+        "Provision a VM, install nanofaas, and validate the CLI against Kubernetes.",
+    ),
 ]
 LOADTEST_MENU = [
     Choice("Run load test", "run", "Run the current k6 and autoscaling workflow."),
@@ -88,7 +94,8 @@ _SCENARIO_FILES = {
     ("validation", "container"): "validate-container.yaml",
     ("validation", "kubernetes"): "validate-k8s.yaml",
     ("validation", "offload"): "validate-offload.yaml",
-    ("cli", "validate"): "cli-container.yaml",
+    ("cli", "container"): "cli-container.yaml",
+    ("cli", "kubernetes"): "cli.yaml",
     ("loadtest", "run"): "loadtest.yaml",
     ("loadtest", "offload"): "offload-loadtest.yaml",
 }
@@ -96,6 +103,10 @@ _SCENARIO_TITLES = {
     scenario_name: _SECTION_TITLES[section]
     for (section, _action), scenario_name in _SCENARIO_FILES.items()
 }
+# The Sonata-provisioned cli/k8s path: it owns its own VM/Helm lifecycle (see
+# `_cli_provisioned` in nanolab.cli.product), so its menu never offers the
+# legacy provision/use-existing choice and always runs with provision=True.
+_PROVISIONED_SCENARIOS = {_SCENARIO_FILES[("cli", "kubernetes")]}
 
 _ACTION_CHOICES = [
     Choice("Plan", "plan", "Show the workflow tasks without running them."),
@@ -275,6 +286,7 @@ class NanofaasTUI:
     def _workflow_menu(self, scenario_name: str) -> None:
         scenario_path = discover_tool_root() / "scenarios-v2" / scenario_name
         title = _SCENARIO_TITLES[scenario_name]
+        provisioned_cli = scenario_name in _PROVISIONED_SCENARIOS
         state = "environment"
         environment_path: Path | None = None
         scenario: Any = None
@@ -310,6 +322,13 @@ class NanofaasTUI:
                     scenario = _scenario(scenario_path)
                     environment = _environment(environment_path)
                     _validate_cli_container_options(scenario, environment)
+                    if provisioned_cli and environment.provider == "local":
+                        # Same wording as `nanolab run --provision`
+                        # (nanolab.cli.product.run_command): this path always
+                        # provisions, so a local environment is never valid.
+                        raise ValueError(
+                            "--provision requires a non-local environment"
+                        )
                 except Exception as exc:
                     self._show_static(
                         title="Configuration error",
@@ -317,9 +336,17 @@ class NanofaasTUI:
                         body=str(exc),
                     )
                     return
+                if provisioned_cli:
+                    # This path owns its own VM/Helm lifecycle end to end; it
+                    # never offers the legacy provision/use-existing choice.
+                    provision = True
                 if action == "plan":
                     break
-                state = "cleanup" if environment.provider == "local" else "provision"
+                state = (
+                    "cleanup"
+                    if environment.provider == "local" or provisioned_cli
+                    else "provision"
+                )
                 continue
 
             if state == "provision":
@@ -349,7 +376,11 @@ class NanofaasTUI:
             )
             if cleanup_choice == "back":
                 keep = False
-                state = "action" if environment.provider == "local" else "provision"
+                state = (
+                    "action"
+                    if environment.provider == "local" or provisioned_cli
+                    else "provision"
+                )
                 continue
             keep = cleanup_choice == "keep"
             try:
@@ -374,6 +405,7 @@ class NanofaasTUI:
                     scenario,
                     environment,
                     dry_run=True,
+                    provision=provision,
                 )
             except Exception as exc:
                 self._show_static(
@@ -390,6 +422,7 @@ class NanofaasTUI:
                 scenario,
                 environment,
                 dry_run=True,
+                provision=provision,
             )
         except Exception as exc:
             self._show_static(
@@ -400,6 +433,12 @@ class NanofaasTUI:
             return
 
         try:
+            # The Sonata-provisioned cli/k8s path compiles its own VM/Helm
+            # lifecycle into the workflow (`build_cli_plan(..., provision=True)`),
+            # so it must never also go through the legacy provisioning context
+            # manager — same guard `nanolab.cli.product.run_command` applies.
+            cli_provisioned = _cli_provisioned(scenario, provision=provision)
+
             def run_current_workflow(_dashboard: Any, _sink: Any) -> Any:
                 provisioning = (
                     provision_environment(
@@ -408,7 +447,7 @@ class NanofaasTUI:
                         repo_root=default_tool_paths().nanofaas_root,
                         keep=keep,
                     )
-                    if provision
+                    if provision and not cli_provisioned
                     else nullcontext()
                 )
                 with provisioning:
@@ -416,6 +455,7 @@ class NanofaasTUI:
                         scenario,
                         environment,
                         dry_run=False,
+                        provision=provision,
                     )
                     workflow.keep_infrastructure = keep
                     return workflow.run()
@@ -446,6 +486,7 @@ class NanofaasTUI:
         environment: Any,
         *,
         dry_run: bool,
+        provision: bool = False,
     ) -> Any:
         if scenario.workflow == "loadtest":
             control_plane_url, prometheus_url = resolve_loadtest_urls(
@@ -460,7 +501,7 @@ class NanofaasTUI:
             )
         if scenario.workflow == "offload-loadtest":
             return _workflow(scenario, environment, dry_run=dry_run)
-        return _workflow(scenario, environment)
+        return _workflow(scenario, environment, provision=provision)
 
     def _plan_rows(self, scenario: ScenarioConfig, workflow: Any) -> list[tuple[str, str]]:
         """(task_id, title) pairs for display, from whichever engine built the workflow.
