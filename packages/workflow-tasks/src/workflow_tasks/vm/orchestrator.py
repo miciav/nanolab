@@ -32,6 +32,7 @@ class VmOrchestrator(MultipassVmProvider):
             shell=shell,
             multipass_client=multipass_client,
         )
+        self._owns_ansible = ansible is None
         if ansible is None:
             from workflow_tasks.infra.ansible import AnsibleAdapter
 
@@ -39,9 +40,16 @@ class VmOrchestrator(MultipassVmProvider):
                 self.repo_root,
                 shell=self.shell,
                 host_resolver=self.connection_host,
-                private_key_path=self._private_key_path,
             )
         self.ansible = ansible
+
+    def ensure_running(
+        self, request: VmRequest, *, dry_run: bool = False
+    ) -> ShellExecutionResult:
+        result = super().ensure_running(request, dry_run=dry_run)
+        if self._owns_ansible and not dry_run:
+            self.ansible.private_key_path = self._ssh_credentials()[1]
+        return result
 
     def remote_project_dir(self, request: VmRequest) -> str:
         return f"{self._remote_home(request)}/nanofaas"
@@ -93,13 +101,14 @@ class VmOrchestrator(MultipassVmProvider):
             )
 
         host = self.connection_host(request, dry_run=dry_run)
+        private_key = None if dry_run else self._ssh_credentials()[1]
         return self._shell_run(
             repo_rsync_command(
                 source=source,
                 user=request.user,
                 host=host,
                 destination=destination,
-                ssh_rsh=repo_sync_ssh_rsh(self._private_key_path),
+                ssh_rsh=repo_sync_ssh_rsh(private_key),
             ),
             dry_run=dry_run,
         )

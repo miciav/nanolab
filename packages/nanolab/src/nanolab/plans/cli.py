@@ -59,7 +59,7 @@ _FUNCTION_READINESS_TIMEOUT_SECONDS = 120
 # always the planner's own `summary` (e.g. the registry step's summary ends in
 # "is running", which is dropped here to keep the id short and stable).
 _BOOTSTRAP_STEPS: tuple[
-    tuple[str, Callable[[ScenarioExecutionContext], tuple[ScenarioOperation, ...]]], ...
+    tuple[str, Callable[..., tuple[ScenarioOperation, ...]]], ...
 ] = (
     ("Provision base VM dependencies", plan_vm_provision_base),
     ("Install k3s", plan_k3s_install),
@@ -121,11 +121,19 @@ def _bootstrap_tasks(
     the same helper the legacy cloud-provider path already uses.
     """
     placeholder_context = _placeholder_context(repo_root, vm_request)
-    private_key = _find_ssh_private_key_path(find_ssh_public_key())
+    private_key: Path | None = None
+    private_key_resolved = False
+
+    def resolve_private_key() -> Path | None:
+        nonlocal private_key, private_key_resolved
+        if not private_key_resolved:
+            private_key = _find_ssh_private_key_path(find_ssh_public_key())
+            private_key_resolved = True
+        return private_key
 
     tasks: list[CommandTask] = []
     for title, planner in _BOOTSTRAP_STEPS:
-        (raw_operation,) = planner(placeholder_context)
+        (raw_operation,) = planner(placeholder_context, discover_private_key=False)
         if not isinstance(raw_operation, RemoteCommandOperation):
             raise TypeError(f"bootstrap operation is not a remote command: {raw_operation}")
         base_operation = raw_operation
@@ -138,7 +146,7 @@ def _bootstrap_tasks(
                 base_operation,
                 context=_resolved_context(placeholder_context, info),
                 host=info.host,
-                private_key=private_key,
+                private_key=resolve_private_key(),
             )
             return retargeted.argv
 

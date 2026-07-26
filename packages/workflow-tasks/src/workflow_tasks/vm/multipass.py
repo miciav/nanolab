@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import shlex
 from pathlib import Path
+from typing import cast
 
 from multipass import MultipassClient, MultipassCommandError, VmNotFoundError, find_ssh_public_key
 from shellcraft.backend import ShellBackend, ShellExecutionResult, SubprocessShell
@@ -19,6 +20,7 @@ REPO_SYNC_EXCLUDE_PATTERNS = (
     "experiments/.image-cache/", "tools/controlplane/runs/",
     "recovery/",
 )
+_SSH_CREDENTIALS_UNRESOLVED = object()
 
 
 def _vm_name_default(request: VmRequest) -> str:
@@ -121,8 +123,15 @@ class MultipassVmProvider:
         self.workspace_root = Path(workspace_root)
         self.shell = shell or SubprocessShell()
         self._client = multipass_client or MultipassClient()
-        self._ssh_public_key: str | None = find_ssh_public_key()
-        self._private_key_path: Path | None = _find_ssh_private_key_path(self._ssh_public_key)
+        self._ssh_public_key: str | None | object = _SSH_CREDENTIALS_UNRESOLVED
+        self._private_key_path: Path | None = None
+
+    def _ssh_credentials(self) -> tuple[str | None, Path | None]:
+        if self._ssh_public_key is _SSH_CREDENTIALS_UNRESOLVED:
+            public_key = find_ssh_public_key()
+            self._ssh_public_key = public_key
+            self._private_key_path = _find_ssh_private_key_path(public_key)
+        return cast(str | None, self._ssh_public_key), self._private_key_path
 
     def _vm_name(self, request: VmRequest) -> str:
         return _vm_name_default(request)
@@ -134,12 +143,13 @@ class MultipassVmProvider:
         return self.shell.run(command, cwd=self.workspace_root, dry_run=dry_run)
 
     def _ensure_multipass_authorized_key(self, request: VmRequest) -> None:
-        if not self._ssh_public_key:
+        public_key, _ = self._ssh_credentials()
+        if not public_key:
             return
         name = self._vm_name(request)
         remote_home = self._remote_home(request)
         authorized_keys = f"{remote_home}/.ssh/authorized_keys"
-        quoted_key = shlex.quote(self._ssh_public_key)
+        quoted_key = shlex.quote(public_key)
         if request.user == "root":
             command = (
                 f"install -d -m 700 {shlex.quote(remote_home)}/.ssh && "
@@ -198,8 +208,9 @@ class MultipassVmProvider:
         ]
         if dry_run:
             return _ok(launch_cmd)
+        public_key, _ = self._ssh_credentials()
         cloud_init_config = (
-            {"ssh_authorized_keys": [self._ssh_public_key]} if self._ssh_public_key else None
+            {"ssh_authorized_keys": [public_key]} if public_key else None
         )
         self._client.ensure_running(
             name, cpus=request.cpus, memory=request.memory,

@@ -4,12 +4,15 @@ from dataclasses import dataclass, field
 
 import pytest
 from sonata_engine import Selection
+from workflow_tasks.components import bootstrap
 from workflow_tasks.execution.bindings import RoleBindings
 from workflow_tasks.tasks.models import CommandTaskSpec, TaskResult
+from workflow_tasks.vm import multipass
 from workflow_tasks.vm.models import VmRequest
 
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
+from nanolab.plans import cli
 from nanolab.plans.cli import PROVISIONED_ENDPOINT, build_cli_plan
 
 SUCCESS = '{"status":"success","output":{"words":2}}'
@@ -289,6 +292,26 @@ def test_provisioned_k8s_plan_compiles_the_expected_14_task_topology() -> None:
         "013.release-control-plane-helm-release",
         "014.release-stack-vm",
     ]
+
+
+def test_provisioned_k8s_plan_compilation_does_not_discover_ssh_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def reject_credential_discovery(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("SSH credentials must not be read while compiling a plan")
+
+    monkeypatch.setattr(cli, "find_ssh_public_key", reject_credential_discovery)
+    monkeypatch.setattr(bootstrap, "find_ssh_public_key", reject_credential_discovery)
+    monkeypatch.setattr(multipass, "find_ssh_public_key", reject_credential_discovery)
+
+    plan = build_cli_plan(
+        _scenario(backend="k8s"),
+        RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor()),
+        provision=True,
+        environment=_multipass_environment(),
+    )
+
+    assert len(plan.compile().tasks) == 14
 
 
 def test_provisioned_k8s_builds_the_cli_on_host_and_runs_everything_else_on_stack() -> None:

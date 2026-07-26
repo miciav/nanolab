@@ -160,7 +160,9 @@ def _stack_operations(
     *,
     dedicated_loadgen: bool,
 ) -> tuple[RemoteCommandOperation, ...]:
-    planners = [plan_vm_provision_base]
+    planners: list[
+        Callable[[ScenarioExecutionContext], tuple[ScenarioOperation, ...]]
+    ] = [plan_vm_provision_base]
     if scenario.backend == "k8s" or scenario.workflow == "loadtest":
         planners.extend(
             [
