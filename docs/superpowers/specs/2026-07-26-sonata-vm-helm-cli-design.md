@@ -354,12 +354,28 @@ Prima delle correzioni emerse durante Task 12, nanolab aveva questa baseline:
 - `tui-toolkit` al 93,67%;
 - Ruff, basedpyright sui quattro package, 11 contratti di import, lock e build verdi.
 
-Dopo le correzioni Task 12:
+Il gate completo di Step 2 è stato rieseguito sul commit nanolab `db96001`:
 
-- 689/689 test nanolab e 25/25 test del planner CLI passati;
-- suite focalizzate interessate verdi;
-- Ruff, basedpyright per nanolab e workflow-tasks, contratti di import e
-  `git diff --check` verdi.
+- nanolab: 690 test passati;
+- `sonata-tasks`: 69 test passati, coverage 99,55%;
+- `workflow-tasks`: 475 test passati, coverage 93,43%;
+- `tui-toolkit`: 51 test passati, coverage 97,11%;
+- Ruff verde e basedpyright sui quattro package con 0 errori e 0 warning;
+- 11/11 contratti di import verdi, ripartiti 4 + 2 + 3 + 2;
+- `uv lock --check` verde su 61 package;
+- build sdist e wheel verdi per `sonata-tasks` e nanolab;
+- `git diff --check` verde e working tree pulito.
+
+I contratti di topologia hanno verificato: piano CLI container invariato a 9 task
+con release finale `009`, k8s non provisioned a 5 task, provisioned a 14 task e
+slice selezionata con closure di 7 unità. Sono inoltre passati 5 test focalizzati su
+legacy, wrapper e topologia; i piani `validate-container` a 6 task e `validate-k8s`
+a 12 task sono terminati con codice 0.
+
+Il manifest e il lock puntano entrambi all'esatto SHA immutabile Sonata
+`527d042a83ed55b6cc6334885121241146204fcf`, versione `0.2.0`, senza override
+locale. I log del gate completo sono in
+`/private/tmp/nanolab-task12-verify.nRYNWc`.
 
 La CI compila inoltre un vero piano `plan --provision` con un environment Multipass
 di fixture, senza avviare alcuna VM. Il contratto verifica il piano di 14 task e gli

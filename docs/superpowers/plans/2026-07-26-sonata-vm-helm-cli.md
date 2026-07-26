@@ -980,6 +980,14 @@ Controlla esplicitamente:
 - cleanup UI visibile sugli eventi Sonata;
 - nessun import/uso del wrapper legacy nel percorso CLI provisioned.
 
+Evidenza: il gate completo è stato rieseguito sul commit `db96001`. Sono verdi
+690 test nanolab, 69 test `sonata-tasks` al 99,55%, 475 test `workflow-tasks` al
+93,43%, 51 test `tui-toolkit` al 97,11%, Ruff, basedpyright sui quattro package,
+11/11 contratti di import, lock su 61 package, build sdist/wheel dei due package e
+`git diff --check`. I piani container, k8s non provisioned, provisioned e slice
+contano rispettivamente 9, 5, 14 e 7 unità; i due piani validate terminano con codice
+0. I log sono in `/private/tmp/nanolab-task12-verify.nRYNWc`.
+
 - [x] **Step 3: validare dal vivo contro Multipass**
 
 Con una VM disposable:
