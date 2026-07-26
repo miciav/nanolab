@@ -25,6 +25,7 @@ class CliFunction:
     image: str
     payload: str
     resources: dict[str, object] | None = None
+    build_argv: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -162,8 +163,14 @@ def build_cli_workflow(
     *,
     workflow_id: str = "cli",
     cwd: Path | None = None,
+    control_plane_build_argv: tuple[str, ...] | None = None,
+    requires: tuple[Resource, ...] = (),
 ) -> Workflow:
-    """Build the CLI end-to-end workflow: build, register, list, invoke, remove."""
+    """Build the CLI end-to-end workflow: build, register, list, invoke, remove.
+
+    Build commands do not require the control plane. `requires` wraps only commands
+    that use its API, so selection of a build task stays offline.
+    """
     executor = RoleBoundCommandTaskExecutor(bindings)
     workflow = Workflow(workflow_id=workflow_id)
     workflow.add(
@@ -175,6 +182,27 @@ def build_cli_workflow(
             cwd=cwd,
         )
     )
+    if control_plane_build_argv is not None:
+        workflow.add(
+            CommandTask(
+                title="Build local control plane",
+                argv=control_plane_build_argv,
+                executor=executor,
+                role=request.cli_role,
+                cwd=cwd,
+            )
+        )
+    for function in request.functions:
+        if function.build_argv is not None:
+            workflow.add(
+                CommandTask(
+                    title=f"Build image {function.name}",
+                    argv=function.build_argv,
+                    executor=executor,
+                    role=request.cli_role,
+                    cwd=cwd,
+                )
+            )
     resources = tuple(
         _function_resource(request, function, executor, cwd) for function in request.functions
     )
@@ -186,7 +214,7 @@ def build_cli_workflow(
             role=request.cli_role,
             cwd=cwd,
         ),
-        requires=resources,
+        requires=(*requires, *resources),
     )
     for function, resource in zip(request.functions, resources):
         workflow.add(
@@ -198,6 +226,6 @@ def build_cli_workflow(
                 cwd=cwd,
                 verify=_verify_invocation,
             ),
-            requires=(resource,),
+            requires=(*requires, resource),
         )
     return workflow

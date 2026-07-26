@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 
 import pytest
-from sonata_engine import Selection
+from sonata_engine import Resource, Selection
 from workflow_tasks.execution.bindings import RoleBindings
 from workflow_tasks.execution.roles import ExecutionRole
 from workflow_tasks.tasks.models import CommandTaskSpec, TaskResult
@@ -333,3 +333,146 @@ def test_every_non_host_or_stack_role_is_rejected(role: ExecutionRole) -> None:
 def test_at_least_one_function_is_required() -> None:
     with pytest.raises(ValueError, match="at least one function"):
         CliWorkflowRequest(functions=())
+
+
+def test_an_external_resource_wraps_the_whole_workflow() -> None:
+    executor = ScriptedExecutor()
+    events: list[str] = []
+    control_plane = Resource(
+        title="Acquire local control plane",
+        acquire=lambda: events.append("start"),
+        release=lambda: events.append("stop"),
+    )
+    workflow = build_cli_workflow(
+        CliWorkflowRequest(functions=(FUNCTION,)),
+        _bindings(executor),
+        requires=(control_plane,),
+    )
+
+    assert [task.task_id for task in workflow.compile().tasks] == [
+        "001.build-nanofaas-cli",
+        "002.acquire-local-control-plane",
+        "003.acquire-word-stats-java",
+        "004.list-functions",
+        "005.invoke-word-stats-java",
+        "006.release-word-stats-java",
+        "007.release-local-control-plane",
+    ]
+
+    workflow.run()
+    assert events == ["start", "stop"]
+
+
+def test_build_only_selection_does_not_acquire_the_external_resource() -> None:
+    events: list[str] = []
+    control_plane = Resource(
+        title="Acquire local control plane",
+        acquire=lambda: events.append("start"),
+        release=lambda: events.append("stop"),
+    )
+    workflow = build_cli_workflow(
+        CliWorkflowRequest(functions=(FUNCTION,)),
+        _bindings(ScriptedExecutor()),
+        requires=(control_plane,),
+    )
+
+    workflow.run(select=Selection(only="build-nanofaas-cli"))
+
+    assert events == []
+
+
+def test_the_external_resource_is_released_when_a_task_fails() -> None:
+    executor = ScriptedExecutor(
+        responses={
+            "invoke word-stats-java": TaskResult(
+                task_id="", status="failed", return_code=1, stderr="boom"
+            )
+        }
+    )
+    events: list[str] = []
+    control_plane = Resource(
+        title="Acquire local control plane",
+        acquire=lambda: events.append("start"),
+        release=lambda: events.append("stop"),
+    )
+    workflow = build_cli_workflow(
+        CliWorkflowRequest(functions=(FUNCTION,)),
+        _bindings(executor),
+        requires=(control_plane,),
+    )
+
+    with pytest.raises(RuntimeError, match="boom"):
+        workflow.run()
+
+    assert events == ["start", "stop"]
+
+
+def test_a_function_with_build_argv_gets_an_image_build_task() -> None:
+    executor = ScriptedExecutor()
+    function = replace(FUNCTION, build_argv=("./gradlew", ":functions:java:word-stats:bootBuildImage"))
+    workflow = build_cli_workflow(
+        CliWorkflowRequest(functions=(function,)), _bindings(executor)
+    )
+
+    assert [task.task_id for task in workflow.compile().tasks] == [
+        "001.build-nanofaas-cli",
+        "002.build-image-word-stats-java",
+        "003.acquire-word-stats-java",
+        "004.list-functions",
+        "005.invoke-word-stats-java",
+        "006.release-word-stats-java",
+    ]
+
+
+def test_the_control_plane_build_runs_before_images_and_acquire() -> None:
+    control_plane = Resource(
+        title="Acquire local control plane",
+        acquire=lambda: None,
+        release=lambda: None,
+    )
+    function = replace(
+        FUNCTION,
+        build_argv=("./gradlew", ":functions:java:word-stats:bootBuildImage"),
+    )
+    workflow = build_cli_workflow(
+        CliWorkflowRequest(functions=(function,)),
+        _bindings(ScriptedExecutor()),
+        control_plane_build_argv=("./gradlew", ":control-plane:bootJar"),
+        requires=(control_plane,),
+    )
+
+    assert [task.task_id for task in workflow.compile().tasks] == [
+        "001.build-nanofaas-cli",
+        "002.build-local-control-plane",
+        "003.build-image-word-stats-java",
+        "004.acquire-local-control-plane",
+        "005.acquire-word-stats-java",
+        "006.list-functions",
+        "007.invoke-word-stats-java",
+        "008.release-word-stats-java",
+        "009.release-local-control-plane",
+    ]
+
+
+def test_the_image_build_runs_before_the_function_is_registered() -> None:
+    executor = ScriptedExecutor()
+    function = replace(FUNCTION, build_argv=("./gradlew", ":functions:java:word-stats:bootBuildImage"))
+    workflow = build_cli_workflow(
+        CliWorkflowRequest(functions=(function,)), _bindings(executor)
+    )
+
+    workflow.run()
+
+    titles = executor.titles
+    assert titles.index("Build image word-stats-java") < titles.index("Apply word-stats-java")
+
+
+def test_without_build_argv_nothing_extra_is_emitted() -> None:
+    executor = ScriptedExecutor()
+    workflow = build_cli_workflow(
+        CliWorkflowRequest(functions=(FUNCTION,)), _bindings(executor)
+    )
+
+    assert "002.build-image-word-stats-java" not in [
+        task.task_id for task in workflow.compile().tasks
+    ]
