@@ -32,7 +32,6 @@ dev = [
 ]
 
 [tool.uv.sources]
-sonata-engine = { path = "../../../sonata", editable = true }
 workflow-tasks = { workspace = true }
 
 [tool.pytest.ini_options]

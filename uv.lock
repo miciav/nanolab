@@ -1074,17 +1074,7 @@ wheels = [
 [[package]]
 name = "sonata-engine"
 version = "0.1.0"
-source = { editable = "../sonata" }
-
-[package.metadata]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "basedpyright", specifier = ">=1.39.3" },
-    { name = "pytest", specifier = ">=9.0.3" },
-    { name = "pytest-cov", specifier = ">=6.0" },
-    { name = "ruff", specifier = ">=0.15.12" },
-]
+source = { git = "https://github.com/miciav/sonata.git?rev=0bafb9ab3778b54ca3f08a75c1f3ccd0ed3e017b#0bafb9ab3778b54ca3f08a75c1f3ccd0ed3e017b" }
 
 [[package]]
 name = "sonata-tasks"
@@ -1107,7 +1097,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "sonata-engine", editable = "../sonata" },
+    { name = "sonata-engine", git = "https://github.com/miciav/sonata.git?rev=0bafb9ab3778b54ca3f08a75c1f3ccd0ed3e017b" },
     { name = "workflow-tasks", editable = "packages/workflow-tasks" },
 ]
 
