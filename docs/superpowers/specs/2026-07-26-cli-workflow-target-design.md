@@ -105,15 +105,21 @@ Qualunque cosa resti, deve avere **almeno un test che parla con un control plane
 La lezione di questo bug è che una guardia di rete testata solo con `urlopen` simulata
 non è testata.
 
-### D4 — L'attesa dopo `fn apply`
+### D4 — L'attesa dopo `fn apply`: niente da fare (verificato)
 
-Con `container-local` il control plane ha già `readiness-timeout` e
-`readiness-poll-interval` propri, quindi `fn apply` potrebbe bloccarsi fino a container
-pronto e far sparire la corsa. **Va verificato, non assunto.** Se `apply` ritorna prima
-che la function risponda, l'acquire della risorsa-function deve attendere — come fa
-`managed_process_resource` per il processo.
+Verificato nel codice invece che assunto:
+`ContainerLocalDeploymentProvider` chiama
+`endpointProbe.awaitReady(baseUrl, properties.readinessTimeout(), properties.readinessPollInterval())`
+subito dopo `adapter.runContainer(...)`, e se la readiness fallisce rimuove il container e
+rilancia l'errore.
 
-Su `backend: k8s` la corsa c'è di sicuro (misurata: ~12s) e la stessa attesa la risolve.
+Quindi con `backend: container` **`fn apply` ritorna solo quando la function risponde**:
+la corsa cold-start non esiste su questo percorso e non c'è nessuna attesa da
+implementare.
+
+La corsa resta reale su `backend: k8s` (misurata: ~12s), ma quel percorso è fuori scope
+qui — continua a richiedere un URL esplicito e il suo provisioning è rimandato. L'attesa
+va aggiunta quando si affronta quell'incremento, non ora.
 
 ## Fuori scope
 
