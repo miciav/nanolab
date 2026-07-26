@@ -47,6 +47,9 @@ jobs:
       - name: Run workflow-tasks tests
         run: uv run --locked --all-packages --all-groups pytest -c packages/workflow-tasks/pyproject.toml packages/workflow-tasks/tests
 
+      - name: Run sonata-tasks tests
+        run: uv run --locked --all-packages --all-groups pytest -c packages/sonata-tasks/pyproject.toml packages/sonata-tasks/tests
+
       - name: Run tui-toolkit tests
         run: uv run --locked --all-packages --all-groups pytest -c packages/tui-toolkit/pyproject.toml packages/tui-toolkit/tests
 
@@ -55,12 +58,14 @@ jobs:
           uv run --locked --all-packages --all-groups ruff check packages
           uv run --locked --all-packages --all-groups basedpyright --project packages/nanolab
           uv run --locked --all-packages --all-groups basedpyright --project packages/workflow-tasks
+          uv run --locked --all-packages --all-groups basedpyright --project packages/sonata-tasks
           uv run --locked --all-packages --all-groups basedpyright --project packages/tui-toolkit
 
       - name: Run import contracts
         run: |
           uv run --locked --all-packages --all-groups lint-imports --config packages/nanolab/.importlinter --no-cache
           uv run --locked --all-packages --all-groups lint-imports --config packages/workflow-tasks/.importlinter --no-cache
+          uv run --locked --all-packages --all-groups lint-imports --config packages/sonata-tasks/.importlinter --no-cache
           uv run --locked --all-packages --all-groups lint-imports --config packages/tui-toolkit/.importlinter --no-cache
 
       - name: Build distributions
@@ -69,11 +74,12 @@ jobs:
       - name: Smoke-test installed wheels
         run: |
           uv venv .wheel-smoke
-          uv pip install dist/nanolab-0.1.0-py3-none-any.whl dist/workflow_tasks-0.1.0-py3-none-any.whl dist/tui_toolkit-0.1.0-py3-none-any.whl --python .wheel-smoke/bin/python
-          .wheel-smoke/bin/python -c "import nanolab, workflow_tasks, tui_toolkit"
+          uv pip install dist/nanolab-0.1.0-py3-none-any.whl dist/sonata_tasks-0.1.0-py3-none-any.whl dist/workflow_tasks-0.1.0-py3-none-any.whl dist/tui_toolkit-0.1.0-py3-none-any.whl --python .wheel-smoke/bin/python
+          .wheel-smoke/bin/python -c "import nanolab, sonata_tasks, workflow_tasks, tui_toolkit"
           .wheel-smoke/bin/nanolab --help
 
       - name: Generate representative plans
         run: |
           uv run --package nanolab nanolab plan packages/nanolab/scenarios-v2/validate-container.yaml --environment packages/nanolab/environments/local.yaml
           uv run --package nanolab nanolab plan packages/nanolab/scenarios-v2/validate-k8s.yaml --environment packages/nanolab/environments/multipass.yaml
+          uv run --package nanolab nanolab plan packages/nanolab/scenarios-v2/cli.yaml
