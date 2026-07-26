@@ -10,6 +10,7 @@ from rich.live import Live
 from nanolab.tui.event_aggregator import WorkflowEventAggregator
 from nanolab.tui.models import TuiPhaseSnapshot
 from nanolab.tui.workflow import TuiWorkflowSink, WorkflowDashboard, WorkflowKeyListener
+from sonata_engine.workflow.context import bind_workflow_sink as bind_sonata_sink
 from tui_toolkit.console import console as default_console
 from workflow_tasks import bind_workflow_sink
 from workflow_tasks.workflow.event_builders import build_task_event
@@ -58,7 +59,9 @@ class TuiWorkflowController:
             refresh()
             try:
                 listener.start()
-                with bind_workflow_sink(sink):
+                # Both engines are live during the migration; each reads its own
+                # contextvar, so the one sink is bound to both.
+                with bind_workflow_sink(sink), bind_sonata_sink(sink):
                     try:
                         result = action(dashboard, sink)
                     except Exception as exc:

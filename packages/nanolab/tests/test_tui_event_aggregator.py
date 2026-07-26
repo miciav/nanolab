@@ -424,3 +424,40 @@ def test_snapshot_logs_are_isolated_from_aggregator_state() -> None:
 def test_non_positive_log_limit_is_rejected(log_limit: int) -> None:
     with pytest.raises(ValueError, match="log_limit must be positive"):
         WorkflowEventAggregator(log_limit=log_limit)
+
+
+def test_the_tui_sink_binds_to_sonata_and_reads_its_task_vocabulary() -> None:
+    from sonata_engine.workflow.context import active_sink
+    from sonata_engine.workflow.context import bind_workflow_sink as bind_sonata_sink
+    from sonata_engine.workflow.events import WorkflowEvent as SonataEvent
+
+    from nanolab.tui.event_aggregator import WorkflowEventAggregator
+    from nanolab.tui.workflow import TuiWorkflowSink
+
+    aggregator = WorkflowEventAggregator(planned_steps=["Build nanofaas-cli"])
+    sink = TuiWorkflowSink(aggregator)
+
+    with bind_sonata_sink(sink):
+        bound_sink = active_sink()
+        assert bound_sink is sink
+        bound_sink.emit(
+            SonataEvent(
+                kind="task.started",
+                flow_id="interactive.console",
+                task_id="001.build-nanofaas-cli",
+                title="Build nanofaas-cli",
+            )
+        )
+        running = aggregator.snapshot().phases[0].status
+
+        bound_sink.emit(
+            SonataEvent(
+                kind="task.passed",
+                flow_id="interactive.console",
+                task_id="001.build-nanofaas-cli",
+                title="Build nanofaas-cli",
+            )
+        )
+    passed = aggregator.snapshot().phases[0].status
+
+    assert (running, passed) == ("running", "success")

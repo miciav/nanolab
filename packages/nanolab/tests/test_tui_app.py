@@ -42,8 +42,10 @@ class FakeWorkflow:
         error: Exception | None = None,
         on_run: Callable[[], None] | None = None,
     ) -> None:
-        self.tasks = [SimpleNamespace(task_id="prepare", title="Prepare environment")]
-        self.phase_titles = ["Prepare environment", "Run checks"]
+        self.tasks = [
+            SimpleNamespace(task_id="prepare", title="Prepare environment"),
+            SimpleNamespace(task_id="verify", title="Run checks"),
+        ]
         self.keep_infrastructure = False
         self.run_calls = 0
         self._error = error
@@ -133,7 +135,9 @@ def _install_workflow_helpers(
     *,
     environment_path: Path,
     workflow: FakeWorkflow,
-    scenario_kind: str = "cli",
+    # FakeWorkflow is legacy-shaped (`.tasks`, no `.compile()`); default to a
+    # legacy scenario so uses_sonata() routes through it correctly.
+    scenario_kind: str = "validate",
     provider: str = "local",
     calls: list[tuple[Any, ...]] | None = None,
 ) -> None:
@@ -571,7 +575,7 @@ def test_run_passes_phase_titles_and_exact_summary_to_live_controller(
 
     assert len(controller.calls) == 1
     assert controller.calls[0]["title"] == "CLI"
-    assert controller.calls[0]["planned_steps"] == workflow.phase_titles
+    assert controller.calls[0]["planned_steps"] == [task.title for task in workflow.tasks]
     assert controller.calls[0]["summary_lines"] == [
         "Scenario: cli.yaml",
         "Environment: local.yaml",
@@ -717,7 +721,7 @@ def test_nonlocal_loadtest_runs_provision_build_and_cleanup_inside_live_sink(
             events.append(("live",))
             action = kwargs["action"]
             assert callable(action)
-            assert kwargs["planned_steps"] == preview.phase_titles
+            assert kwargs["planned_steps"] == [task.title for task in preview.tasks]
             with bind_workflow_sink(self.sink):
                 action(None, self.sink)
             events.append(("live-final",))
@@ -858,7 +862,9 @@ def test_reselecting_local_environment_resets_remote_provisioning_choice(
     remote_path = local_path.parent / "remote.yaml"
     remote_path.write_text("provider: multipass\n", encoding="utf-8")
     workflow = FakeWorkflow()
-    monkeypatch.setattr(tui_app, "_scenario", lambda _path: SimpleNamespace(workflow="cli"))
+    # FakeWorkflow is legacy-shaped; use a legacy scenario so uses_sonata() takes
+    # the `.tasks`-based path instead of trying to `.compile()` it.
+    monkeypatch.setattr(tui_app, "_scenario", lambda _path: SimpleNamespace(workflow="validate"))
     monkeypatch.setattr(
         tui_app,
         "_environment",
@@ -1252,4 +1258,26 @@ def test_ctrl_c_from_every_workflow_depth_propagates_to_exit(
         "What would you like to do?",
         "CLI",
         *expected_messages,
+    ]
+
+
+def test_cli_plan_rows_come_from_the_compiled_sonata_workflow() -> None:
+    workflow = MagicMock()
+    workflow.compile.return_value.tasks = [
+        SimpleNamespace(
+            task_id="001.build-nanofaas-cli",
+            task=SimpleNamespace(title="Build nanofaas-cli"),
+        ),
+        SimpleNamespace(
+            task_id="002.list-functions",
+            task=SimpleNamespace(title="List functions"),
+        ),
+    ]
+    scenario = SimpleNamespace(workflow="cli")
+
+    rows = NanofaasTUI(controller=RecordingController())._plan_rows(scenario, workflow)
+
+    assert rows == [
+        ("001.build-nanofaas-cli", "Build nanofaas-cli"),
+        ("002.list-functions", "List functions"),
     ]

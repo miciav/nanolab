@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 
+from sonata_engine.workflow.events import WorkflowEvent as SonataWorkflowEvent
 from workflow_tasks.workflow.events import WorkflowEvent
 from workflow_tasks.workflow.models import WorkflowState
 from nanolab.tui.models import (
@@ -91,7 +92,9 @@ class WorkflowEventAggregator:
         for phase in self._phases:
             complete_phase(phase)
 
-    def handle_event(self, event: WorkflowEvent) -> None:
+    # workflow_tasks emits running/completed, Sonata emits started/passed. One
+    # aggregator reads both for as long as the migration lasts.
+    def handle_event(self, event: WorkflowEvent | SonataWorkflowEvent) -> None:
         if event.kind == "log.line":
             if event.task_id:
                 self._phase_for_event(event)
@@ -105,7 +108,7 @@ class WorkflowEventAggregator:
         if event.kind == "task.pending":
             self._phase_for_event(event)
             return
-        if event.kind == "task.running":
+        if event.kind in ("task.running", "task.started"):
             self.append_log(
                 f"[step] {event.title or event.task_id or 'Task'}"
                 + (f" ({event.detail})" if event.detail else "")
@@ -114,7 +117,7 @@ class WorkflowEventAggregator:
             if phase is not None:
                 self._mark_phase_running(phase)
             return
-        if event.kind == "task.completed":
+        if event.kind in ("task.completed", "task.passed"):
             self.append_log(
                 f"[ok] {event.title or event.task_id or 'Task'}"
                 + (f" ({event.detail})" if event.detail else "")
@@ -172,7 +175,7 @@ class WorkflowEventAggregator:
 
     def _phase_for_event(
         self,
-        event: WorkflowEvent,
+        event: WorkflowEvent | SonataWorkflowEvent,
     ) -> TuiPhaseSnapshot | None:
         if event.parent_task_id:
             parent = self._phase_by_task_id.get(event.parent_task_id)

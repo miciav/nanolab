@@ -14,8 +14,9 @@ from rich.text import Text
 from nanolab.cli import diagnostics
 from nanolab.cli.execution import resolve_loadtest_urls
 from nanolab.cli.preflight import PreflightError, preflight_control_plane
-from nanolab.cli.product import _environment, _scenario, _workflow
+from nanolab.cli.product import _environment, _scenario, _workflow, uses_sonata
 from nanolab.cli.provisioning import provision_environment
+from nanolab.config import ScenarioConfig
 from nanolab.tui.workflow_controller import TuiWorkflowController
 from nanolab.workspace.paths import default_tool_paths, discover_tool_root
 from tui_toolkit import Choice, render_screen_frame, select
@@ -362,7 +363,7 @@ class NanofaasTUI:
                     body=str(exc),
                 )
                 return
-            self._render_plan(title=title, workflow=workflow)
+            self._render_plan(title=title, workflow=workflow, scenario=scenario)
             return
 
         try:
@@ -422,7 +423,9 @@ class NanofaasTUI:
                     f"Provision: {'yes' if provision else 'no'}",
                     f"Cleanup: {'keep' if keep else 'cleanup'}",
                 ],
-                planned_steps=preview.phase_titles,
+                planned_steps=[
+                    task_title for _task_id, task_title in self._plan_rows(scenario, preview)
+                ],
                 action=run_current_workflow,
             )
         except Exception:
@@ -452,13 +455,30 @@ class NanofaasTUI:
             return _workflow(scenario, environment, dry_run=dry_run)
         return _workflow(scenario, environment)
 
-    def _render_plan(self, *, title: str, workflow: Any) -> None:
+    def _plan_rows(self, scenario: ScenarioConfig, workflow: Any) -> list[tuple[str, str]]:
+        """(task_id, title) pairs for display, from whichever engine built the workflow.
+
+        A Sonata `Workflow` has no task list until it is compiled, and its
+        compiled units carry the title on the task, not on themselves.
+        """
+        if uses_sonata(scenario):
+            return [
+                (compiled_task.task_id, compiled_task.task.title)
+                for compiled_task in workflow.compile().tasks
+            ]
+        return [(task.task_id, task.title) for task in workflow.tasks]
+
+    def _render_plan(
+        self, *, title: str, workflow: Any, scenario: ScenarioConfig
+    ) -> None:
         table = Table(expand=True)
         table.add_column("#", justify="right", style="cyan", no_wrap=True)
         table.add_column("Task", style="bold")
         table.add_column("Description")
-        for index, task in enumerate(workflow.tasks, start=1):
-            table.add_row(f"{index:02d}", task.task_id, task.title)
+        for index, (task_id, task_title) in enumerate(
+            self._plan_rows(scenario, workflow), start=1
+        ):
+            table.add_row(f"{index:02d}", task_id, task_title)
 
         self._show_static(
             title=title,
