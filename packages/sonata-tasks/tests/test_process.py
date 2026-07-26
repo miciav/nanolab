@@ -39,6 +39,18 @@ def _spawner(process: FakeProcess, seen: list[dict[str, object]]):
     return spawn
 
 
+def _ready_once_spawned():
+    """False on the first call (the pre-spawn "is anything already up?" check),
+    True from the second call onward (the process we spawned is up)."""
+    calls = {"n": 0}
+
+    def ready() -> bool:
+        calls["n"] += 1
+        return calls["n"] > 1
+
+    return ready
+
+
 def test_it_builds_a_sonata_resource() -> None:
     resource = managed_process_resource(
         title="Acquire thing", argv=("run",), ready=lambda: True, spawn=_spawner(FakeProcess(), [])
@@ -55,7 +67,7 @@ def test_acquire_spawns_with_argv_and_cwd() -> None:
         title="Acquire thing",
         argv=("java", "-jar", "app.jar"),
         cwd=Path("/repo"),
-        ready=lambda: True,
+        ready=_ready_once_spawned(),
         spawn=_spawner(FakeProcess(), seen),
     )
 
@@ -65,8 +77,25 @@ def test_acquire_spawns_with_argv_and_cwd() -> None:
     assert seen[0]["cwd"] == Path("/repo")
 
 
+def test_acquire_refuses_to_start_when_something_is_already_answering() -> None:
+    seen: list[dict[str, object]] = []
+    resource = managed_process_resource(
+        title="Acquire thing",
+        argv=("run",),
+        ready=lambda: True,
+        spawn=_spawner(FakeProcess(), seen),
+    )
+
+    with pytest.raises(RuntimeError, match="already answering"):
+        resource.acquire()
+
+    # Something is already up, so we must never spawn a second, competing process.
+    assert seen == []
+
+
 def test_acquire_waits_until_ready() -> None:
-    attempts = iter([False, False, True])
+    # The first value covers the pre-spawn "is anything already up?" check.
+    attempts = iter([False, False, False, True])
     slept: list[float] = []
     resource = managed_process_resource(
         title="Acquire thing",
@@ -120,10 +149,35 @@ def test_acquire_fails_immediately_when_the_process_exits() -> None:
     assert slept == []
 
 
+def test_acquire_stops_the_process_when_the_readiness_wait_raises() -> None:
+    process = FakeProcess()
+    calls = {"n": 0}
+
+    def ready() -> bool:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return False  # pre-spawn check: nothing already running
+        raise KeyboardInterrupt
+
+    resource = managed_process_resource(
+        title="Acquire thing",
+        argv=("run",),
+        ready=ready,
+        spawn=_spawner(process, []),
+    )
+
+    with pytest.raises(KeyboardInterrupt):
+        resource.acquire()
+
+    # An interrupt (or any other exception) during the readiness wait must not
+    # leak the process we just spawned.
+    assert process.terminated is True
+
+
 def test_release_terminates_a_live_process() -> None:
     process = FakeProcess()
     resource = managed_process_resource(
-        title="Acquire thing", argv=("run",), ready=lambda: True, spawn=_spawner(process, [])
+        title="Acquire thing", argv=("run",), ready=_ready_once_spawned(), spawn=_spawner(process, [])
     )
 
     resource.acquire()
@@ -151,7 +205,7 @@ def test_release_kills_a_process_that_ignores_terminate() -> None:
 
     process = Stubborn()
     resource = managed_process_resource(
-        title="Acquire thing", argv=("run",), ready=lambda: True, spawn=_spawner(process, [])
+        title="Acquire thing", argv=("run",), ready=_ready_once_spawned(), spawn=_spawner(process, [])
     )
 
     resource.acquire()

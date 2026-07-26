@@ -45,24 +45,39 @@ def managed_process_resource(
 
     def acquire() -> None:
         nonlocal process
+        if ready():
+            # Something is already answering before we've spawned anything: an
+            # orphan from a previous run, a concurrent invocation, or someone's
+            # own instance. Starting our process on top of it would make this
+            # acquire pass against the WRONG process (the original bug's shape),
+            # so refuse instead of racing it.
+            raise RuntimeError(
+                f"{title}: refusing to start — something is already answering "
+                "the readiness check"
+            )
         current = spawn(argv, cwd=cwd, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
         if current is None:  # pragma: no cover - invalid injected spawn contract
             raise RuntimeError(f"{title} failed to start")
         process = current
-        for attempt in range(readiness_attempts):
-            exit_code = current.poll()
-            if exit_code is not None:
-                raise RuntimeError(
-                    f"{title} exited with code {exit_code} before becoming ready"
-                )
-            if ready():
-                return
-            if attempt < readiness_attempts - 1:
-                sleep(readiness_interval)
-        # The engine never releases an acquire that did not pass, so a process
-        # that never came up has to be cleaned up here or it leaks.
-        stop()
-        raise RuntimeError(f"{title} never became ready")
+        try:
+            for attempt in range(readiness_attempts):
+                exit_code = current.poll()
+                if exit_code is not None:
+                    raise RuntimeError(
+                        f"{title} exited with code {exit_code} before becoming ready"
+                    )
+                if ready():
+                    return
+                if attempt < readiness_attempts - 1:
+                    sleep(readiness_interval)
+            raise RuntimeError(f"{title} never became ready")
+        except BaseException:
+            # The engine never releases an acquire that did not complete, and
+            # the wait can end in more ways than "gave up": ready() can raise,
+            # or a KeyboardInterrupt can land during the up-to-90s wait. Any of
+            # those must still stop the process we just spawned, or it leaks.
+            stop()
+            raise
 
     # infrastructure stays False on purpose: `keep_infrastructure` skips the release
     # of infrastructure resources, and a spawned child process that outlives the run

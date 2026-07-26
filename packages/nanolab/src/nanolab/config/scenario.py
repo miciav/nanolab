@@ -46,8 +46,8 @@ class ScenarioConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_workflow(self) -> "ScenarioConfig":
-        if self.workflow == "validate" and self.backend is None:
-            raise ValueError("backend is required for validate workflow")
+        if self.workflow in ("validate", "cli") and self.backend is None:
+            raise ValueError(f"backend is required for {self.workflow} workflow")
         if self.workflow == "offload" and self.backend is not None:
             raise ValueError("offload workflow does not take a backend")
         if set(self.resources) - set(self.functions):

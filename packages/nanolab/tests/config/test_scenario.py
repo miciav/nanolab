@@ -24,6 +24,11 @@ def test_validate_requires_backend() -> None:
         ScenarioConfig(workflow="validate", functions=["word-stats-java"])
 
 
+def test_cli_requires_backend() -> None:
+    with pytest.raises(ValidationError, match="backend is required"):
+        ScenarioConfig(workflow="cli", functions=["word-stats-java"])
+
+
 def test_resource_request_must_not_exceed_limit() -> None:
     with pytest.raises(ValidationError, match="resource request must not exceed limit"):
         ScenarioConfig.model_validate(

@@ -1,6 +1,5 @@
 import json
 from pathlib import Path
-import urllib.request
 
 import yaml
 from workflow_tasks.components.container import managed_process_resource
@@ -15,36 +14,18 @@ from workflow_tasks.workflows.validate import (
 
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.functions.catalog import FunctionDefinition, resolve_function_definition
+from nanolab.plans import _local_control_plane
 from nanolab.plans._assembly import workflow_from_specs
 from nanolab.workspace.paths import discover_tool_root
 
 
 def _container_control_plane(repo_root: Path):
-    health_url = "http://127.0.0.1:18081/actuator/health"
-
-    def ready() -> bool:
-        try:
-            with urllib.request.urlopen(health_url, timeout=1) as response:
-                return response.status == 200
-        except OSError:
-            return False
-
     return managed_process_resource(
         task_id="container.start.control-plane",
         title="Start container-local control plane",
-        argv=(
-            "java",
-            "-jar",
-            str(repo_root / "platform/control-plane/build/libs/app.jar"),
-            "--server.port=18080",
-            "--management.server.port=18081",
-            "--sync-queue.enabled=false",
-            "--nanofaas.deployment.default-backend=container-local",
-            "--nanofaas.container-local.runtime-adapter=docker",
-            "--nanofaas.container-local.bind-host=127.0.0.1",
-        ),
+        argv=_local_control_plane.argv(repo_root),
         cwd=repo_root,
-        ready=ready,
+        ready=_local_control_plane.ready,
     )
 
 

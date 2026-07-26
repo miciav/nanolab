@@ -1,5 +1,4 @@
 import json
-import urllib.request
 from pathlib import Path
 
 from sonata_engine import Resource, Workflow
@@ -9,10 +8,10 @@ from workflow_tasks.execution.bindings import RoleBindings
 from workflow_tasks.execution.roles import ExecutionRole
 
 from nanolab.config.scenario import ScenarioConfig
+from nanolab.plans import _local_control_plane
 from nanolab.plans.validate import _resolve_function
 
-LOCAL_ENDPOINT = "http://127.0.0.1:18080"
-LOCAL_HEALTH_URL = "http://127.0.0.1:18081/actuator/health"
+LOCAL_ENDPOINT = _local_control_plane.ENDPOINT
 LOCAL_CONTROL_PLANE_BUILD_ARGV = (
     "./gradlew",
     ":control-plane:bootJar",
@@ -21,36 +20,13 @@ LOCAL_CONTROL_PLANE_BUILD_ARGV = (
 )
 
 
-def _local_control_plane(repo_root: Path) -> Resource:
-    """The control plane running on this machine, deploying functions with Docker.
-
-    The health probe deliberately targets the management port: the actuator never
-    lives on the API port, which is what made the old `cli` preflight impossible
-    to satisfy.
-    """
-
-    def ready() -> bool:
-        try:
-            with urllib.request.urlopen(LOCAL_HEALTH_URL, timeout=1) as response:
-                return response.status == 200
-        except OSError:
-            return False
-
+def _local_control_plane_resource(repo_root: Path) -> Resource:
+    """The control plane running on this machine, deploying functions with Docker."""
     return managed_process_resource(
         title="Acquire local control plane",
-        argv=(
-            "java",
-            "-jar",
-            str(repo_root / "platform/control-plane/build/libs/app.jar"),
-            "--server.port=18080",
-            "--management.server.port=18081",
-            "--sync-queue.enabled=false",
-            "--nanofaas.deployment.default-backend=container-local",
-            "--nanofaas.container-local.runtime-adapter=docker",
-            "--nanofaas.container-local.bind-host=127.0.0.1",
-        ),
+        argv=_local_control_plane.argv(repo_root),
         cwd=repo_root,
-        ready=ready,
+        ready=_local_control_plane.ready,
     )
 
 
@@ -92,7 +68,7 @@ def build_cli_plan(
         endpoint=target_endpoint,
         namespace=namespace,
     )
-    requires = (_local_control_plane(root),) if local else ()
+    requires = (_local_control_plane_resource(root),) if local else ()
     return build_cli_workflow(
         request,
         bindings,
