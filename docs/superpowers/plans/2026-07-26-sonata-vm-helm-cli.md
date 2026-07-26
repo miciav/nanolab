@@ -169,14 +169,14 @@ class Resource(Generic[T]):
     acquire_idempotent: bool = False
 ```
 
-- [ ] **Step 1: creare il branch e confermare la baseline**
+- [x] **Step 1: creare il branch e confermare la baseline**
 
 ```bash
 git switch -c codex/resource-values 0bafb9ab3778b54ca3f08a75c1f3ccd0ed3e017b
 git status --short --branch
 ```
 
-- [ ] **Step 2: scrivere test rossi**
+- [x] **Step 2: scrivere test rossi**
 
 Copri almeno:
 
@@ -211,7 +211,7 @@ uv run basedpyright
 
 Atteso: fallimento per API e firme mancanti.
 
-- [ ] **Step 3: implementare il minimo**
+- [x] **Step 3: implementare il minimo**
 
 `TaskInputs` deve essere una vista immutabile di:
 
@@ -240,12 +240,12 @@ class ResourceOperation(StrEnum):
 
 Il release può leggere la propria Resource oltre alle dipendenze dichiarate.
 
-- [ ] **Step 4: migrare tutte le firme Sonata**
+- [x] **Step 4: migrare tutte le firme Sonata**
 
 Aggiorna tutte le implementazioni/test double da `run(self)` a
 `run(self, _inputs: TaskInputs)`. Non introdurre uno shim con `inspect.signature`.
 
-- [ ] **Step 5: verificare e committare**
+- [x] **Step 5: verificare e committare**
 
 ```bash
 uv run pytest
@@ -276,7 +276,7 @@ git commit -m "feat: add typed resource values"
 - Test: `tests/test_journal.py`
 - Test: `tests/test_resume.py`
 
-- [ ] **Step 1: scrivere test rossi sul grafo**
+- [x] **Step 1: scrivere test rossi sul grafo**
 
 Costruisci `vm`, `helm(requires=(vm,))`,
 `function(requires=(helm,))` e un consumer che richiede `function`.
@@ -297,7 +297,7 @@ Verifica:
 uv run pytest tests/core/test_compiled.py tests/core/test_compile_selection.py tests/core/test_run_selection.py tests/test_journal.py -q
 ```
 
-- [ ] **Step 2: implementare DFS stabile e accesso stretto**
+- [x] **Step 2: implementare DFS stabile e accesso stretto**
 
 Espandi `requires` con DFS in ordine dichiarato e colori
 `unseen/visiting/done`. Usa la chiusura solo per placement e lifecycle;
@@ -307,12 +307,12 @@ direttamente.
 Per gli acquire/release generati, `required_resources` contiene le dipendenze
 dirette della Resource.
 
-- [ ] **Step 3: rendere il fingerprint sensibile agli archi**
+- [x] **Step 3: rendere il fingerprint sensibile agli archi**
 
 Nel payload del fingerprint registra, per ciascun acquire, gli ID compilati
 degli acquire richiesti. Non usare `repr()` delle callback o indirizzi runtime.
 
-- [ ] **Step 4: retention transitiva con `keep_infrastructure`**
+- [x] **Step 4: retention transitiva con `keep_infrastructure`**
 
 Prima del run calcola il set retained:
 
@@ -324,7 +324,7 @@ ogni Resource infrastructure
 Salta il release per tutto il set, non soltanto per la Resource che porta il
 flag. Aggiungi test sia sul percorso felice sia sul cleanup dopo errore.
 
-- [ ] **Step 5: verificare e committare**
+- [x] **Step 5: verificare e committare**
 
 ```bash
 uv run pytest
@@ -348,7 +348,7 @@ git commit -m "feat: compile resource dependency graphs"
 - Test: `tests/test_package_boundaries.py`
 - Test: `tests/typecheck/task_contracts.py`
 
-- [ ] **Step 1: aggiungere esempi pubblici**
+- [x] **Step 1: aggiungere esempi pubblici**
 
 Documenta:
 
@@ -358,7 +358,7 @@ Documenta:
 - selection e retention transitive;
 - valori runtime non journalizzati e ricostruiti al resume.
 
-- [ ] **Step 2: verificare export e confini**
+- [x] **Step 2: verificare export e confini**
 
 Gli utenti devono importare da `sonata_engine`:
 
@@ -368,7 +368,7 @@ from sonata_engine import Resource, TaskInputs
 
 Il test di package boundary deve continuare a impedire dipendenze applicative.
 
-- [ ] **Step 3: eseguire la suite completa e committare**
+- [x] **Step 3: eseguire la suite completa e committare**
 
 ```bash
 uv run pytest
@@ -382,7 +382,7 @@ git commit -m "docs: explain resource inputs and dependencies"
 git log --oneline 0bafb9ab..HEAD
 ```
 
-- [ ] **Step 4: push della branch candidata**
+- [x] **Step 4: push della branch candidata**
 
 ```bash
 git push -u origin codex/resource-values
@@ -408,7 +408,7 @@ revisionato e poi integrato in `origin/main`.
 - Test: `packages/sonata-tasks/tests/test_process.py`
 - Modify generated: `uv.lock`
 
-- [ ] **Step 1: confermare il branch creato con i documenti**
+- [x] **Step 1: confermare il branch creato con i documenti**
 
 La pianificazione crea `codex/sonata-vm-helm-cli` da `9878efe` e vi committa
 design e piano. Prima di implementare verifica branch e merge-base:
@@ -423,7 +423,7 @@ Il branch deve essere `codex/sonata-vm-helm-cli` e il merge-base deve essere
 `9878efe`. Se l'esecuzione parte da un clone dove il branch non è presente,
 crealo da `9878efe` e porta soltanto il commit dei documenti.
 
-- [ ] **Step 2: usare Sonata locale durante lo sviluppo**
+- [x] **Step 2: usare Sonata locale durante lo sviluppo**
 
 Nel solo periodo di sviluppo, aggiungi alla root `[tool.uv.sources]`:
 
@@ -439,7 +439,7 @@ soltanto in sviluppo. Rigenera il lock:
 uv lock
 ```
 
-- [ ] **Step 3: scrivere test rossi per il nuovo contratto**
+- [x] **Step 3: scrivere test rossi per il nuovo contratto**
 
 I test diretti devono chiamare:
 
@@ -451,13 +451,13 @@ resource.acquire(TaskInputs.empty())
 Il processo gestito deve diventare `Resource[Popen[Any]]`; il release deve
 ricevere il processo prodotto, senza campo/cella mutabile.
 
-- [ ] **Step 4: implementare la migrazione minima**
+- [x] **Step 4: implementare la migrazione minima**
 
 Aggiorna le callback CLI function a `acquire(inputs)` e
 `release(inputs, value)`. In questo task non aggiungere ancora VM, Helm,
 readiness k8s o argv dinamici.
 
-- [ ] **Step 5: verificare e committare**
+- [x] **Step 5: verificare e committare**
 
 ```bash
 uv run --all-packages --all-groups pytest -c packages/sonata-tasks/pyproject.toml packages/sonata-tasks/tests -q
@@ -491,7 +491,7 @@ class CommandTask(Task[TaskResult]):
     env: Mapping[str, str] = field(default_factory=dict)
 ```
 
-- [ ] **Step 1: scrivere test rossi**
+- [x] **Step 1: scrivere test rossi**
 
 Verifica che:
 
@@ -502,12 +502,12 @@ Verifica che:
 - il resolver venga chiamato una volta per esecuzione;
 - un errore del resolver fallisca prima di invocare l'executor.
 
-- [ ] **Step 2: implementare il minimo**
+- [x] **Step 2: implementare il minimo**
 
 Rendi `_spec(inputs)` l'unico punto che risolve argv ed env. Non aggiungere un
 secondo tipo di task remoto.
 
-- [ ] **Step 3: verificare e committare**
+- [x] **Step 3: verificare e committare**
 
 ```bash
 uv run --all-packages --all-groups pytest -c packages/sonata-tasks/pyproject.toml packages/sonata-tasks/tests/test_command.py -q
@@ -543,7 +543,7 @@ vm_resource(
 ) -> Resource[VmInfo]
 ```
 
-- [ ] **Step 1: scrivere test rossi**
+- [x] **Step 1: scrivere test rossi**
 
 Copri:
 
@@ -555,12 +555,12 @@ Copri:
   primario;
 - la Resource è `infrastructure=True`.
 
-- [ ] **Step 2: implementare riusando gli adapter esistenti**
+- [x] **Step 2: implementare riusando gli adapter esistenti**
 
 Non spostare provider/configuration in Sonata. L'helper può usare
 `workflow_tasks` per la meccanica VM, ma non deve importare `nanolab`.
 
-- [ ] **Step 3: verificare contratti e committare**
+- [x] **Step 3: verificare contratti e committare**
 
 ```bash
 uv run --all-packages --all-groups pytest -c packages/sonata-tasks/pyproject.toml packages/sonata-tasks/tests/test_vm.py -q
@@ -605,7 +605,7 @@ def helm_release_resource(
 ) -> Resource[HelmReleaseSpec]: ...
 ```
 
-- [ ] **Step 1: scrivere test rossi**
+- [x] **Step 1: scrivere test rossi**
 
 Verifica:
 
@@ -617,12 +617,12 @@ Verifica:
 - errore di cleanup è una nota sull'errore primario;
 - Resource è infrastructure.
 
-- [ ] **Step 2: implementare il minimo**
+- [x] **Step 2: implementare il minimo**
 
 Il builder è generico: niente nome chart nanoFaaS, porte o valori di prodotto
 hard-coded in `sonata-tasks`.
 
-- [ ] **Step 3: verificare e committare**
+- [x] **Step 3: verificare e committare**
 
 ```bash
 uv run --all-packages --all-groups pytest -c packages/sonata-tasks/pyproject.toml packages/sonata-tasks/tests/test_helm.py -q
@@ -650,7 +650,7 @@ git commit -m "feat: add Sonata Helm resource"
   `packages/nanolab/src/nanolab/cli/vm_provider.py`,
   `packages/nanolab/src/nanolab/cli/provisioning.py`.
 
-- [ ] **Step 1: testare prima la topologia di prodotto**
+- [x] **Step 1: testare prima la topologia di prodotto**
 
 In `packages/nanolab/tests/plans/test_cli.py` aggiungi un ambiente Multipass
 finto e verifica gli esatti 14 ID della sezione “Topologia attesa”.
@@ -670,13 +670,13 @@ Verifica inoltre:
 NANOFAAS_ROOT=/Users/micheleciavotta/Downloads/mcFaas uv run --all-packages --all-groups pytest -c packages/nanolab/pyproject.toml packages/nanolab/tests/plans/test_cli.py -q
 ```
 
-- [ ] **Step 2: separare ruolo di build e ruolo runtime**
+- [x] **Step 2: separare ruolo di build e ruolo runtime**
 
 Estendi `CliWorkflowRequest` con `build_role: ExecutionRole = "host"`.
 `Build nanofaas-cli`, build control plane e build immagini usano `build_role`;
 apply/list/invoke/delete usano `cli_role`.
 
-- [ ] **Step 3: costruire bootstrap runtime**
+- [x] **Step 3: costruire bootstrap runtime**
 
 Riusa i planner esistenti:
 
@@ -695,7 +695,7 @@ Produci le operazioni prima del run con una request placeholder. Ogni
 
 Il sync deve includere `clients/cli/build/install/nanofaas-cli` già costruito.
 
-- [ ] **Step 4: costruire valori Helm in nanolab**
+- [x] **Step 4: costruire valori Helm in nanolab**
 
 Usa la chart del repository con:
 
@@ -707,7 +707,7 @@ Usa la chart del repository con:
 
 La Resource Helm usa ruolo stack e `requires=(vm,)`.
 
-- [ ] **Step 5: aggiungere readiness function soltanto al provisioned k8s**
+- [x] **Step 5: aggiungere readiness function soltanto al provisioned k8s**
 
 Estendi il builder function con callback opzionale di readiness. Dopo `fn apply`:
 
@@ -719,7 +719,7 @@ best-effort e rilancia l'errore primario.
 
 Non modificare container-local né k8s non provisioned.
 
-- [ ] **Step 6: verificare e committare**
+- [x] **Step 6: verificare e committare**
 
 ```bash
 uv run --all-packages --all-groups pytest -c packages/sonata-tasks/pyproject.toml packages/sonata-tasks/tests/test_cli.py -q
@@ -744,7 +744,7 @@ git commit -m "feat: provision CLI workflow with Sonata"
 - Modify: `packages/nanolab/src/nanolab/cli/product.py`
 - Modify: `packages/nanolab/tests/cli/test_command_surface.py`
 
-- [ ] **Step 1: scrivere test rossi sulla matrice CLI**
+- [x] **Step 1: scrivere test rossi sulla matrice CLI**
 
 Copri:
 
@@ -759,7 +759,7 @@ Copri:
 Verifica anche che `plan cli.yaml --provision --environment ...` mostri i 14
 task e che `run cli.yaml --provision` non entri nel context manager legacy.
 
-- [ ] **Step 2: propagare `provision` nel builder**
+- [x] **Step 2: propagare `provision` nel builder**
 
 Estendi `_workflow(..., provision: bool = False)` e passa scenario/environment
 a `build_cli_plan` quando serve costruire le risorse.
@@ -772,7 +772,7 @@ and scenario.backend == "k8s"
 and not provision
 ```
 
-- [ ] **Step 3: un solo proprietario del lifecycle**
+- [x] **Step 3: un solo proprietario del lifecycle**
 
 Nel comando `run`, usa `provision_environment` soltanto se il percorso non è
 `cli/k8s` Sonata provisioned. Il workflow Sonata riceve
@@ -781,7 +781,7 @@ Nel comando `run`, usa `provision_environment` soltanto se il percorso non è
 Aggiungi `--provision` e `--environment` al comando `plan` con le stesse
 validazioni del run.
 
-- [ ] **Step 4: verificare e committare**
+- [x] **Step 4: verificare e committare**
 
 ```bash
 NANOFAAS_ROOT=/Users/micheleciavotta/Downloads/mcFaas uv run --all-packages --all-groups pytest -c packages/nanolab/pyproject.toml packages/nanolab/tests/cli/test_command_surface.py -q
@@ -804,7 +804,7 @@ git commit -m "feat: expose Sonata provisioning in CLI"
 - Modify: `packages/nanolab/tests/test_tui_app.py`
 - Test as needed: `packages/nanolab/tests/test_tui_navigation.py`
 
-- [ ] **Step 1: scrivere test rossi sul menu**
+- [x] **Step 1: scrivere test rossi sul menu**
 
 Il menu CLI deve essere:
 
@@ -834,7 +834,7 @@ Verifica che il percorso Kubernetes:
 - `Keep` imposti `workflow.keep_infrastructure=True`;
 - Back da cleanup torni ad Action senza contaminare il percorso container.
 
-- [ ] **Step 2: rendere il tipo di percorso esplicito**
+- [x] **Step 2: rendere il tipo di percorso esplicito**
 
 Non dedurre il provisioning soltanto dal nome file. Conserva una proprietà
 locale derivata dalla coppia `(section, action)`:
@@ -846,7 +846,7 @@ provisioned_cli = scenario_name == "cli.yaml"
 oppure un piccolo mapping booleano adiacente a `_SCENARIO_FILES`. Non introdurre
 una nuova gerarchia di classi per due opzioni.
 
-- [ ] **Step 3: usare lo stesso workflow per plan, preview e run**
+- [x] **Step 3: usare lo stesso workflow per plan, preview e run**
 
 Estendi `_build_workflow(..., provision: bool)` e propaga il flag a
 `nanolab.cli.product._workflow`.
@@ -861,7 +861,7 @@ Per `Kubernetes (provisioned)`:
 
 Il percorso container resta identico e continua a non accettare Keep.
 
-- [ ] **Step 4: verificare e committare**
+- [x] **Step 4: verificare e committare**
 
 ```bash
 NANOFAAS_ROOT=/Users/micheleciavotta/Downloads/mcFaas uv run --all-packages --all-groups pytest -c packages/nanolab/pyproject.toml packages/nanolab/tests/test_tui_app.py packages/nanolab/tests/test_tui_navigation.py -q
@@ -878,7 +878,7 @@ git commit -m "feat: expose provisioned CLI path in TUI"
 
 **Ordine obbligatorio:** prima review/merge Sonata, poi pin nanolab.
 
-- [ ] **Step 1: revisionare Sonata**
+- [x] **Step 1: revisionare Sonata**
 
 Da `/Users/micheleciavotta/Downloads/sonata`:
 
@@ -894,7 +894,7 @@ git diff 0bafb9ab...HEAD
 Richiedere review con `superpowers:requesting-code-review`; correggere soltanto
 finding verificati con `superpowers:receiving-code-review`.
 
-- [ ] **Step 2: integrare Sonata**
+- [x] **Step 2: integrare Sonata**
 
 Creare/mergiare la PR Sonata. Poi:
 
@@ -907,7 +907,7 @@ git rev-parse origin/main
 Il primo comando deve uscire `0`. Registra il full SHA risultante come
 `SONATA_MAIN_SHA`.
 
-- [ ] **Step 3: rimuovere l'override locale e aggiornare il pin**
+- [x] **Step 3: rimuovere l'override locale e aggiornare il pin**
 
 Da `/Users/micheleciavotta/Downloads/nanolab`:
 
@@ -924,7 +924,7 @@ rg -n "sonata.git" packages/sonata-tasks/pyproject.toml uv.lock
 
 La ricerca non deve mostrare path locale o nome della feature branch.
 
-- [ ] **Step 4: committare il pin**
+- [x] **Step 4: committare il pin**
 
 ```bash
 git diff --check

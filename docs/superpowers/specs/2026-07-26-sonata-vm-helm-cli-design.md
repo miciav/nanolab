@@ -354,28 +354,56 @@ Prima delle correzioni emerse durante Task 12, nanolab aveva questa baseline:
 - `tui-toolkit` al 93,67%;
 - Ruff, basedpyright sui quattro package, 11 contratti di import, lock e build verdi.
 
-Il gate completo di Step 2 è stato rieseguito sul commit nanolab `db96001`:
+Il gate completo di Step 2 è stato rieseguito sul commit nanolab `db96001`. Questo
+manifest tracciato è la fonte durevole dell'esito:
 
-- nanolab: 690 test passati;
-- `sonata-tasks`: 69 test passati, coverage 99,55%;
-- `workflow-tasks`: 475 test passati, coverage 93,43%;
-- `tui-toolkit`: 51 test passati, coverage 97,11%;
-- Ruff verde e basedpyright sui quattro package con 0 errori e 0 warning;
-- 11/11 contratti di import verdi, ripartiti 4 + 2 + 3 + 2;
-- `uv lock --check` verde su 61 package;
-- build sdist e wheel verdi per `sonata-tasks` e nanolab;
-- `git diff --check` verde e working tree pulito.
+```text
+NANOFAAS_ROOT=<checkout-mcFaas> uv run --all-packages --all-groups \
+  pytest -c packages/nanolab/pyproject.toml packages/nanolab/tests -q
+uv run --all-packages --all-groups \
+  pytest -c packages/<package>/pyproject.toml packages/<package>/tests -q
+uv run --all-packages --all-groups ruff check packages
+uv run --all-packages --all-groups basedpyright --project packages/<package>
+uv run --all-packages --all-groups \
+  lint-imports --config packages/<package>/.importlinter --no-cache
+uv lock --check
+uv build --package <sonata-tasks|nanolab>
+git diff --check
+```
 
-I contratti di topologia hanno verificato: piano CLI container invariato a 9 task
-con release finale `009`, k8s non provisioned a 5 task, provisioned a 14 task e
-slice selezionata con closure di 7 unità. Sono inoltre passati 5 test focalizzati su
-legacy, wrapper e topologia; i piani `validate-container` a 6 task e `validate-k8s`
-a 12 task sono terminati con codice 0.
+Nel secondo comando `<package>` è stato espanso sui tre package restanti; nel quarto
+e quinto su tutti e quattro i package per type check e import-linter.
+
+| Gruppo di comandi | Exit code | Risultato |
+|---|---:|---|
+| `pytest` con config/package nanolab e `NANOFAAS_ROOT` | 0 | 690 test passati |
+| `pytest` con config/package `sonata-tasks` | 0 | 69 test passati, coverage 99,55% |
+| `pytest` con config/package `workflow-tasks` | 0 | 475 test passati, coverage 93,43% |
+| `pytest` con config/package `tui-toolkit` | 0 | 51 test passati, coverage 97,11% |
+| `ruff check packages` | 0 | verde |
+| `basedpyright --project` per i quattro package | 0 ciascuno | 0 errori, 0 warning |
+| `lint-imports` per i quattro package | 0 ciascuno | 11/11 contratti, ripartiti 4 + 2 + 3 + 2 |
+| `uv lock --check` | 0 | 61 package |
+| `uv build --package sonata-tasks` | 0 | sdist e wheel |
+| `uv build --package nanolab` | 0 | sdist e wheel |
+| `git diff --check` e `git status --short` | 0 | diff valido e working tree pulito |
+
+Il gruppo pytest focalizzato su legacy, wrapper e topologia ha passato 5 test. I
+comandi `nanolab plan` hanno verificato queste forme e postcondizioni:
+
+- CLI container: exit 0, 9 task, con `009` release finale;
+- CLI k8s non provisioned: exit 0, 5 task;
+- CLI k8s provisioned con fixture Multipass: exit 0, 14 task, inclusi
+  `002.acquire-stack-vm`, `008.acquire-control-plane-helm-release` e
+  `014.release-stack-vm`;
+- slice provisioned `--only invoke-word-stats-java`: exit 0, closure di 7 unità;
+- `validate-container`: exit 0, 6 task;
+- `validate-k8s`: exit 0, 12 task.
 
 Il manifest e il lock puntano entrambi all'esatto SHA immutabile Sonata
 `527d042a83ed55b6cc6334885121241146204fcf`, versione `0.2.0`, senza override
-locale. I log del gate completo sono in
-`/private/tmp/nanolab-task12-verify.nRYNWc`.
+locale. `/private/tmp/nanolab-task12-verify.nRYNWc` contiene soltanto diagnostica
+locale transitoria del rerun; non è la fonte dell'evidenza qui registrata.
 
 La CI compila inoltre un vero piano `plan --provision` con un environment Multipass
 di fixture, senza avviare alcuna VM. Il contratto verifica il piano di 14 task e gli
@@ -401,24 +429,30 @@ review finale dell'intero branch.
 
 ### Validazione live
 
-Il rerun CLI finale sul commit nanolab
-`2ef60637b1e8e68d141326859659bd772bb48790` ha superato tutti i controlli Task 12
-da 1 a 10:
+Il codice live validato è il commit nanolab
+`2ef60637b1e8e68d141326859659bd772bb48790`. Il run finale ha superato tutti i
+controlli Task 12 da 1 a 10 con queste sequenze e postcondizioni durevoli:
 
-- il run completo con cleanup è terminato con codice 0; list e invoke sono passati,
-  poi function, Helm e VM sono stati rilasciati in quest'ordine;
-- la slice `--only invoke-word-stats-java` ha compilato ed eseguito le sette unità
-  della closure delle risorse;
-- l'invoke forzato con JSON `status=error` ha restituito il reale codice 1 dopo
-  tutti gli acquire e ha comunque completato il cleanup nell'ordine esatto
-  function → Helm → VM;
-- il run con `--keep` ha conservato VM, Helm e function;
-- il cleanup manuale esplicito è terminato con codice 0 e senza istanze residue.
+| Scenario | Esito | Sequenza/postcondizione verificata |
+|---|---|---|
+| `plan ...cli.yaml --environment <multipass> --provision` | exit 0, 14 task | topologia completa `001`–`014` descritta in N2 |
+| run completo Cleanup | exit 0 | list e invoke passati; release function → Helm → VM; function e release Helm assenti, VM distrutta |
+| slice `--only invoke-word-stats-java` | 7 unità compilate ed eseguite | acquire VM → Helm → function → invoke → release function → Helm → VM |
+| invoke forzato con JSON `status=error` | exit 1 reale | tutti gli acquire eseguiti; cleanup function → Helm → VM completato |
+| run `--keep` | PASS | VM, release Helm e function presenti dopo il run |
+| cleanup manuale esplicito | exit 0 | risorse trattenute eliminate; nessuna istanza Multipass residua |
 
-I log della validazione CLI sono in
-`/private/tmp/nanolab-task12-live-fixed.EtihhD/`.
+La sequenza eventi osservata nel run completo includeva le 14 fasi nell'ordine
+compilato N2: build; acquire VM; cinque task bootstrap; acquire Helm; acquire
+function; list; invoke; release function; release Helm; release VM. Nel fallimento
+forzato i tre eventi di release sono rimasti presenti e ordinati function → Helm →
+VM.
 
-La walkthrough TUI è stata eseguita sullo stesso commit tramite:
+`/private/tmp/nanolab-task12-live-fixed.EtihhD/` contiene soltanto diagnostica
+locale transitoria; l'evidenza durevole è il manifest qui sopra.
+
+La walkthrough TUI è un'attestazione manuale interattiva osservata nel PTY di
+controllo sullo stesso commit, tramite:
 
 ```text
 CLI
@@ -432,4 +466,5 @@ Il dashboard finale mostrava esattamente 14 fasi, tutte `success`, con righe eve
 e log Sonata reali per VM, bootstrap, Helm, function, list, invoke e release. La VM
 ha raggiunto lo stato `Deleted`, l'unica istanza esatta è stata eliminata e
 `multipass list` ha restituito `No instances found`. La sessione TUI è stata
-osservata nel PTY di controllo; non è stato prodotto un file transcript persistente.
+osservata direttamente; non esistono screenshot, transcript o altri artefatti
+persistenti della sessione.
