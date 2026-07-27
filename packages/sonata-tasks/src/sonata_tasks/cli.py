@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from sonata_engine import Resource, TaskInputs, Workflow
+from sonata_engine import Resource, Workflow
 from workflow_tasks.execution.bindings import (
     CommandTaskExecutor,
     RoleBindings,
@@ -16,6 +16,7 @@ from workflow_tasks.execution.roles import ExecutionRole
 from workflow_tasks.tasks.models import TaskResult
 
 from sonata_tasks.command import CommandTask
+from sonata_tasks.function import function_resource
 
 
 @dataclass(frozen=True, slots=True)
@@ -168,13 +169,10 @@ def _function_resource(
 ) -> Resource[None]:
     """The registered function as an acquire/release pair.
 
-    Sonata splices the apply before the first task that needs the function and
-    the delete after the last one, and runs the delete even when a consumer
-    fails. That is why the old separate `cleanup_specs` list is gone.
-
-    `requires` (e.g. a Helm release the function's Deployment depends on) is a
-    real compiled edge, not just something every consumer happens to also list:
-    a slice that keeps this function keeps `requires` too.
+    Only the commands are CLI-specific: applying a manifest through the nanofaas
+    binary. The lifecycle around them — splicing, compensation on a partial
+    register, readiness — belongs to `function_resource`, which every other
+    workflow reuses with its own register and delete commands.
     """
     apply_task = CommandTask(
         title=f"Apply {function.name}",
@@ -196,31 +194,12 @@ def _function_resource(
         else ()
     )
 
-    def acquire(_inputs: TaskInputs) -> None:
-        try:
-            _ = apply_task.run(TaskInputs.empty())
-            for ready_task in ready_tasks:
-                _ = ready_task.run(TaskInputs.empty())
-        except BaseException as error:
-            # The apply may have registered the function before failing, or the
-            # readiness wait may have timed out after a real apply. Either way
-            # the engine will not release an acquire that did not pass, so the
-            # compensation has to happen here, best-effort.
-            try:
-                _ = delete_task.run(TaskInputs.empty())
-            except BaseException as cleanup_error:
-                error.add_note(f"Best-effort delete after a failed apply failed: {cleanup_error}")
-            raise
-
-    def release(_inputs: TaskInputs, _value: None) -> None:
-        _ = delete_task.run(TaskInputs.empty())
-
-    return Resource(
-        title=f"Acquire {function.name}",
-        acquire=acquire,
-        release=release,
+    return function_resource(
+        name=function.name,
+        register=apply_task,
+        delete=delete_task,
+        readiness=ready_tasks,
         requires=requires,
-        infrastructure=True,
     )
 
 

@@ -2,6 +2,7 @@
 
 from sonata_tasks.cli import CliFunction, CliWorkflowRequest, build_cli_workflow
 from sonata_tasks.command import CommandTask
+from sonata_tasks.function import function_resource
 from sonata_tasks.helm import HelmReleaseSpec, helm_release_resource
 from sonata_tasks.process import managed_process_resource
 from sonata_tasks.vm import vm_resource
@@ -12,6 +13,7 @@ __all__ = [
     "CommandTask",
     "HelmReleaseSpec",
     "build_cli_workflow",
+    "function_resource",
     "helm_release_resource",
     "managed_process_resource",
     "vm_resource",
