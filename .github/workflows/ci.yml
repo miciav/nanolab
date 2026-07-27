@@ -23,7 +23,10 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: miciav/nanofaas
-          ref: 4e0aa0751b5f3a5008012994bd4a8843de801316
+          # nanofaas main at "Prepare release v0.17.1". Carries the
+          # deploymentObjects field the control plane now reports, and the 0.17.1
+          # version bump — which the release tests read rather than assume.
+          ref: ef80fd3b67e9f858f18e1868955ac8931ad43c03
           path: .nanofaas-source
           token: ${{ secrets.NANOFAAS_CHECKOUT_TOKEN }}
 
