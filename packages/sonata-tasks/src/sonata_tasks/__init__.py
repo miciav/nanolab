@@ -6,6 +6,7 @@ from sonata_tasks.command import CommandTask
 from sonata_tasks.function import function_resource
 from sonata_tasks.http_function import HttpFunctionDeleteTask, HttpFunctionRegisterTask
 from sonata_tasks.kubectl import KubectlTask
+from sonata_tasks.lifecycle import compensated_resource
 from sonata_tasks.manifest import FunctionManifest
 from sonata_tasks.docker import (
     DockerBuildTask,
@@ -39,6 +40,7 @@ __all__ = [
     "HelmReleaseSpec",
     "HelmUninstallTask",
     "build_cli_workflow",
+    "compensated_resource",
     "DockerBuildTask",
     "DockerInspectTask",
     "DockerPushTask",
