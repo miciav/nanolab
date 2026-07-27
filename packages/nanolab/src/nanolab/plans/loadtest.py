@@ -91,9 +91,7 @@ def build_loadtest_plan(
         role_target = environment.target("loadgen" if dedicated else "stack")
         home = _home(role_target.user, role_target.home)
         script_name = "autoscaling.js" if config.autoscaling else "two-vm-function-invoke.js"
-        # ponytail: remote checkout still carries legacy tool assets; stage nanolab assets
-        # separately when the monorepo copy is removed.
-        script_path = Path(home) / f"nanofaas/tools/controlplane/assets/k6/{script_name}"
+        script_path = Path(home) / f"nanolab-assets/k6/{script_name}"
         summary_path = Path(home) / "nanofaas-loadtest/k6-summary.json"
     else:
         script_name = "autoscaling.js" if config.autoscaling else "two-vm-function-invoke.js"

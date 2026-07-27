@@ -48,6 +48,9 @@ class ScenarioExecutionContext:
     manifest_path: Path | None = None
     release: str | None = None
     loadgen_vm_request: VmRequest | None = None
+    # Directory of tooling assets (k6 scripts) staged onto load-generating VMs,
+    # injected by the nanolab context factory; they no longer live in the repo.
+    assets_root: Path | None = None
     # nanolab verification commands, injected by the nanolab context factory.
     # Empty by default so this library module stays nanolab-agnostic.
     k3s_curl_verify_command: tuple[str, ...] = ()

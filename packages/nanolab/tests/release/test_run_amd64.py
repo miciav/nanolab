@@ -329,43 +329,14 @@ def test_source_tests_reuse_gradle_and_uv_and_pin_container_toolchains() -> None
     assert commands[0].argv == ("./gradlew", "test")
     python_commands = [command for command in commands if command.argv[:2] == ("uv", "run")]
     assert {command.task_id for command in python_commands} == {
-        "release.source.controlplane",
-        "release.source.workflow-tasks",
         "release.source.python-sdk",
     }
     by_id = {command.task_id: command.argv for command in python_commands}
-    assert by_id["release.source.controlplane"] == (
-        "uv",
-        "run",
-        "--project",
-        ".",
-        "--locked",
-        "pytest",
-        "-q",
-        "tests",
-    )
-    assert by_id["release.source.workflow-tasks"] == (
-        "uv",
-        "run",
-        "--project",
-        ".",
-        "--locked",
-        "pytest",
-        "-q",
-        "tests",
-    )
     assert by_id["release.source.python-sdk"][-4:] == (
         "sdks/python/tests",
         "functions/python/word-stats/tests",
         "functions/python/json-transform/tests",
         "functions/python/roman-numeral/tests",
-    )
-    by_task = {command.task_id: command for command in commands}
-    assert by_task["release.source.controlplane"].remote_dir == (
-        "/srv/nanofaas-source/tools/controlplane"
-    )
-    assert by_task["release.source.workflow-tasks"].remote_dir == (
-        "/srv/nanofaas-source/tools/workflow-tasks"
     )
     container_commands = [command for command in commands if command.argv[:2] == ("docker", "run")]
     assert {command.task_id for command in container_commands} == {

@@ -132,7 +132,7 @@ def test_loadtest_defaults_preserve_task_ids_byte_for_byte(tmp_path: Path) -> No
     assert workflow.task_ids == DEFAULT_TASK_IDS
 
 
-def test_dedicated_loadgen_uses_the_remote_legacy_k6_asset(tmp_path: Path) -> None:
+def test_dedicated_loadgen_uses_the_staged_nanolab_k6_asset(tmp_path: Path) -> None:
     executor = RecordingExecutor()
     environment = EnvironmentConfig.model_validate(
         {
@@ -155,7 +155,7 @@ def test_dedicated_loadgen_uses_the_remote_legacy_k6_asset(tmp_path: Path) -> No
 
     run = next(task for task in workflow.tasks if task.task_id == "loadgen.run_k6")
     assert run.config.script_path == Path(
-        "/home/ubuntu/nanofaas/tools/controlplane/assets/k6/two-vm-function-invoke.js"
+        "/home/ubuntu/nanolab-assets/k6/two-vm-function-invoke.js"
     )
 
 

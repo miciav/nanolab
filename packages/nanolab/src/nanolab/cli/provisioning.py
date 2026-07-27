@@ -17,6 +17,7 @@ from workflow_tasks import (
     command_task_from_operation,
 )
 from workflow_tasks.components.bootstrap import (
+    plan_assets_sync_to_vm,
     plan_k3s_configure_registry,
     plan_k3s_install,
     plan_loadtest_install_k6,
@@ -39,6 +40,7 @@ from nanolab.cli.vm_provider import (
     vm_request_for_role,
 )
 from nanolab.core.task_shell_adapter import ShellCommandTaskRunner
+from nanolab.workspace.paths import discover_tool_root
 
 
 def _request(environment: EnvironmentConfig, role: ExecutionRole, *, loadtest: bool) -> VmRequest:
@@ -106,6 +108,7 @@ def _context(repo_root: Path, request: VmRequest) -> ScenarioExecutionContext:
         resolved_scenario=None,
         vm_request=request,
         cleanup_vm=False,
+        assets_root=discover_tool_root() / "assets",
     )
 
 
@@ -172,7 +175,7 @@ def _stack_operations(
             ]
         )
     if scenario.workflow == "loadtest" and not dedicated_loadgen:
-        planners.append(plan_loadtest_install_k6)
+        planners.extend([plan_loadtest_install_k6, plan_assets_sync_to_vm])
     planners.append(plan_repo_sync_to_vm)
     return _remote_operations(operation for planner in planners for operation in planner(context))
 
@@ -307,7 +310,11 @@ def provision_environment(
                     orchestrator,
                     context,
                     _remote_operations(
-                        (*plan_loadtest_install_k6(context), *plan_repo_sync_to_vm(context))
+                        (
+                            *plan_loadtest_install_k6(context),
+                            *plan_assets_sync_to_vm(context),
+                            *plan_repo_sync_to_vm(context),
+                        )
                     ),
                 ),
                 role="loadgen",

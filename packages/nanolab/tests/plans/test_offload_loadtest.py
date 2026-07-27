@@ -130,9 +130,7 @@ def test_dedicated_loadgen_runs_k6_on_loadgen_and_fetches_results(tmp_path: Path
 
     run_k6 = next(task for task in workflow.tasks if isinstance(task, RunK6))
     assert run_k6.runner._role == "loadgen"  # noqa: SLF001
-    assert run_k6.config.script_path == Path(
-        "/home/ubuntu/nanofaas/tools/controlplane/assets/k6/offload-mixed.js"
-    )
+    assert run_k6.config.script_path == Path("/home/ubuntu/nanolab-assets/k6/offload-mixed.js")
     assert any(isinstance(task, FetchVmResults) for task in workflow.tasks)
 
 
