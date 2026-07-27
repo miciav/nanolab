@@ -50,10 +50,14 @@ def container_resource_check(
     container: str,
     resources: ResourceSpec | None,
     executor: CommandTaskExecutor,
-    role: ExecutionRole = "host",
+    role: ExecutionRole,
     cwd: Path | None = None,
 ) -> CommandTask:
     """Read a container's host config and assert the declared limits landed on it.
+
+    `role` has no default on purpose: running this on the host and running it
+    inside a VM are different checks against different daemons, and a default
+    would hide that decision at the call site.
 
     With no spec the task only reads, which is what the workflow wants when the
     scenario declares no resources: proof the container exists, nothing more.
@@ -100,7 +104,7 @@ def k8s_resource_check(
     namespace: str,
     resources: ResourceSpec | None,
     executor: CommandTaskExecutor,
-    role: ExecutionRole = "stack",
+    role: ExecutionRole,
     cwd: Path | None = None,
 ) -> CommandTask:
     """Read a Deployment and assert the declared limits reached its container."""

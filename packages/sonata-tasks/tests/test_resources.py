@@ -68,7 +68,7 @@ def test_container_check_reads_the_host_config_as_json() -> None:
     executor = StubExecutor(stdout=MATCHING_HOST_CONFIG)
 
     container_resource_check(
-        container="nanofaas-word-stats-r1", resources=SPEC, executor=executor
+        container="nanofaas-word-stats-r1", resources=SPEC, executor=executor, role="host"
     ).run(TaskInputs.empty())
 
     assert executor.seen[0].argv == (
@@ -83,7 +83,7 @@ def test_container_check_passes_when_every_field_matches() -> None:
     executor = StubExecutor(stdout=MATCHING_HOST_CONFIG)
 
     container_resource_check(
-        container="nanofaas-word-stats-r1", resources=SPEC, executor=executor
+        container="nanofaas-word-stats-r1", resources=SPEC, executor=executor, role="host"
     ).run(TaskInputs.empty())
 
 
@@ -100,7 +100,7 @@ def test_container_check_names_the_field_that_mismatched(stdout: str, expected_f
     """The shell version compared one space-joined line, so a failure never said which."""
     executor = StubExecutor(stdout=stdout)
     task = container_resource_check(
-        container="nanofaas-word-stats-r1", resources=SPEC, executor=executor
+        container="nanofaas-word-stats-r1", resources=SPEC, executor=executor, role="host"
     )
 
     with pytest.raises(RuntimeError, match=expected_field):
@@ -114,7 +114,7 @@ def test_container_reservation_is_zero_when_request_equals_limit() -> None:
     )
 
     container_resource_check(
-        container="nanofaas-word-stats-r1", resources=same, executor=executor
+        container="nanofaas-word-stats-r1", resources=same, executor=executor, role="host"
     ).run(TaskInputs.empty())
 
 
@@ -123,7 +123,7 @@ def test_container_cpu_shares_never_drop_below_two() -> None:
     executor = StubExecutor(stdout=_host_config(2, 2_000_000, 0, 8 * 1024 * 1024))
 
     container_resource_check(
-        container="nanofaas-word-stats-r1", resources=tiny, executor=executor
+        container="nanofaas-word-stats-r1", resources=tiny, executor=executor, role="host"
     ).run(TaskInputs.empty())
 
 
@@ -131,7 +131,7 @@ def test_container_check_without_a_spec_only_reads() -> None:
     executor = StubExecutor(stdout="not json at all")
 
     container_resource_check(
-        container="nanofaas-word-stats-r1", resources=None, executor=executor
+        container="nanofaas-word-stats-r1", resources=None, executor=executor, role="host"
     ).run(TaskInputs.empty())
 
 
@@ -139,7 +139,7 @@ def test_k8s_check_reads_the_deployment_as_json() -> None:
     executor = StubExecutor(stdout=MATCHING_K8S)
 
     k8s_resource_check(
-        deployment="fn-word-stats", namespace="research", resources=SPEC, executor=executor
+        deployment="fn-word-stats", namespace="research", resources=SPEC, executor=executor, role="stack"
     ).run(TaskInputs.empty())
 
     assert executor.seen[0].argv == (
@@ -165,7 +165,7 @@ def test_k8s_check_reads_the_deployment_as_json() -> None:
 def test_k8s_check_names_the_field_that_mismatched(payload: str, expected_field: str) -> None:
     executor = StubExecutor(stdout=payload)
     task = k8s_resource_check(
-        deployment="fn-word-stats", namespace="research", resources=SPEC, executor=executor
+        deployment="fn-word-stats", namespace="research", resources=SPEC, executor=executor, role="stack"
     )
 
     with pytest.raises(RuntimeError, match=expected_field):
@@ -177,14 +177,14 @@ def test_k8s_whole_cpu_is_not_rendered_in_millicores() -> None:
     executor = StubExecutor(stdout=MATCHING_K8S)
 
     k8s_resource_check(
-        deployment="fn-word-stats", namespace="research", resources=SPEC, executor=executor
+        deployment="fn-word-stats", namespace="research", resources=SPEC, executor=executor, role="stack"
     ).run(TaskInputs.empty())
 
 
 def test_malformed_output_is_reported_as_such() -> None:
     executor = StubExecutor(stdout="<html>502</html>")
     task = container_resource_check(
-        container="nanofaas-word-stats-r1", resources=SPEC, executor=executor
+        container="nanofaas-word-stats-r1", resources=SPEC, executor=executor, role="host"
     )
 
     with pytest.raises(RuntimeError, match="was not JSON"):
