@@ -8,9 +8,13 @@ import yaml
 
 from nanolab.config import EnvironmentConfig
 from nanolab.release.environment import validate_release_environment
+from nanolab.release.versioning import read_project_version
 
 
 NANOFAAS_ROOT = Path(os.environ["NANOFAAS_ROOT"]).resolve()
+# The validator compares this against the checkout's own version, so reading it
+# keeps the test from failing on every release rather than on a real defect.
+CURRENT_VERSION = read_project_version(NANOFAAS_ROOT)
 NANOLAB_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -47,7 +51,7 @@ def test_release_environment_example_is_pinned_and_comparable() -> None:
     path = NANOLAB_ROOT / "environments/azure-release.yaml.example"
     environment = EnvironmentConfig.model_validate(yaml.safe_load(path.read_text(encoding="utf-8")))
 
-    validate_release_environment(environment, NANOFAAS_ROOT, "0.17.0")
+    validate_release_environment(environment, NANOFAAS_ROOT, CURRENT_VERSION)
     assert environment.roles["stack"].disk == "128G"
     assert environment.roles["loadgen"].disk == "30G"
     assert environment.roles["arm-builder"].disk == "64G"
@@ -63,7 +67,7 @@ def test_release_environment_rejects_non_azure_provider(provider: str) -> None:
     environment = _release_environment(**changes)
 
     with pytest.raises(ValueError, match="Azure"):
-        validate_release_environment(environment, NANOFAAS_ROOT, "0.17.0")
+        validate_release_environment(environment, NANOFAAS_ROOT, CURRENT_VERSION)
 
 
 @pytest.mark.parametrize(
@@ -78,7 +82,7 @@ def test_release_environment_requires_stack_and_loadgen_roles(roles: dict[str, o
     environment = _release_environment(roles=roles)
 
     with pytest.raises(ValueError, match="stack, loadgen and arm-builder"):
-        validate_release_environment(environment, NANOFAAS_ROOT, "0.17.0")
+        validate_release_environment(environment, NANOFAAS_ROOT, CURRENT_VERSION)
 
 
 @pytest.mark.parametrize(
@@ -94,7 +98,7 @@ def test_release_environment_requires_dedicated_vm_names(role: str, name: str) -
     environment.roles[role].name = name  # type: ignore[index]
 
     with pytest.raises(ValueError, match="dedicated release VM"):
-        validate_release_environment(environment, NANOFAAS_ROOT, "0.17.0")
+        validate_release_environment(environment, NANOFAAS_ROOT, CURRENT_VERSION)
 
 
 @pytest.mark.parametrize(
@@ -109,7 +113,7 @@ def test_release_environment_requires_restricted_operator_source(
     environment.azure.operator_source_cidr = source
 
     with pytest.raises(ValueError, match="operator source CIDR"):
-        validate_release_environment(environment, NANOFAAS_ROOT, "0.17.0")
+        validate_release_environment(environment, NANOFAAS_ROOT, CURRENT_VERSION)
 
 
 @pytest.mark.parametrize(
@@ -137,7 +141,7 @@ def test_release_environment_rejects_unpinned_or_malformed_urn(urn: str) -> None
     )
 
     with pytest.raises(ValueError, match="image URN"):
-        validate_release_environment(environment, NANOFAAS_ROOT, "0.17.0")
+        validate_release_environment(environment, NANOFAAS_ROOT, CURRENT_VERSION)
 
 
 @pytest.mark.parametrize("field", ("vm_size", "loadgen_vm_size", "arm_vm_size"))
@@ -155,7 +159,7 @@ def test_release_environment_rejects_burstable_vm_size(field: str) -> None:
     environment = _release_environment(azure=azure)
 
     with pytest.raises(ValueError, match="burstable"):
-        validate_release_environment(environment, NANOFAAS_ROOT, "0.17.0")
+        validate_release_environment(environment, NANOFAAS_ROOT, CURRENT_VERSION)
 
 
 def test_release_environment_rejects_unprepared_project_version() -> None:
