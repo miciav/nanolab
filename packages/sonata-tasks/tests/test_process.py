@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from sonata_engine import Resource
+from sonata_engine import Resource, TaskInputs
 
 from sonata_tasks.process import managed_process_resource
 
@@ -61,6 +61,15 @@ def test_it_builds_a_sonata_resource() -> None:
     assert resource.release_title == "Release thing"
 
 
+def test_the_resource_keeps_the_spawner_process_type() -> None:
+    process = FakeProcess()
+    resource: Resource[FakeProcess] = managed_process_resource(
+        title="Acquire thing", argv=("run",), ready=_ready_once_spawned(), spawn=_spawner(process, [])
+    )
+
+    assert resource.acquire(TaskInputs.empty()) is process
+
+
 def test_acquire_spawns_with_argv_and_cwd() -> None:
     seen: list[dict[str, object]] = []
     resource = managed_process_resource(
@@ -71,7 +80,7 @@ def test_acquire_spawns_with_argv_and_cwd() -> None:
         spawn=_spawner(FakeProcess(), seen),
     )
 
-    resource.acquire()
+    resource.acquire(TaskInputs.empty())
 
     assert seen[0]["argv"] == ("java", "-jar", "app.jar")
     assert seen[0]["cwd"] == Path("/repo")
@@ -87,7 +96,7 @@ def test_acquire_refuses_to_start_when_something_is_already_answering() -> None:
     )
 
     with pytest.raises(RuntimeError, match="already answering"):
-        resource.acquire()
+        resource.acquire(TaskInputs.empty())
 
     # Something is already up, so we must never spawn a second, competing process.
     assert seen == []
@@ -106,7 +115,7 @@ def test_acquire_waits_until_ready() -> None:
         sleep=slept.append,
     )
 
-    resource.acquire()
+    resource.acquire(TaskInputs.empty())
 
     assert slept == [0.5, 0.5]
 
@@ -123,7 +132,7 @@ def test_acquire_gives_up_and_stops_the_process() -> None:
     )
 
     with pytest.raises(RuntimeError, match="never became ready"):
-        resource.acquire()
+        resource.acquire(TaskInputs.empty())
 
     # A failed acquire is never released by the engine, so it must clean up itself.
     assert process.terminated is True
@@ -144,7 +153,7 @@ def test_acquire_fails_immediately_when_the_process_exits() -> None:
     )
 
     with pytest.raises(RuntimeError, match="exited with code 23"):
-        resource.acquire()
+        resource.acquire(TaskInputs.empty())
 
     assert slept == []
 
@@ -167,7 +176,7 @@ def test_acquire_stops_the_process_when_the_readiness_wait_raises() -> None:
     )
 
     with pytest.raises(KeyboardInterrupt):
-        resource.acquire()
+        resource.acquire(TaskInputs.empty())
 
     # An interrupt (or any other exception) during the readiness wait must not
     # leak the process we just spawned.
@@ -180,8 +189,8 @@ def test_release_terminates_a_live_process() -> None:
         title="Acquire thing", argv=("run",), ready=_ready_once_spawned(), spawn=_spawner(process, [])
     )
 
-    resource.acquire()
-    resource.release()
+    process = resource.acquire(TaskInputs.empty())
+    resource.release(TaskInputs.empty(), process)
 
     assert (process.terminated, process.killed) == (True, False)
 
@@ -208,15 +217,18 @@ def test_release_kills_a_process_that_ignores_terminate() -> None:
         title="Acquire thing", argv=("run",), ready=_ready_once_spawned(), spawn=_spawner(process, [])
     )
 
-    resource.acquire()
-    resource.release()
+    process = resource.acquire(TaskInputs.empty())
+    resource.release(TaskInputs.empty(), process)
 
     assert process.killed is True
 
 
-def test_release_is_a_no_op_when_nothing_was_started() -> None:
+def test_release_is_a_no_op_for_an_already_exited_process() -> None:
+    process = FakeProcess()
+    process.terminate()
     resource = managed_process_resource(
         title="Acquire thing", argv=("run",), ready=lambda: True, spawn=_spawner(FakeProcess(), [])
     )
 
-    resource.release()  # must not raise
+    resource.release(TaskInputs.empty(), process)
+    assert process.killed is False

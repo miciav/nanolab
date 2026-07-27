@@ -54,6 +54,7 @@ def _ansible_operation(
     summary: str,
     playbook_name: str,
     extra_vars: Mapping[str, str],
+    discover_private_key: bool = True,
 ) -> RemoteCommandOperation:
     # Playbooks are bundled with the library.
     from workflow_tasks.infra.ansible import bundled_ansible_root
@@ -63,7 +64,9 @@ def _ansible_operation(
     for key, value in extra_vars.items():
         extra_args.extend(["-e", f"{key}={value}"])
 
-    private_key = _find_ssh_private_key_path(find_ssh_public_key())
+    private_key = (
+        _find_ssh_private_key_path(find_ssh_public_key()) if discover_private_key else None
+    )
     private_key_args: list[str] = (
         ["--private-key", str(private_key)] if private_key is not None else []
     )
@@ -117,7 +120,11 @@ def plan_vm_ensure_running(context: ScenarioExecutionContext) -> tuple[ScenarioO
     )
 
 
-def plan_vm_provision_base(context: ScenarioExecutionContext) -> tuple[ScenarioOperation, ...]:
+def plan_vm_provision_base(
+    context: ScenarioExecutionContext,
+    *,
+    discover_private_key: bool = True,
+) -> tuple[ScenarioOperation, ...]:
     return (
         _ansible_operation(
             context=context,
@@ -129,11 +136,16 @@ def plan_vm_provision_base(context: ScenarioExecutionContext) -> tuple[ScenarioO
                 "helm_version": "3.16.4",
                 "vm_user": context.vm_request.user,
             },
+            discover_private_key=discover_private_key,
         ),
     )
 
 
-def plan_repo_sync_to_vm(context: ScenarioExecutionContext) -> tuple[ScenarioOperation, ...]:
+def plan_repo_sync_to_vm(
+    context: ScenarioExecutionContext,
+    *,
+    discover_private_key: bool = True,
+) -> tuple[ScenarioOperation, ...]:
     vm_request = context.vm_request
     destination = _remote_project_dir(vm_request)
     if vm_request.lifecycle == "external":
@@ -151,6 +163,8 @@ def plan_repo_sync_to_vm(context: ScenarioExecutionContext) -> tuple[ScenarioOpe
                         destination=destination,
                         ssh_rsh=repo_sync_ssh_rsh(
                             _find_ssh_private_key_path(find_ssh_public_key())
+                            if discover_private_key
+                            else None
                         ),
                     )
                 ),
@@ -167,7 +181,11 @@ def plan_repo_sync_to_vm(context: ScenarioExecutionContext) -> tuple[ScenarioOpe
                     user=vm_request.user,
                     host=f"<multipass-ip:{vm_request.name or 'nanofaas-e2e'}>",
                     destination=destination,
-                    ssh_rsh=repo_sync_ssh_rsh(_find_ssh_private_key_path(find_ssh_public_key())),
+                    ssh_rsh=repo_sync_ssh_rsh(
+                        _find_ssh_private_key_path(find_ssh_public_key())
+                        if discover_private_key
+                        else None
+                    ),
                 )
             ),
         ),
@@ -212,6 +230,8 @@ def retarget_bootstrap_operation(
 
 def plan_registry_ensure_container(
     context: ScenarioExecutionContext,
+    *,
+    discover_private_key: bool = True,
 ) -> tuple[ScenarioOperation, ...]:
     registry_host, registry_port = context.local_registry.rsplit(":", 1)
     return (
@@ -226,11 +246,16 @@ def plan_registry_ensure_container(
                 "registry_port": registry_port,
                 "registry_container_name": "nanofaas-e2e-registry",
             },
+            discover_private_key=discover_private_key,
         ),
     )
 
 
-def plan_k3s_install(context: ScenarioExecutionContext) -> tuple[ScenarioOperation, ...]:
+def plan_k3s_install(
+    context: ScenarioExecutionContext,
+    *,
+    discover_private_key: bool = True,
+) -> tuple[ScenarioOperation, ...]:
     vm_request = context.vm_request
     return (
         _ansible_operation(
@@ -242,12 +267,15 @@ def plan_k3s_install(context: ScenarioExecutionContext) -> tuple[ScenarioOperati
                 "vm_user": vm_request.user,
                 "kubeconfig_path": _kubeconfig_path(vm_request),
             },
+            discover_private_key=discover_private_key,
         ),
     )
 
 
 def plan_k3s_configure_registry(
     context: ScenarioExecutionContext,
+    *,
+    discover_private_key: bool = True,
 ) -> tuple[ScenarioOperation, ...]:
     registry_host, registry_port = context.local_registry.rsplit(":", 1)
     return (
@@ -261,6 +289,7 @@ def plan_k3s_configure_registry(
                 "registry_host": registry_host,
                 "registry_port": registry_port,
             },
+            discover_private_key=discover_private_key,
         ),
     )
 

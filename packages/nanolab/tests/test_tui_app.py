@@ -210,7 +210,7 @@ def test_tui_exits_from_the_main_menu() -> None:
 
 
 def test_tui_dispatches_a_stable_scenario_filename() -> None:
-    answers = iter(["cli", "validate", "back", "exit"])
+    answers = iter(["cli", "container", "back", "exit"])
     dispatched: list[str] = []
 
     def choose(message: str, **kwargs: object) -> str:
@@ -220,6 +220,13 @@ def test_tui_dispatches_a_stable_scenario_filename() -> None:
     NanofaasTUI(choose=choose, dispatch_scenario=dispatch).run()
 
     assert dispatched == ["cli-container.yaml"]
+
+
+def test_cli_menu_offers_container_and_kubernetes_provisioned_choices() -> None:
+    assert [(choice.title, choice.value) for choice in tui_app.CLI_MENU] == [
+        ("Container", "container"),
+        ("Kubernetes (provisioned)", "kubernetes"),
+    ]
 
 
 def test_tools_inspect_selects_only_stable_scenarios_and_renders_validated_json(
@@ -275,6 +282,7 @@ def test_tools_inspect_selects_only_stable_scenarios_and_renders_validated_json(
         "validate-k8s.yaml",
         "validate-offload.yaml",
         "cli-container.yaml",
+        "cli.yaml",
         "loadtest.yaml",
         "offload-loadtest.yaml",
     ]
@@ -741,6 +749,168 @@ def test_container_cli_rejects_keep(
     assert controller.calls == []
 
 
+def test_kubernetes_provisioned_rejects_local_environment(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    environment_path = _install_paths(monkeypatch, tmp_path)
+    helper_calls: list[tuple[Any, ...]] = []
+    _install_workflow_helpers(
+        monkeypatch,
+        environment_path=environment_path,
+        workflow=FakeSonataWorkflow(),
+        scenario_kind="cli",
+        backend="k8s",
+        calls=helper_calls,
+    )
+    frame_calls: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        tui_app,
+        "render_screen_frame",
+        lambda **kwargs: frame_calls.append(kwargs) or object(),
+    )
+    controller = RecordingController()
+
+    NanofaasTUI(
+        choose=ScriptedChooser(iter([str(environment_path), "run"])),
+        controller=controller,
+        console=RecordingConsole(),
+        input_stream=RecordingInput(tty=False),
+    )._workflow_menu("cli.yaml")
+
+    assert [call[0] for call in helper_calls] == ["scenario", "environment"]
+    assert frame_calls[0]["title"] == "Configuration error"
+    assert str(frame_calls[0]["body"]) == (
+        "--provision requires a non-local environment"
+    )
+    assert controller.calls == []
+
+
+def test_kubernetes_provisioned_run_skips_provision_menu_forces_provision_and_avoids_legacy_provisioning(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    environment_path = _install_paths(monkeypatch, tmp_path)
+    workflow = FakeSonataWorkflow()
+    helper_calls: list[tuple[Any, ...]] = []
+    _install_workflow_helpers(
+        monkeypatch,
+        environment_path=environment_path,
+        workflow=workflow,
+        scenario_kind="cli",
+        backend="k8s",
+        provider="multipass",
+        calls=helper_calls,
+    )
+    provision_calls: list[tuple[Any, ...]] = []
+    monkeypatch.setattr(
+        tui_app,
+        "provision_environment",
+        lambda *args, **kwargs: provision_calls.append((args, kwargs)),
+    )
+    controller = RecordingController()
+    chooser = ScriptedChooser(iter([str(environment_path), "run", "cleanup"]))
+
+    NanofaasTUI(choose=chooser, controller=controller)._workflow_menu("cli.yaml")
+
+    # No "Provision environment?" question anywhere in the flow.
+    assert [message for message, _ in chooser.calls] == [
+        "Environment",
+        "Action",
+        "Cleanup policy",
+    ]
+    # Never enters the legacy provision_environment context manager: the
+    # compiled Sonata plan owns VM/Helm lifecycle for this path.
+    assert provision_calls == []
+    workflow_calls = [call for call in helper_calls if call[0] == "workflow"]
+    assert len(workflow_calls) == 2  # preview build + real run build
+    assert [call[3]["provision"] for call in workflow_calls] == [True, True]
+    assert workflow.run_calls == 1
+    assert controller.calls[0]["summary_lines"] == [
+        "Scenario: cli.yaml",
+        "Environment: local.yaml",
+        "Provision: yes",
+        "Cleanup: cleanup",
+    ]
+    # Preview and run share the same compiled Sonata task IDs/titles.
+    assert controller.calls[0]["planned_steps"] == [
+        "Build nanofaas-cli",
+        "List functions",
+    ]
+
+
+def test_kubernetes_provisioned_keep_sets_keep_infrastructure_without_entering_legacy_provisioning(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    environment_path = _install_paths(monkeypatch, tmp_path)
+    preview = FakeSonataWorkflow()
+    workflow = FakeSonataWorkflow()
+    _install_workflow_helpers(
+        monkeypatch,
+        environment_path=environment_path,
+        workflow=preview,
+        scenario_kind="cli",
+        backend="k8s",
+        provider="multipass",
+    )
+    workflows = iter([preview, workflow])
+    monkeypatch.setattr(tui_app, "_workflow", lambda *args, **kwargs: next(workflows))
+    provision_calls: list[tuple[Any, ...]] = []
+    monkeypatch.setattr(
+        tui_app,
+        "provision_environment",
+        lambda *args, **kwargs: provision_calls.append((args, kwargs)),
+    )
+    controller = RecordingController()
+
+    NanofaasTUI(
+        choose=ScriptedChooser(iter([str(environment_path), "run", "keep"])),
+        controller=controller,
+    )._workflow_menu("cli.yaml")
+
+    assert provision_calls == []
+    assert preview.keep_infrastructure is False
+    assert preview.run_calls == 0
+    assert workflow.keep_infrastructure is True
+    assert workflow.run_calls == 1
+    assert controller.calls[0]["summary_lines"] == [
+        "Scenario: cli.yaml",
+        "Environment: local.yaml",
+        "Provision: yes",
+        "Cleanup: keep",
+    ]
+
+
+def test_kubernetes_provisioned_back_from_cleanup_returns_to_action(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    environment_path = _install_paths(monkeypatch, tmp_path)
+    _install_workflow_helpers(
+        monkeypatch,
+        environment_path=environment_path,
+        workflow=FakeSonataWorkflow(),
+        scenario_kind="cli",
+        backend="k8s",
+        provider="multipass",
+    )
+    chooser = ScriptedChooser(
+        iter([str(environment_path), "run", "back", "back", "back"])
+    )
+
+    NanofaasTUI(
+        choose=chooser, controller=RecordingController()
+    )._workflow_menu("cli.yaml")
+
+    # Back from Cleanup returns straight to Action (the "Provision environment?"
+    # state is never inserted for this path), and this is not local-environment
+    # behavior leaking in: the environment here is "multipass".
+    assert [message for message, _ in chooser.calls] == [
+        "Environment",
+        "Action",
+        "Cleanup policy",
+        "Action",
+        "Environment",
+    ]
+
+
 def test_non_local_run_enters_existing_provisioning_context(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -1018,7 +1188,7 @@ def test_workflow_failure_returns_to_the_previous_submenu(
         workflow=workflow,
     )
     chooser = ScriptedChooser(
-        iter(["cli", "validate", str(environment_path), "run", "cleanup", "back", "exit"])
+        iter(["cli", "container", str(environment_path), "run", "cleanup", "back", "exit"])
     )
 
     NanofaasTUI(choose=chooser, controller=RecordingController()).run()
@@ -1286,7 +1456,7 @@ def test_environment_back_returns_to_the_scenario_submenu(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     _install_paths(monkeypatch, tmp_path)
-    chooser = ScriptedChooser(iter(["cli", "validate", "back", "back", "exit"]))
+    chooser = ScriptedChooser(iter(["cli", "container", "back", "back", "exit"]))
 
     NanofaasTUI(choose=chooser).run()
 
@@ -1338,7 +1508,7 @@ def test_ctrl_c_from_every_workflow_depth_propagates_to_exit(
     )
     resolved_answers = iter([
         "cli",
-        "validate",
+        "container",
         *(
             str(environment_path) if answer == "environment" else answer
             for answer in answers

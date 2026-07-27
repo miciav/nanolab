@@ -1,14 +1,16 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import override
 
-from sonata_engine import Task, TaskOutcome
+from sonata_engine import Task, TaskInputs, TaskOutcome
 from workflow_tasks.execution.bindings import CommandTaskExecutor
 from workflow_tasks.execution.roles import ExecutionRole
 from workflow_tasks.tasks.models import CommandTaskSpec, TaskResult
+
+Argv = tuple[str, ...] | Callable[[TaskInputs], tuple[str, ...]]
 
 
 @dataclass
@@ -26,16 +28,17 @@ class CommandTask(Task[TaskResult]):
     """
 
     title: str
-    argv: tuple[str, ...]
+    argv: Argv
     executor: CommandTaskExecutor
     role: ExecutionRole = "host"
+    env: Mapping[str, str] = field(default_factory=dict[str, str])
     cwd: Path | None = None
     expected_exit_codes: frozenset[int] = field(default_factory=lambda: frozenset({0}))
     verify: Callable[[TaskResult], None] | None = None
 
     @override
-    def run(self) -> TaskOutcome[TaskResult]:
-        result = self.executor.run(self._spec())
+    def run(self, inputs: TaskInputs) -> TaskOutcome[TaskResult]:
+        result = self.executor.run(self._spec(inputs))
         if result.status != "passed":
             detail = result.stderr.strip() or result.stdout.strip() or "no output"
             raise RuntimeError(f"{self.title} failed (exit {result.return_code}): {detail}")
@@ -43,14 +46,15 @@ class CommandTask(Task[TaskResult]):
             self.verify(result)
         return TaskOutcome(value=result)
 
-    def _spec(self) -> CommandTaskSpec:
+    def _spec(self, inputs: TaskInputs) -> CommandTaskSpec:
         # task_id is empty on purpose: identity belongs to the compiler, and
         # CommandTaskSpec only uses this field to label its TaskResult.
         return CommandTaskSpec(
             task_id="",
             summary=self.title,
-            argv=self.argv,
+            argv=self.argv(inputs) if callable(self.argv) else self.argv,
             role=self.role,
+            env=self.env,
             cwd=self.cwd,
             expected_exit_codes=self.expected_exit_codes,
         )

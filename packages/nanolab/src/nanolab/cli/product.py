@@ -61,6 +61,7 @@ def _workflow(
     prometheus_url: str = "http://127.0.0.1:9090",
     run_dir: Path | None = None,
     dry_run: bool = False,
+    provision: bool = False,
 ):
     bindings, fetcher = build_role_bindings(environment)
     paths = default_tool_paths()
@@ -90,6 +91,8 @@ def _workflow(
             bindings,
             endpoint=control_plane_url,
             repo_root=paths.nanofaas_root,
+            provision=provision,
+            environment=environment,
         )
     return build_loadtest_plan(
         scenario,
@@ -107,15 +110,28 @@ def _workflow(
 def _require_cli_endpoint(
     scenario: ScenarioConfig,
     control_plane_url: str | None,
+    *,
+    provision: bool = False,
 ) -> None:
     if (
         scenario.workflow == "cli"
         and scenario.backend == "k8s"
+        and not provision
         and control_plane_url is None
     ):
         raise typer.BadParameter(
             "--control-plane-url is required for a k8s cli scenario"
         )
+
+
+def _cli_provisioned(scenario: ScenarioConfig, *, provision: bool) -> bool:
+    """Whether this run/plan is the Sonata-provisioned cli/k8s path.
+
+    That path owns its own VM/Helm lifecycle (built into the compiled plan by
+    `build_cli_plan`), so it must never also go through the legacy
+    `provision_environment` context manager.
+    """
+    return provision and scenario.workflow == "cli" and scenario.backend == "k8s"
 
 
 def _validate_cli_container_options(
@@ -310,7 +326,8 @@ def install_product_commands(app: typer.Typer) -> None:
             environment_config,
             keep=keep,
         )
-        _require_cli_endpoint(scenario_config, control_plane_url)
+        _require_cli_endpoint(scenario_config, control_plane_url, provision=provision)
+        cli_provisioned = _cli_provisioned(scenario_config, provision=provision)
         paths = default_tool_paths()
         effective_run_dir = run_dir
         if (
@@ -336,7 +353,7 @@ def install_product_commands(app: typer.Typer) -> None:
                         repo_root=paths.nanofaas_root,
                         keep=keep,
                     )
-                    if provision
+                    if provision and not cli_provisioned
                     else nullcontext()
                 )
                 with provisioning:
@@ -352,6 +369,7 @@ def install_product_commands(app: typer.Typer) -> None:
                         control_plane_url=control_plane_url,
                         prometheus_url=prometheus_url or "http://127.0.0.1:9090",
                         run_dir=effective_run_dir,
+                        provision=provision,
                     )
                     if uses_sonata(scenario_config):
                         sonata_workflow = cast(SonataWorkflow, workflow)
@@ -403,6 +421,7 @@ def install_product_commands(app: typer.Typer) -> None:
     def plan_command(
         scenario: Path = typer.Argument(..., exists=True),
         environment: Path | None = typer.Option(None, "--environment", exists=True),
+        provision: bool = typer.Option(False, "--provision"),
         only: str | None = typer.Option(
             None,
             "--only",
@@ -427,8 +446,10 @@ def install_product_commands(app: typer.Typer) -> None:
     ) -> None:
         scenario_config = _scenario(scenario)
         environment_config = _environment(environment)
+        if provision and environment_config.provider == "local":
+            raise typer.BadParameter("--provision requires a non-local environment")
         _validate_cli_container_options(scenario_config, environment_config)
-        _require_cli_endpoint(scenario_config, control_plane_url)
+        _require_cli_endpoint(scenario_config, control_plane_url, provision=provision)
         if scenario_config.workflow == "loadtest":
             control_plane_url, prometheus_url = resolve_loadtest_urls(
                 environment_config,
@@ -440,6 +461,7 @@ def install_product_commands(app: typer.Typer) -> None:
             scenario_config,
             environment_config,
             control_plane_url=control_plane_url,
+            provision=provision,
             prometheus_url=prometheus_url or "http://127.0.0.1:9090",
             run_dir=run_dir,
             dry_run=True,

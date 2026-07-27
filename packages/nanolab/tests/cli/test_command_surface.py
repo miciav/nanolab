@@ -155,6 +155,32 @@ def test_run_container_cli_requires_local_environment(
     build.assert_not_called()
 
 
+def test_run_container_cli_rejects_provision_even_with_a_nonlocal_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A local environment already trips the generic "--provision requires a
+    # non-local environment" guard; using multipass here proves the container
+    # workflow rejects --provision on its own terms, not just via that guard.
+    build = MagicMock()
+    monkeypatch.setattr(product_module, "_workflow", build)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "run",
+            "scenarios-v2/cli-container.yaml",
+            "--provision",
+            "--environment",
+            "environments/multipass.yaml",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "cli container scenario requires a local environment" in result.output
+    assert "Traceback" not in result.output
+    build.assert_not_called()
+
+
 def test_run_container_cli_rejects_keep(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -197,6 +223,61 @@ def test_run_passes_custom_control_plane_url_to_cli_plan(
     assert build_cli_plan.call_args.kwargs["endpoint"] == (
         "http://control-plane.example:8181"
     )
+
+
+def test_run_provisioned_k8s_cli_skips_the_legacy_provisioning_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # cli/k8s --provision owns its own VM/Helm lifecycle inside the compiled
+    # Sonata plan (see nanolab.plans.cli.build_cli_plan); it must never also
+    # go through the legacy provision_environment context manager.
+    workflow = MagicMock()
+    build_cli_plan = MagicMock(return_value=workflow)
+    monkeypatch.setattr(product_module, "build_cli_plan", build_cli_plan)
+
+    def _legacy_provision_must_not_run(*args, **kwargs):
+        raise AssertionError("legacy provision_environment must not run for cli/k8s --provision")
+
+    monkeypatch.setattr(product_module, "provision_environment", _legacy_provision_must_not_run)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "run",
+            "scenarios-v2/cli.yaml",
+            "--provision",
+            "--environment",
+            "environments/multipass.yaml",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert build_cli_plan.call_args.kwargs["endpoint"] is None
+    assert build_cli_plan.call_args.kwargs["provision"] is True
+    assert build_cli_plan.call_args.kwargs["environment"].provider == "multipass"
+    workflow.run.assert_called_once_with(
+        select=Selection(only=None, start=None, until=None)
+    )
+
+
+def test_plan_provisioned_k8s_cli_shows_the_fourteen_task_workflow() -> None:
+    result = CliRunner().invoke(
+        app,
+        [
+            "plan",
+            "scenarios-v2/cli.yaml",
+            "--provision",
+            "--environment",
+            "environments/multipass.yaml",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    lines = [line for line in result.stdout.splitlines() if line.strip()]
+    assert len(lines) == 14
+    assert "001.build-nanofaas-cli" in result.stdout
+    assert "002.acquire-stack-vm" in result.stdout
+    assert "014.release-stack-vm" in result.stdout
 
 
 def test_run_provisions_before_executing_workflow(monkeypatch, tmp_path: Path) -> None:
