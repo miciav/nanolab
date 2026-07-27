@@ -12,9 +12,7 @@ from sonata_tasks.helm import HelmReleaseSpec, helm_release_resource
 from sonata_tasks.process import managed_process_resource
 from sonata_tasks.vm import vm_resource
 from workflow_tasks.components.bootstrap import (
-    plan_k3s_configure_registry,
     plan_k3s_install,
-    plan_registry_ensure_container,
     plan_repo_sync_to_vm,
     plan_vm_provision_base,
     retarget_bootstrap_operation,
@@ -50,23 +48,31 @@ LOCAL_CONTROL_PLANE_BUILD_ARGV = (
 # the control plane as a NodePort, so the CLI never needs to discover an
 # external URL or fight a cloud provider's firewall.
 PROVISIONED_ENDPOINT = "http://127.0.0.1:30080"
+
+# Nothing in this workflow reads a local registry: images come from GHCR, and the
+# two bootstrap planners that consumed this value are not reused (see
+# `_BOOTSTRAP_STEPS`). It survives only because `ScenarioExecutionContext` requires
+# the field, and because `control_image()` is the canonical source of the image's
+# name — `_published_image` keeps the name and discards this prefix.
 _LOCAL_REGISTRY = "localhost:5000"
 _HELM_CHART = "deploy/helm/nanofaas"
 _HELM_RELEASE = "control-plane"
 _FUNCTION_READINESS_TIMEOUT_SECONDS = 120
 
-# (task title, planner) — the exact bootstrap sequence the CLI-provisioned
-# workflow reuses from the legacy provisioning components. Titles are chosen
-# so their compiled slug matches the plan's expected topology; they are not
-# always the planner's own `summary` (e.g. the registry step's summary ends in
-# "is running", which is dropped here to keep the id short and stable).
+# (task title, planner) — the bootstrap sequence the CLI-provisioned workflow
+# reuses from the legacy provisioning components. Titles are chosen so their
+# compiled slug matches the plan's expected topology; they are not always the
+# planner's own `summary`.
+#
+# The legacy sequence also starts a local registry and points k3s at it, because
+# `validate` builds its images on the spot and pushes them there. This workflow
+# pulls published images from GHCR instead, so both of those steps would set up
+# a registry nothing ever reads. They are deliberately not reused.
 _BOOTSTRAP_STEPS: tuple[
     tuple[str, Callable[..., tuple[ScenarioOperation, ...]]], ...
 ] = (
     ("Provision base VM dependencies", plan_vm_provision_base),
     ("Install k3s", plan_k3s_install),
-    ("Ensure local registry container", plan_registry_ensure_container),
-    ("Configure k3s registry access", plan_k3s_configure_registry),
     ("Sync repository into VM", plan_repo_sync_to_vm),
 )
 

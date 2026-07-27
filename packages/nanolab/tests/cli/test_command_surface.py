@@ -108,7 +108,7 @@ def test_run_requires_an_explicit_url_for_k8s_cli(
     build = MagicMock()
     monkeypatch.setattr(product_module, "_workflow", build)
 
-    result = CliRunner().invoke(app, ["run", "scenarios-v2/cli.yaml"])
+    result = CliRunner().invoke(app, ["run", "scenarios-v2/cli-k8s.yaml"])
 
     assert result.exit_code != 0
     assert "--control-plane-url is required for a k8s cli scenario" in result.output
@@ -213,7 +213,7 @@ def test_run_passes_custom_control_plane_url_to_cli_plan(
         app,
         [
             "run",
-            "scenarios-v2/cli.yaml",
+            "scenarios-v2/cli-k8s.yaml",
             "--control-plane-url",
             "http://control-plane.example:8181",
         ],
@@ -244,7 +244,7 @@ def test_run_provisioned_k8s_cli_skips_the_legacy_provisioning_context(
         app,
         [
             "run",
-            "scenarios-v2/cli.yaml",
+            "scenarios-v2/cli-k8s.yaml",
             "--provision",
             "--environment",
             "environments/multipass.yaml",
@@ -260,12 +260,12 @@ def test_run_provisioned_k8s_cli_skips_the_legacy_provisioning_context(
     )
 
 
-def test_plan_provisioned_k8s_cli_shows_the_fourteen_task_workflow() -> None:
+def test_plan_provisioned_k8s_cli_shows_the_twelve_task_workflow() -> None:
     result = CliRunner().invoke(
         app,
         [
             "plan",
-            "scenarios-v2/cli.yaml",
+            "scenarios-v2/cli-k8s.yaml",
             "--provision",
             "--environment",
             "environments/multipass.yaml",
@@ -274,10 +274,11 @@ def test_plan_provisioned_k8s_cli_shows_the_fourteen_task_workflow() -> None:
 
     assert result.exit_code == 0, result.output
     lines = [line for line in result.stdout.splitlines() if line.strip()]
-    assert len(lines) == 14
+    assert len(lines) == 12
     assert "001.build-nanofaas-cli" in result.stdout
     assert "002.acquire-stack-vm" in result.stdout
-    assert "014.release-stack-vm" in result.stdout
+    assert "012.release-stack-vm" in result.stdout
+    assert "registry" not in result.stdout
 
 
 def test_run_provisions_before_executing_workflow(monkeypatch, tmp_path: Path) -> None:
@@ -425,7 +426,7 @@ def test_run_rejects_provisioning_for_local_environment() -> None:
 
 
 def test_inspect_renders_validated_configuration() -> None:
-    result = CliRunner().invoke(app, ["inspect", "scenarios-v2/cli.yaml"])
+    result = CliRunner().invoke(app, ["inspect", "scenarios-v2/cli-k8s.yaml"])
 
     assert result.exit_code == 0
     assert '"workflow": "cli"' in result.stdout
