@@ -40,6 +40,9 @@ def _images() -> dict[str, str]:
     }
 
 
+_PUBLIC_KEY_PEM = "-----BEGIN PUBLIC KEY-----\nMFkwEwYHfake\n-----END PUBLIC KEY-----"
+
+
 @dataclass
 class _Result:
     return_code: int = 0
@@ -67,6 +70,8 @@ class _AttestProvider:
             self.fail_on_contains in part for part in argv
         ):
             return _Result(return_code=1)
+        if "public-key" in argv:
+            return _Result(stdout=_PUBLIC_KEY_PEM)
         return _Result()
 
     def transfer_to(self, request: object, *, source: Path, destination: str) -> _Result:
@@ -187,6 +192,12 @@ def test_signature_verification_happens_after_signing_and_uses_the_key_file() ->
     verify_indexes = [i for i, line in enumerate(rendered) if "verify" in line]
     assert verify_indexes
     assert max(sign_indexes) < min(verify_indexes)
+    # cosign verify rejects the encrypted signing key, so every verification has
+    # to run against the derived public half.
+    for index in verify_indexes:
+        assert "/work/cosign.pub" in rendered[index]
+        assert "--key /secrets/cosign-key" not in rendered[index]
+    assert any("public-key --key /secrets/cosign-key" in line for line in rendered)
 
 
 def test_signing_failure_stops_before_any_verification() -> None:

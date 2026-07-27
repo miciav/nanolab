@@ -714,6 +714,10 @@ class _ReleaseProvider(_ArchiveProvider):
             return _TransferResult(return_code=1)
         if argv[:3] == ("docker", "buildx", "inspect") and "--bootstrap" in argv:
             return _TransferResult(stdout="Platforms: linux/amd64, linux/arm64\n")
+        if "public-key" in argv:
+            return _TransferResult(
+                stdout="-----BEGIN PUBLIC KEY-----\nMFkwEwYHfake\n-----END PUBLIC KEY-----"
+            )
         if argv[0] == "sha256sum":
             digest = self.remote_digests[argv[1]].removeprefix("sha256:")
             return _TransferResult(stdout=f"{digest}  {argv[1]}\n")

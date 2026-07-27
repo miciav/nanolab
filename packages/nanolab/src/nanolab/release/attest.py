@@ -108,6 +108,7 @@ def attest_release_images(
                 "-o",
                 f"spdx-json=/out/{Path(sbom_file).name}",
             ),
+            describe=f"syft sbom {image}",
         )
     for image in sorted(pinned):
         _cosign(
@@ -151,20 +152,27 @@ def attest_release_images(
             ),
             extra_mounts=((sboms[image], "/work/sbom.spdx.json"),),
         )
+    # `cosign verify` rejects the signing key ("unknown Public key PEM file
+    # type: ENCRYPTED SIGSTORE PRIVATE KEY"), so derive the public half once and
+    # verify against that.
+    public_key_remote = f"{sbom_dir_remote}/cosign.pub"
+    _write_public_key(provider, request, cosign, docker_config, public_key_remote)
     for image in sorted(pinned):
         _cosign(
             provider,
             request,
             cosign,
             docker_config,
-            ("verify", "--key", "/secrets/cosign-key", image),
+            ("verify", "--key", "/work/cosign.pub", image),
+            extra_mounts=((public_key_remote, "/work/cosign.pub"),),
         )
         _cosign(
             provider,
             request,
             cosign,
             docker_config,
-            ("verify-attestation", "--key", "/secrets/cosign-key", "--type", "custom", image),
+            ("verify-attestation", "--key", "/work/cosign.pub", "--type", "custom", image),
+            extra_mounts=((public_key_remote, "/work/cosign.pub"),),
         )
 
 
@@ -210,6 +218,32 @@ def _artifact_slug(reference: str) -> str:
     return re.sub(r"[^a-zA-Z0-9._-]+", "-", reference.split("/")[-1])
 
 
+def _write_public_key(
+    provider: object,
+    request: object,
+    cosign: RemoteCosignCredentials,
+    docker_config: str,
+    destination: str,
+) -> None:
+    """Derive the public half of the signing key into a remote file."""
+    result = _cosign(
+        provider,
+        request,
+        cosign,
+        docker_config,
+        ("public-key", "--key", "/secrets/cosign-key"),
+    )
+    pem = str(getattr(result, "stdout", "")).strip()
+    if "PUBLIC KEY" not in pem:
+        raise RuntimeError("cosign did not return a public key for the release signing key")
+    _exec(
+        provider,
+        request,
+        ("sh", "-c", 'printf "%s\\n" "$1" > "$2"', "nanofaas-release-cosign", pem, destination),
+        describe="stage cosign public key",
+    )
+
+
 def _cosign(
     provider: object,
     request: object,
@@ -218,7 +252,7 @@ def _cosign(
     arguments: tuple[str, ...],
     *,
     extra_mounts: tuple[tuple[str, str], ...] = (),
-) -> None:
+) -> object:
     secrets_dir = str(Path(cosign.key_file).parent)
     mounts: list[str] = [
         "--volume",
@@ -255,16 +289,31 @@ def _cosign(
         str(cosign.password_file),
         *docker_argv,
     )
-    _exec(provider, request, wrapped)
+    return _exec(provider, request, wrapped, describe=f"cosign {arguments[0]} {arguments[-1]}")
 
 
-def _exec(provider: object, request: object, argv: tuple[str, ...]) -> object:
+def _exec(
+    provider: object,
+    request: object,
+    argv: tuple[str, ...],
+    *,
+    describe: str | None = None,
+) -> object:
+    # argv[0] alone is useless here: every cosign call is wrapped in the `sh -c`
+    # that reads the password file, so the failure has to name the real step and
+    # carry the remote output.
+    action = describe or argv[0]
     result = retry_on_connection_death(
         lambda: provider.exec_argv(  # type: ignore[attr-defined]
             request, argv, env=None, cwd=None, dry_run=False
         ),
-        describe=f"attestation {argv[0]}",
+        describe=f"attestation {action}",
     )
-    if int(getattr(result, "return_code", 0)) != 0:
-        raise RuntimeError(f"release attestation command failed: {argv[0]}")
+    return_code = int(getattr(result, "return_code", 0))
+    if return_code != 0:
+        detail = str(getattr(result, "stderr", "") or getattr(result, "stdout", "")).strip()
+        raise RuntimeError(
+            f"release attestation step failed (exit {return_code}): {action}"
+            + (f"\n{detail}" if detail else "")
+        )
     return result
