@@ -129,6 +129,37 @@ def test_prepare_version_updates_each_curated_location_without_reformatting(
     assert verify_version_consistency(source_tree) == "0.18.0"
 
 
+def test_prepare_version_ignores_dependency_pins_that_start_with_the_new_version(
+    source_tree: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Releasing 0.17.1 must not trip over a dependency pinned at 0.17.14.
+
+    The real case: `ring 0.17.14` sits in the watchdog lockfile beside our own
+    pin, so a substring search reports two hits where one is expected and
+    aborts the release.
+    """
+    lockfile = source_tree / "runtimes" / "watchdog" / "Cargo.lock"
+    colliding_pin = '\n[[package]]\nname = "colliding-dep"\nversion = "0.17.14"\n'
+    lockfile.write_text(lockfile.read_text(encoding="utf-8") + colliding_pin, encoding="utf-8")
+
+    def bump_lockfiles(_command: tuple[str, ...], cwd: Path) -> None:
+        for _, relative_cwd, relative_lockfile in LOCKFILE_COMMANDS:
+            if cwd.relative_to(source_tree) != relative_cwd:
+                continue
+            path = source_tree / relative_lockfile
+            path.write_text(
+                path.read_text(encoding="utf-8").replace("0.17.0", "0.17.1"), encoding="utf-8"
+            )
+
+    monkeypatch.setattr(versioning, "_run_command", bump_lockfiles)
+
+    prepare_version(source_tree, "0.17.1")
+
+    assert verify_version_consistency(source_tree) == "0.17.1"
+    assert colliding_pin in lockfile.read_text(encoding="utf-8")
+
+
 def test_prepare_version_regenerates_lockfiles_after_primary_edits(
     source_tree: Path,
     monkeypatch: pytest.MonkeyPatch,
