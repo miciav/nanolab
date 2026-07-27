@@ -110,10 +110,26 @@ def prepare_version(repo_root: Path, requested: str) -> tuple[Path, ...]:
     return tuple(repo_root / relative_path for relative_path in _CURATED_COUNTS)
 
 
+def _version_pattern(version: str) -> re.Pattern[str]:
+    """Match a whole version, never one that merely starts with it.
+
+    Lockfiles pin dependency versions beside our own, and a plain substring
+    search cannot tell them apart: releasing 0.17.1 finds two hits in
+    `runtimes/watchdog/Cargo.lock`, because `ring 0.17.14` starts with it.
+    Counting that way aborts a correct release; replacing that way would
+    silently rewrite the dependency's pin.
+    """
+    return re.compile(rf"(?<![\d.]){re.escape(version)}(?![\d.])")
+
+
+def _count_version(text: str, version: str) -> int:
+    return len(_version_pattern(version).findall(text))
+
+
 def _validate_replacement_counts(repo_root: Path, version: str) -> None:
     for relative_path, expected_count in _CURATED_COUNTS.items():
         path = repo_root / relative_path
-        actual_count = path.read_text(encoding="utf-8").count(version)
+        actual_count = _count_version(path.read_text(encoding="utf-8"), version)
         if actual_count != expected_count:
             raise ValueError(
                 f"replacement count in {relative_path} is {actual_count}, expected {expected_count}"
@@ -130,11 +146,12 @@ def _prepared_updates(
     for relative_path, expected_count in counts.items():
         path = repo_root / relative_path
         source = path.read_text(encoding="utf-8")
-        if source.count(current) != expected_count:
+        actual_count = _count_version(source, current)
+        if actual_count != expected_count:
             raise ValueError(
-                f"replacement count in {relative_path} is {source.count(current)}, expected {expected_count}"
+                f"replacement count in {relative_path} is {actual_count}, expected {expected_count}"
             )
-        updates.append((path, source.replace(current, requested)))
+        updates.append((path, _version_pattern(current).sub(requested, source)))
     return tuple(updates)
 
 
