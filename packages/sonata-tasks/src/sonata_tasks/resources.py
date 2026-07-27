@@ -9,8 +9,8 @@ from workflow_tasks.execution.bindings import CommandTaskExecutor
 from workflow_tasks.execution.roles import ExecutionRole
 from workflow_tasks.tasks.models import TaskResult
 
-from sonata_tasks.command import CommandTask
 from sonata_tasks.docker import DockerInspectTask
+from sonata_tasks.kubectl import KubectlTask
 
 ResourceSpec = Mapping[str, Any]
 
@@ -101,11 +101,11 @@ def _k8s_cpu(value: object) -> str:
     return str(int(number)) if number.is_integer() else f"{int(number * 1000)}m"
 
 
-class K8sResourceCheckTask(CommandTask):
+class K8sResourceCheckTask(KubectlTask):
     """Read a Deployment and assert the declared limits reached its container.
 
-    Unlike its container sibling this builds its own `kubectl get` invocation:
-    there is no KubectlGetTask primitive yet, because nothing else needs one.
+    Both halves of the check now sit on a primitive: the container one on
+    DockerInspectTask, this one on KubectlTask.
     """
 
     def __init__(
@@ -147,10 +147,14 @@ class K8sResourceCheckTask(CommandTask):
             verify = check_deployment
 
         super().__init__(
-            title=f"Inspect resources of {deployment}",
-            argv=("kubectl", "get", "deployment", deployment, "-n", namespace, "-o=json"),
+            "get",
+            "deployment",
+            deployment,
+            "-o=json",
             executor=executor,
             role=role,
+            namespace=namespace,
+            title=f"Inspect resources of {deployment}",
             cwd=cwd,
             verify=verify,
         )

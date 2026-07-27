@@ -142,13 +142,15 @@ def test_k8s_check_reads_the_deployment_as_json() -> None:
         deployment="fn-word-stats", namespace="research", resources=SPEC, executor=executor, role="stack"
     ).run(TaskInputs.empty())
 
+    # The namespace sits right after kubectl, where KubectlTask puts it for every
+    # caller, rather than wherever each call site chose to append it.
     assert executor.seen[0].argv == (
         "kubectl",
+        "-n",
+        "research",
         "get",
         "deployment",
         "fn-word-stats",
-        "-n",
-        "research",
         "-o=json",
     )
 

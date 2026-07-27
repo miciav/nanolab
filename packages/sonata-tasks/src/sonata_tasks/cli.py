@@ -18,6 +18,7 @@ from workflow_tasks.tasks.models import TaskResult
 from sonata_tasks.cli_function import CliFunctionApplyTask, CliFunctionDeleteTask
 from sonata_tasks.command import CommandTask
 from sonata_tasks.function import function_resource
+from sonata_tasks.kubectl import KubectlTask
 from sonata_tasks.manifest import FunctionManifest
 
 
@@ -113,19 +114,15 @@ def _readiness_tasks(
             role=request.cli_role,
             cwd=cwd,
         ),
-        CommandTask(
-            title=f"Roll out deployment/{deployment}",
-            argv=(
-                "kubectl",
-                "-n",
-                request.namespace,
-                "rollout",
-                "status",
-                f"deployment/{deployment}",
-                f"--timeout={timeout_seconds}s",
-            ),
+        KubectlTask(
+            "rollout",
+            "status",
+            f"deployment/{deployment}",
+            f"--timeout={timeout_seconds}s",
             executor=executor,
             role=request.cli_role,
+            namespace=request.namespace,
+            title=f"Roll out deployment/{deployment}",
             cwd=cwd,
         ),
     )

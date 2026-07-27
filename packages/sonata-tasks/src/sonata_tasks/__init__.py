@@ -5,6 +5,7 @@ from sonata_tasks.cli_function import CliFunctionApplyTask, CliFunctionDeleteTas
 from sonata_tasks.command import CommandTask
 from sonata_tasks.function import function_resource
 from sonata_tasks.http_function import HttpFunctionDeleteTask, HttpFunctionRegisterTask
+from sonata_tasks.kubectl import KubectlTask
 from sonata_tasks.manifest import FunctionManifest
 from sonata_tasks.docker import DockerBuildTask, DockerInspectTask, DockerPushTask
 from sonata_tasks.helm import (
@@ -28,6 +29,7 @@ __all__ = [
     "HttpFunctionDeleteTask",
     "HttpFunctionRegisterTask",
     "K8sResourceCheckTask",
+    "KubectlTask",
     "HelmInstallTask",
     "HelmReleaseSpec",
     "HelmUninstallTask",
