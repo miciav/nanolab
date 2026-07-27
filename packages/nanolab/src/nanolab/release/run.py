@@ -897,6 +897,7 @@ def _run_amd64_release_locked(
                     provider,
                     arm_request,
                     remote_arm_bake,
+                    remote_buildkit,
                     source_dir,
                     registry_upstream=provider.connection_host(stack_request),  # type: ignore[attr-defined]
                 )
@@ -1356,23 +1357,30 @@ def _build_arm64_images(
     provider: object,
     request: object,
     remote_bake: str,
+    remote_buildkit: str,
     remote_source_dir: str,
     *,
     registry_upstream: str,
 ) -> tuple[ArtifactEvidence, ...]:
     bake_file.write_text(render_bake_json(image_plan), encoding="utf-8")
     _provider_exec(provider, request, ("mkdir", "-p", str(Path(remote_bake).parent)))
-    _provider_transfer_to(
-        provider,
-        request,
-        source=bake_file,
-        destination=remote_bake,
-        action=f"transfer {bake_file.name}",
-    )
+    for source, destination in (
+        (bake_file, remote_bake),
+        (plan.buildkit_config, remote_buildkit),
+    ):
+        _provider_transfer_to(
+            provider,
+            request,
+            source=source,
+            destination=destination,
+            action=f"transfer {source.name}",
+        )
+    _reset_named_builder(plan, provider, request)
     for command in arm.arm64_build_commands(
         image_plan,
         builder_name=plan.builder.name,
         remote_bake_file=remote_bake,
+        remote_buildkit_config=remote_buildkit,
         remote_source_dir=remote_source_dir,
         registry_upstream=registry_upstream,
     ):

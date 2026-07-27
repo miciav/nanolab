@@ -1210,7 +1210,9 @@ def test_release_runs_arm64_only_after_the_passed_amd64_gate(
     assert len(server_runs) == 25
     assert len(server_removals) == 25
     assert all("--platform linux/arm64" in event for event in server_runs)
-    assert sum(event.startswith("exec:docker buildx create") for event in events) == 1
+    # One per builder VM: buildx state is per-daemon, so the ARM builder cannot
+    # reuse the one the stack VM created.
+    assert sum(event.startswith("exec:docker buildx create") for event in events) == 2
     health_checks = [event for event in events if event.startswith("exec:curl")]
     assert len(health_checks) == 25
     assert all("--retry-max-time 120" in event for event in health_checks)

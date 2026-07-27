@@ -59,6 +59,7 @@ def arm64_build_commands(
     *,
     builder_name: str,
     remote_bake_file: str,
+    remote_buildkit_config: str,
     remote_source_dir: str,
     registry_upstream: str,
 ) -> tuple[CommandTaskSpec, ...]:
@@ -67,6 +68,27 @@ def arm64_build_commands(
             task_id="release.arm64.registry-tunnel",
             summary="Tunnel localhost:5000 to the stack registry",
             argv=registry_tunnel_command(registry_upstream),
+            role="arm-builder",
+            remote_dir=remote_source_dir,
+        ),
+        # Buildx builders are per-daemon state, so the name the stack VM created
+        # means nothing here: this VM needs its own, with the same parallelism
+        # bound.
+        CommandTaskSpec(
+            task_id="release.arm64.builder-create",
+            summary="Create bounded release Buildx builder",
+            argv=(
+                "docker",
+                "buildx",
+                "create",
+                "--name",
+                builder_name,
+                "--driver",
+                "docker-container",
+                "--buildkitd-config",
+                remote_buildkit_config,
+                "--use",
+            ),
             role="arm-builder",
             remote_dir=remote_source_dir,
         ),
