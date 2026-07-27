@@ -15,8 +15,10 @@ from workflow_tasks.execution.bindings import (
 from workflow_tasks.execution.roles import ExecutionRole
 from workflow_tasks.tasks.models import TaskResult
 
+from sonata_tasks.cli_function import CliFunctionApplyTask, CliFunctionDeleteTask
 from sonata_tasks.command import CommandTask
 from sonata_tasks.function import function_resource
+from sonata_tasks.manifest import FunctionManifest
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,35 +81,6 @@ def _cli_argv(request: CliWorkflowRequest, *arguments: str) -> tuple[str, ...]:
         "--namespace",
         request.namespace,
         *arguments,
-    )
-
-
-def _apply_script(request: CliWorkflowRequest, function: CliFunction) -> str:
-    """Shell that writes the manifest next to the CLI and applies it.
-
-    The manifest is created with `mktemp` on the target on purpose. Writing it
-    here with `tempfile` would work on the host role and silently break on the
-    stack role, where the CLI runs elsewhere and would never see a local path.
-    """
-    body: dict[str, object] = {
-        "name": function.name,
-        "image": function.image,
-        "executionMode": "DEPLOYMENT",
-        "timeoutMs": 5000,
-        "concurrency": 2,
-        "queueSize": 20,
-        "maxRetries": 3,
-    }
-    if function.resources is not None:
-        body["resources"] = function.resources
-    manifest = json.dumps(body, separators=(",", ":"))
-    apply_command = " ".join(
-        shlex.quote(value)
-        for value in _cli_argv(request, "fn", "apply", "--file", "$manifest")
-    ).replace("'$manifest'", '"$manifest"')
-    return (
-        f"manifest=$(mktemp); trap 'rm -f \"$manifest\"' EXIT; "
-        f"printf '%s' {shlex.quote(manifest)} > \"$manifest\"; " + apply_command
     )
 
 
@@ -174,19 +147,15 @@ def _function_resource(
     register, readiness — belongs to `function_resource`, which every other
     workflow reuses with its own register and delete commands.
     """
-    apply_task = CommandTask(
-        title=f"Apply {function.name}",
-        argv=("bash", "-lc", _apply_script(request, function)),
-        executor=executor,
-        role=request.cli_role,
-        cwd=cwd,
+    manifest = FunctionManifest(
+        name=function.name, image=function.image, resources=function.resources
     )
-    delete_task = CommandTask(
-        title=f"Delete {function.name}",
-        argv=_cli_argv(request, "fn", "delete", function.name),
-        executor=executor,
-        role=request.cli_role,
-        cwd=cwd,
+    prefix = _cli_argv(request)
+    apply_task = CliFunctionApplyTask(
+        manifest, cli_argv=prefix, executor=executor, role=request.cli_role, cwd=cwd
+    )
+    delete_task = CliFunctionDeleteTask(
+        function.name, cli_argv=prefix, executor=executor, role=request.cli_role, cwd=cwd
     )
     ready_tasks = (
         _readiness_tasks(request, function, executor, cwd, readiness_timeout_seconds)
