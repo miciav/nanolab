@@ -27,7 +27,6 @@ from sonata_tasks.http_function import (
 )
 from sonata_tasks.kubectl import KubectlTask
 from sonata_tasks.manifest import FunctionManifest
-from sonata_tasks.process import ManagedProcess
 from sonata_tasks.resources import ContainerResourceCheckTask, K8sResourceCheckTask
 
 Backend = Literal["container", "k8s"]
@@ -213,7 +212,7 @@ def build_validate_workflow(
     *,
     workflow_id: str = "validate",
     cwd: Path | None = None,
-    control_plane_process: Callable[[], Resource[ManagedProcess]] | None = None,
+    control_plane_process: Callable[[], Resource[Any]] | None = None,
     local_endpoint: str = "http://127.0.0.1:18080",
     requires: tuple[Resource[Any], ...] = (),
 ) -> Workflow:

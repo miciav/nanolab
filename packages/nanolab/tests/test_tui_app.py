@@ -166,7 +166,7 @@ def _install_workflow_helpers(
     workflow: object,
     # FakeWorkflow is legacy-shaped (`.tasks`, no `.compile()`); default to a
     # legacy scenario so uses_sonata() routes through it correctly.
-    scenario_kind: str = "validate",
+    scenario_kind: str = "offload",
     backend: str = "container",
     provider: str = "local",
     calls: list[tuple[Any, ...]] | None = None,
@@ -248,7 +248,7 @@ def test_tools_inspect_selects_only_stable_scenarios_and_renders_validated_json(
             assert indent == 2
             return json.dumps(
                 {
-                    "workflow": "validate",
+                    "workflow": "offload",
                     "x-function": "echo",
                     "detail": "[/bold] literal [/]",
                 },
@@ -288,7 +288,7 @@ def test_tools_inspect_selects_only_stable_scenarios_and_renders_validated_json(
     ]
     assert loaded_paths == [tmp_path / "scenarios-v2" / "validate-container.yaml"]
     assert json.loads(str(frame_calls[0]["body"])) == {
-        "workflow": "validate",
+        "workflow": "offload",
         "x-function": "echo",
         "detail": "[/bold] literal [/]",
     }
@@ -307,7 +307,7 @@ def test_tool_navigation_does_not_require_nanofaas_root(
     scenarios_dir = tmp_path / "scenarios-v2"
     scenarios_dir.mkdir()
     (scenarios_dir / "validate-container.yaml").write_text(
-        "workflow: validate\nbackend: container\n",
+        "workflow: offload\nbackend: container\n",
         encoding="utf-8",
     )
     monkeypatch.delenv("NANOFAAS_ROOT", raising=False)
@@ -581,7 +581,7 @@ def test_legacy_run_planned_steps_include_cleanup_titles(
         monkeypatch,
         environment_path=environment_path,
         workflow=workflow,
-        scenario_kind="validate",
+        scenario_kind="offload",
     )
     controller = RecordingController()
 
@@ -1133,7 +1133,7 @@ def test_reselecting_local_environment_resets_remote_provisioning_choice(
     workflow = FakeWorkflow()
     # FakeWorkflow is legacy-shaped; use a legacy scenario so uses_sonata() takes
     # the `.tasks`-based path instead of trying to `.compile()` it.
-    monkeypatch.setattr(tui_app, "_scenario", lambda _path: SimpleNamespace(workflow="validate"))
+    monkeypatch.setattr(tui_app, "_scenario", lambda _path: SimpleNamespace(workflow="offload"))
     monkeypatch.setattr(
         tui_app,
         "_environment",

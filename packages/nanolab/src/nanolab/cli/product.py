@@ -30,8 +30,12 @@ from nanolab.workspace.paths import default_tool_paths, discover_tool_root
 
 
 def uses_sonata(scenario: ScenarioConfig) -> bool:
-    """Whether this scenario is already executed by Sonata."""
-    return scenario.workflow == "cli"
+    """Whether this scenario is already executed by Sonata.
+
+    Shrinks as the migration proceeds: `loadtest`, `offload` and
+    `offload-loadtest` are what is left on the legacy engine.
+    """
+    return scenario.workflow in ("cli", "validate")
 
 
 def _read(path: Path) -> dict[str, object]:

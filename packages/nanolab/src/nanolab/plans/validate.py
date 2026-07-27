@@ -1,28 +1,27 @@
 import json
+from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import yaml
-from workflow_tasks.components.container import managed_process_resource
-from workflow_tasks.core.workflow import Workflow
+from sonata_engine import Resource, Workflow
+from sonata_tasks.process import managed_process_resource
+from sonata_tasks.validate import ValidateFunction as SonataFunction
+from sonata_tasks.validate import ValidateWorkflowRequest, build_validate_workflow
+from workflow_tasks.components.helm import control_plane_helm_values
 from workflow_tasks.execution.bindings import RoleBindings
-from workflow_tasks.workflows.validate import (
-    ValidateFunction,
-    ValidateWorkflowRequest,
-    validate_cleanup_specs,
-    validate_task_specs,
-)
+from workflow_tasks.workflows.validate import ValidateFunction
 
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.functions.catalog import FunctionDefinition, resolve_function_definition
 from nanolab.plans import _local_control_plane
-from nanolab.plans._assembly import workflow_from_specs
 from nanolab.workspace.paths import discover_tool_root
 
 
-def _container_control_plane(repo_root: Path):
+def _container_control_plane(repo_root: Path) -> Resource[Any]:
+    """The control plane running on this machine, deploying functions with Docker."""
     return managed_process_resource(
-        task_id="container.start.control-plane",
-        title="Start container-local control plane",
+        title="Acquire local control plane",
         argv=_local_control_plane.argv(repo_root),
         cwd=repo_root,
         ready=_local_control_plane.ready,
@@ -101,6 +100,35 @@ def _resolve_function(
     )
 
 
+def _sonata_function(resolved: ValidateFunction) -> SonataFunction:
+    """The same resolved function in the Sonata catalogue's shape.
+
+    `loadtest`, `offload` and `offload-loadtest` still consume the legacy type,
+    so resolution keeps producing it and only the workflow that has moved
+    converts. This goes away with the last of them; the dropped `key` existed
+    only to spell task ids by hand.
+    """
+    return SonataFunction(
+        name=resolved.name,
+        image=resolved.image,
+        payload=resolved.payload,
+        build_argv=resolved.build_argv,
+        resources=resolved.resources,
+        scaling_config=resolved.scaling_config,
+        timeout_ms=resolved.timeout_ms,
+        concurrency=resolved.concurrency,
+        queue_size=resolved.queue_size,
+        max_retries=resolved.max_retries,
+    )
+
+
+def _set_args(values: dict[str, str]) -> tuple[str, ...]:
+    args: list[str] = []
+    for key, value in values.items():
+        args.extend(["--set", f"{key}={value}"])
+    return tuple(args)
+
+
 def build_validate_plan(
     config: ScenarioConfig,
     bindings: RoleBindings,
@@ -108,32 +136,50 @@ def build_validate_plan(
     repo_root: Path | None = None,
     tool_root: Path | None = None,
 ) -> Workflow:
+    """Compile the validate scenario into a Sonata workflow.
+
+    The legacy builder had to take the rendered specs apart to work: it filtered
+    out `container.start.control-plane` by task id, built the rest, then inserted
+    a resource back at the index the removed spec had occupied, and finally
+    attached a separate cleanup list the runner had to remember to execute. The
+    control plane is now a resource the workflow is given, and the teardown is
+    the release half of the resources it holds.
+    """
     if config.workflow != "validate" or config.backend is None:
         raise ValueError("validate plan requires a validate scenario with a backend")
+    root = repo_root or Path.cwd()
+    kubernetes = config.backend == "k8s"
     request = ValidateWorkflowRequest(
         backend=config.backend,
         build=config.build,
         functions=tuple(
-            _resolve_function(config, key, tool_root=tool_root) for key in config.functions
+            _sonata_function(_resolve_function(config, key, tool_root=tool_root))
+            for key in config.functions
         ),
-        additional_modules=("async-queue", "sync-queue") if config.backend == "k8s" else (),
+        additional_modules=("async-queue", "sync-queue") if kubernetes else (),
     )
-    root = repo_root or Path.cwd()
-    specs = validate_task_specs(request)
-    cleanup_tasks = workflow_from_specs(validate_cleanup_specs(request), bindings, cwd=root).tasks
-    if config.backend != "container":
-        workflow = workflow_from_specs(specs, bindings, cwd=root)
-        workflow.cleanup_tasks = cleanup_tasks
-        return workflow
-
-    commands = workflow_from_specs(
-        tuple(spec for spec in specs if spec.task_id != "container.start.control-plane"),
+    if kubernetes:
+        # Both settings are what this workflow exists to exercise: the JUnit queue
+        # contracts need admission on, and the metric assertions need the advanced
+        # profile. Derived from the request so the chart and the pushed image can
+        # never name different things.
+        request = replace(
+            request,
+            helm_values=_set_args(
+                control_plane_helm_values(
+                    namespace=request.namespace,
+                    control_plane_image=request.control_plane_image_reference(),
+                    metrics_profile="advanced",
+                    sync_queue_admission_enabled=True,
+                )
+            ),
+        )
+    return build_validate_workflow(
+        request,
         bindings,
         cwd=root,
+        control_plane_process=(
+            None if kubernetes else lambda: _container_control_plane(root)
+        ),
+        local_endpoint=_local_control_plane.ENDPOINT,
     )
-    start_index = next(
-        index for index, spec in enumerate(specs) if spec.task_id == "container.start.control-plane"
-    )
-    commands.tasks.insert(start_index, _container_control_plane(root))
-    commands.cleanup_tasks = cleanup_tasks
-    return commands

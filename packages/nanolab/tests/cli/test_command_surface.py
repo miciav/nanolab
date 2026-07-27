@@ -85,8 +85,8 @@ def test_plan_builds_shared_validate_workflow() -> None:
     )
 
     assert result.exit_code == 0
-    assert "images.build.word-stats-java" in result.stdout
-    assert "resources.inspect.k8s.word-stats-java" in result.stdout
+    assert "005.build-image-word-stats-java" in result.stdout
+    assert "010.inspect-resources-of-fn-word-stats-java" in result.stdout
 
 
 def test_run_renders_normalized_task_progress(monkeypatch) -> None:
@@ -95,7 +95,7 @@ def test_run_renders_normalized_task_progress(monkeypatch) -> None:
         lambda *args, **kwargs: Workflow(tasks=[_Task()]),
     )
 
-    result = CliRunner().invoke(app, ["run", "scenarios-v2/validate-container.yaml"])
+    result = CliRunner().invoke(app, ["run", "scenarios-v2/loadtest.yaml"])
 
     assert result.exit_code == 0
     assert "[test.task] running" in result.stdout
@@ -435,21 +435,23 @@ def test_inspect_renders_validated_configuration() -> None:
 def test_plan_can_select_one_task() -> None:
     result = CliRunner().invoke(
         app,
-        ["plan", "scenarios-v2/validate-k8s.yaml", "--only", "functions.invoke.word-stats-java"],
+        ["plan", "scenarios-v2/validate-k8s.yaml", "--only", "invoke-word-stats-java"],
     )
 
     assert result.exit_code == 0
-    assert "functions.invoke.word-stats-java" in result.stdout
-    assert "images.build.word-stats-java" not in result.stdout
+    assert "invoke-word-stats-java" in result.stdout
+    assert "build-image-word-stats-java" not in result.stdout
 
 
 def test_task_slice_keeps_only_cleanup_for_selected_acquisitions() -> None:
+    """Still the legacy slicer, now exercised through a workflow that still uses
+    it: `validate` moved to Sonata, whose Selection filters before compiling."""
     workflow = _workflow(
-        ScenarioConfig(workflow="validate", backend="k8s", functions=["word-stats-java"]),
+        ScenarioConfig(workflow="offload", functions=["word-stats-java"]),
         EnvironmentConfig(provider="local"),
     )
 
-    _slice(workflow, only="stack.preflight", start=None, until=None)
+    _slice(workflow, only="offload.build.control-plane", start=None, until=None)
 
     assert workflow.cleanup_tasks == []
 
@@ -467,7 +469,7 @@ def test_plan_accepts_external_ssh_environment(tmp_path: Path) -> None:
     )
 
     assert result.exit_code == 0
-    assert "stack.preflight" in result.stdout
+    assert "001.check-kubectl-is-usable" in result.stdout
 
 
 def test_plan_builds_loadtest_with_operational_defaults(tmp_path: Path) -> None:
