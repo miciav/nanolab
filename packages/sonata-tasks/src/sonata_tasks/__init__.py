@@ -7,7 +7,12 @@ from sonata_tasks.function import function_resource
 from sonata_tasks.http_function import HttpFunctionDeleteTask, HttpFunctionRegisterTask
 from sonata_tasks.kubectl import KubectlTask
 from sonata_tasks.manifest import FunctionManifest
-from sonata_tasks.docker import DockerBuildTask, DockerInspectTask, DockerPushTask
+from sonata_tasks.docker import (
+    DockerBuildTask,
+    DockerInspectTask,
+    DockerPushTask,
+    DockerTask,
+)
 from sonata_tasks.helm import (
     HelmInstallTask,
     HelmReleaseSpec,
@@ -37,6 +42,7 @@ __all__ = [
     "DockerBuildTask",
     "DockerInspectTask",
     "DockerPushTask",
+    "DockerTask",
     "function_resource",
     "helm_release_resource",
     "managed_process_resource",

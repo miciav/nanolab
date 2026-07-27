@@ -7,7 +7,12 @@ from sonata_engine import TaskInputs
 from workflow_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 from sonata_tasks.command import CommandTask
-from sonata_tasks.docker import DockerBuildTask, DockerInspectTask, DockerPushTask
+from sonata_tasks.docker import (
+    DockerBuildTask,
+    DockerInspectTask,
+    DockerPushTask,
+    DockerTask,
+)
 
 
 @dataclass
@@ -104,3 +109,36 @@ def test_they_are_command_tasks_rather_than_wrappers_around_one(task: CommandTas
     """Subclassing keeps role, cwd, exit codes and verify working without a second
     layer to maintain — and lets a workflow treat them as ordinary tasks."""
     assert isinstance(task, CommandTask)
+
+
+def test_the_catch_all_covers_commands_the_typed_subclasses_do_not() -> None:
+    """Without it, `docker logs` would mean dropping to a raw CommandTask and
+    spelling the binary at the call site."""
+    executor = RecordingExecutor()
+
+    task = DockerTask("logs", "--tail", "20", "fn-1", executor=executor, role="host")
+    _ = task.run(TaskInputs.empty())
+
+    assert task.title == "docker logs --tail 20 fn-1"
+    assert executor.seen[0].argv == ("docker", "logs", "--tail", "20", "fn-1")
+
+
+def test_the_catch_all_can_widen_the_accepted_exit_codes() -> None:
+    executor = RecordingExecutor()
+
+    task = DockerTask(
+        "rm", "--force", "fn-1", executor=executor, role="host",
+        expected_exit_codes=frozenset({0, 1}),
+    )
+    _ = task.run(TaskInputs.empty())
+
+    assert executor.seen[0].expected_exit_codes == frozenset({0, 1})
+
+
+def test_the_typed_ones_are_docker_tasks_too() -> None:
+    executor = RecordingExecutor()
+
+    assert isinstance(DockerPushTask(image="i", executor=executor, role="host"), DockerTask)
+    assert isinstance(
+        DockerInspectTask(container="c", executor=executor, role="host"), DockerTask
+    )

@@ -15,7 +15,36 @@ from sonata_tasks.command import CommandTask
 # of a call site most needs to see.
 
 
-class DockerBuildTask(CommandTask):
+class DockerTask(CommandTask):
+    """Run one docker sub-command.
+
+    The catch-all, so a workflow needing something the typed subclasses do not
+    cover — `logs`, `rm`, `cp` — still picks a docker task rather than dropping
+    to a raw CommandTask and spelling the binary itself.
+    """
+
+    def __init__(
+        self,
+        *args: str,
+        executor: CommandTaskExecutor,
+        role: ExecutionRole,
+        title: str | None = None,
+        cwd: Path | None = None,
+        verify: Callable[[TaskResult], None] | None = None,
+        expected_exit_codes: frozenset[int] = frozenset({0}),
+    ) -> None:
+        super().__init__(
+            title=title or f"docker {' '.join(args)}",
+            argv=("docker", *args),
+            executor=executor,
+            role=role,
+            cwd=cwd,
+            verify=verify,
+            expected_exit_codes=expected_exit_codes,
+        )
+
+
+class DockerBuildTask(DockerTask):
     """Build an image from a Dockerfile."""
 
     def __init__(
@@ -29,15 +58,20 @@ class DockerBuildTask(CommandTask):
         cwd: Path | None = None,
     ) -> None:
         super().__init__(
-            title=f"Build image {image}",
-            argv=("docker", "build", "-f", dockerfile, "-t", image, context),
+            "build",
+            "-f",
+            dockerfile,
+            "-t",
+            image,
+            context,
             executor=executor,
             role=role,
+            title=f"Build image {image}",
             cwd=cwd,
         )
 
 
-class DockerPushTask(CommandTask):
+class DockerPushTask(DockerTask):
     """Push an image to the registry its tag names."""
 
     def __init__(
@@ -49,15 +83,16 @@ class DockerPushTask(CommandTask):
         cwd: Path | None = None,
     ) -> None:
         super().__init__(
-            title=f"Push image {image}",
-            argv=("docker", "push", image),
+            "push",
+            image,
             executor=executor,
             role=role,
+            title=f"Push image {image}",
             cwd=cwd,
         )
 
 
-class DockerInspectTask(CommandTask):
+class DockerInspectTask(DockerTask):
     """Read a container's metadata.
 
     `fmt` is a Go template, defaulting to the whole host config as JSON so a
@@ -75,10 +110,12 @@ class DockerInspectTask(CommandTask):
         verify: Callable[[TaskResult], None] | None = None,
     ) -> None:
         super().__init__(
-            title=f"Inspect {container}",
-            argv=("docker", "inspect", f"--format={fmt}", container),
+            "inspect",
+            f"--format={fmt}",
+            container,
             executor=executor,
             role=role,
+            title=f"Inspect {container}",
             cwd=cwd,
             verify=verify,
         )
