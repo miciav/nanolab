@@ -76,7 +76,12 @@ jobs:
           uv run --locked --all-packages --all-groups lint-imports --config packages/tui-toolkit/.importlinter --no-cache
 
       - name: Build distributions
-        run: uv build --all-packages --out-dir dist --clear
+        # No --clear: the runner checks out fresh, so there is nothing to clear,
+        # and clearing races with the .gitignore uv keeps in the output directory
+        # while four packages build into it. That race failed one run of PR #3
+        # with "failed to open file dist/.gitignore" after every package had
+        # already built successfully.
+        run: uv build --all-packages --out-dir dist
 
       - name: Smoke-test installed wheels
         run: |
