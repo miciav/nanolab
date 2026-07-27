@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import shlex
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,11 +12,15 @@ from workflow_tasks.execution.bindings import (
     RoleBoundCommandTaskExecutor,
 )
 from workflow_tasks.execution.roles import ExecutionRole
-from workflow_tasks.tasks.models import TaskResult
 
-from sonata_tasks.cli_function import CliFunctionApplyTask, CliFunctionDeleteTask
+from sonata_tasks.cli_function import (
+    CliFunctionApplyTask,
+    CliFunctionDeleteTask,
+    CliFunctionInvokeTask,
+)
 from sonata_tasks.command import CommandTask
 from sonata_tasks.function import function_resource
+from sonata_tasks.gradle import GradleTask
 from sonata_tasks.kubectl import KubectlTask
 from sonata_tasks.manifest import FunctionManifest
 
@@ -51,27 +54,6 @@ class CliWorkflowRequest:
             raise ValueError("CLI workflow can run only on host or stack")
         if not self.functions:
             raise ValueError("CLI workflow requires at least one function")
-
-
-def _verify_invocation(result: TaskResult) -> None:
-    """Assert the control plane reported a usable invocation.
-
-    This is the whole point of porting invoke to a real task: the old workflow
-    piped the response through two `grep -q` calls inside a bash string, which
-    could not tell "not JSON" from "status was error".
-    """
-    try:
-        response = json.loads(result.stdout)
-    except ValueError as error:
-        raise RuntimeError(
-            f"invocation response was not JSON: {result.stdout[:200]!r}"
-        ) from error
-    if not isinstance(response, dict):
-        raise RuntimeError(f"invocation response was not JSON object: {result.stdout[:200]!r}")
-    if response.get("status") != "success":
-        raise RuntimeError(f"invocation did not report success: {response.get('status')!r}")
-    if "output" not in response:
-        raise RuntimeError("invocation carried no output")
 
 
 def _cli_argv(request: CliWorkflowRequest, *arguments: str) -> tuple[str, ...]:
@@ -198,9 +180,9 @@ def build_cli_workflow(
     executor = RoleBoundCommandTaskExecutor(bindings)
     workflow = Workflow(workflow_id=workflow_id)
     workflow.add(
-        CommandTask(
+        GradleTask(
+            ":nanofaas-cli:installDist",
             title="Build nanofaas-cli",
-            argv=("./gradlew", ":nanofaas-cli:installDist", "--no-daemon"),
             executor=executor,
             role=request.build_role,
             cwd=cwd,
@@ -252,13 +234,13 @@ def build_cli_workflow(
     )
     for function, resource in zip(request.functions, resources):
         workflow.add(
-            CommandTask(
-                title=f"Invoke {function.name}",
-                argv=_cli_argv(request, "invoke", function.name, "--data", function.payload),
+            CliFunctionInvokeTask(
+                function.name,
+                payload=function.payload,
+                cli_argv=_cli_argv(request),
                 executor=executor,
                 role=request.cli_role,
                 cwd=cwd,
-                verify=_verify_invocation,
             ),
             requires=(*requires, resource),
         )

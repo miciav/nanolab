@@ -1,10 +1,20 @@
 """nanoFaaS workflow tasks built on the Sonata engine."""
 
 from sonata_tasks.cli import CliFunction, CliWorkflowRequest, build_cli_workflow
-from sonata_tasks.cli_function import CliFunctionApplyTask, CliFunctionDeleteTask
+from sonata_tasks.cli_function import (
+    CliFunctionApplyTask,
+    CliFunctionDeleteTask,
+    CliFunctionInvokeTask,
+)
 from sonata_tasks.command import CommandTask
 from sonata_tasks.function import function_resource
-from sonata_tasks.http_function import HttpFunctionDeleteTask, HttpFunctionRegisterTask
+from sonata_tasks.gradle import GradleTask
+from sonata_tasks.http_function import (
+    HttpFunctionDeleteTask,
+    HttpFunctionInvokeTask,
+    HttpFunctionRegisterTask,
+)
+from sonata_tasks.invocation import verify_invocation
 from sonata_tasks.kubectl import KubectlTask
 from sonata_tasks.compensation import compensated_resource
 from sonata_tasks.manifest import FunctionManifest
@@ -29,10 +39,13 @@ __all__ = [
     "CliWorkflowRequest",
     "CliFunctionApplyTask",
     "CliFunctionDeleteTask",
+    "CliFunctionInvokeTask",
     "CommandTask",
     "ContainerResourceCheckTask",
     "FunctionManifest",
+    "GradleTask",
     "HttpFunctionDeleteTask",
+    "HttpFunctionInvokeTask",
     "HttpFunctionRegisterTask",
     "K8sResourceCheckTask",
     "KubectlTask",
@@ -48,5 +61,6 @@ __all__ = [
     "function_resource",
     "helm_release_resource",
     "managed_process_resource",
+    "verify_invocation",
     "vm_resource",
 ]

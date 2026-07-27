@@ -7,6 +7,7 @@ from workflow_tasks.execution.bindings import CommandTaskExecutor
 from workflow_tasks.execution.roles import ExecutionRole
 
 from sonata_tasks.command import CommandTask
+from sonata_tasks.invocation import verify_invocation
 from sonata_tasks.manifest import FunctionManifest
 
 
@@ -73,4 +74,31 @@ class CliFunctionDeleteTask(CommandTask):
             executor=executor,
             role=role,
             cwd=cwd,
+        )
+
+
+class CliFunctionInvokeTask(CommandTask):
+    """Invoke a function through the nanofaas CLI and check what came back.
+
+    The CLI's twin of `HttpFunctionInvokeTask`: different transport, same
+    response, so both share `verify_invocation`.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        *,
+        payload: str,
+        cli_argv: tuple[str, ...],
+        executor: CommandTaskExecutor,
+        role: ExecutionRole,
+        cwd: Path | None = None,
+    ) -> None:
+        super().__init__(
+            title=f"Invoke {name}",
+            argv=(*cli_argv, "invoke", name, "--data", payload),
+            executor=executor,
+            role=role,
+            cwd=cwd,
+            verify=verify_invocation,
         )

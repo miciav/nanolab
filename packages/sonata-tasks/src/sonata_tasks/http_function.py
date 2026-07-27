@@ -7,6 +7,7 @@ from workflow_tasks.execution.bindings import CommandTaskExecutor
 from workflow_tasks.execution.roles import ExecutionRole
 
 from sonata_tasks.command import CommandTask
+from sonata_tasks.invocation import verify_invocation
 from sonata_tasks.manifest import FunctionManifest
 
 # Reaching the control plane over HTTP, for workflows that talk to its API rather
@@ -88,4 +89,40 @@ class HttpFunctionDeleteTask(CommandTask):
             role=role,
             cwd=cwd,
             expected_exit_codes=frozenset({0, 7, 22}),
+        )
+
+
+class HttpFunctionInvokeTask(CommandTask):
+    """Invoke a function over the control plane API and check what came back.
+
+    The response is verified rather than merely accepted: a 200 carrying an
+    error status is a failed invocation, and curl alone cannot tell.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        *,
+        payload: str,
+        endpoint: str,
+        executor: CommandTaskExecutor,
+        role: ExecutionRole,
+        through_shell: bool = False,
+        cwd: Path | None = None,
+    ) -> None:
+        super().__init__(
+            title=f"Invoke {name}",
+            argv=_curl(
+                "-fsS",
+                "-H",
+                "Content-Type: application/json",
+                "--data",
+                payload,
+                f"{endpoint}/v1/functions/{name}:invoke",
+                through_shell=through_shell,
+            ),
+            executor=executor,
+            role=role,
+            cwd=cwd,
+            verify=verify_invocation,
         )
