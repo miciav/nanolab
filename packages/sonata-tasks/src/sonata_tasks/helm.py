@@ -9,7 +9,7 @@ from workflow_tasks.execution.bindings import CommandTaskExecutor
 from workflow_tasks.execution.roles import ExecutionRole
 
 from sonata_tasks.command import CommandTask
-from sonata_tasks.lifecycle import compensated_resource
+from sonata_tasks.compensation import compensated_resource
 
 
 @dataclass(frozen=True, slots=True)

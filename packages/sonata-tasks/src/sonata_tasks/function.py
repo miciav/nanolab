@@ -5,7 +5,7 @@ from typing import Any
 from sonata_engine import Resource
 
 from sonata_tasks.command import CommandTask
-from sonata_tasks.lifecycle import compensated_resource
+from sonata_tasks.compensation import compensated_resource
 
 
 def function_resource(
