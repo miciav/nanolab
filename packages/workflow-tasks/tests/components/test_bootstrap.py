@@ -20,6 +20,7 @@ def _ctx(
         resolved_scenario=None,
         vm_request=VmRequest(lifecycle=lifecycle, name="nanofaas-e2e", user="ubuntu", host=host),
         cleanup_vm=True,
+        assets_root=Path("/nanolab/assets"),
     )
 
 
@@ -87,6 +88,29 @@ def test_retarget_bootstrap_repo_sync_uses_endpoint_port_and_key() -> None:
         in argv
     )
     assert argv[-1] == "ubuntu@pve.example:/home/ubuntu/nanofaas/"
+
+
+def test_assets_sync_stages_the_nanolab_assets_dir() -> None:
+    argv = list(_remote(bs.plan_assets_sync_to_vm(_ctx())[0]).argv)
+
+    assert argv[0] == "rsync"
+    assert argv[-2] == "/nanolab/assets/"
+    assert argv[-1] == "ubuntu@vm.test:/home/ubuntu/nanolab-assets/"
+
+
+def test_retarget_bootstrap_assets_sync_uses_endpoint_and_assets_root() -> None:
+    context = _ctx(lifecycle="azure", host=None)
+    operation = _remote(bs.plan_assets_sync_to_vm(context)[0])
+
+    retargeted = bs.retarget_bootstrap_operation(
+        operation,
+        context=context,
+        host="20.30.40.50",
+        private_key=Path("/keys/azure"),
+    )
+
+    assert retargeted.argv[-2] == "/nanolab/assets/"
+    assert retargeted.argv[-1] == "ubuntu@20.30.40.50:/home/ubuntu/nanolab-assets/"
 
 
 def test_retarget_bootstrap_azure_uses_default_ssh_port() -> None:

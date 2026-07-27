@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
 from types import MappingProxyType
+from typing import cast
 
 from multipass import find_ssh_public_key
 
@@ -29,6 +30,10 @@ def _remote_home(vm_request: VmRequest) -> str:
 
 def _remote_project_dir(vm_request: VmRequest) -> str:
     return f"{_remote_home(vm_request)}/nanofaas"
+
+
+def remote_assets_dir(vm_request: VmRequest) -> str:
+    return f"{_remote_home(vm_request)}/nanolab-assets"
 
 
 def _kubeconfig_path(vm_request: VmRequest) -> str:
@@ -141,53 +146,72 @@ def plan_vm_provision_base(
     )
 
 
+def _rsync_operation(
+    vm_request: VmRequest,
+    *,
+    operation_id: str,
+    summary: str,
+    source: Path,
+    destination: str,
+    discover_private_key: bool,
+) -> RemoteCommandOperation:
+    if vm_request.lifecycle == "external":
+        if vm_request.host is None:
+            raise ValueError("external VM lifecycle requires a host")
+        host = vm_request.host
+    else:
+        host = f"<multipass-ip:{vm_request.name or 'nanofaas-e2e'}>"
+    return RemoteCommandOperation(
+        operation_id=operation_id,
+        summary=summary,
+        argv=tuple(
+            repo_rsync_command(
+                source=source,
+                user=vm_request.user,
+                host=host,
+                destination=destination,
+                ssh_rsh=repo_sync_ssh_rsh(
+                    _find_ssh_private_key_path(find_ssh_public_key())
+                    if discover_private_key
+                    else None
+                ),
+            )
+        ),
+    )
+
+
 def plan_repo_sync_to_vm(
     context: ScenarioExecutionContext,
     *,
     discover_private_key: bool = True,
 ) -> tuple[ScenarioOperation, ...]:
-    vm_request = context.vm_request
-    destination = _remote_project_dir(vm_request)
-    if vm_request.lifecycle == "external":
-        if vm_request.host is None:
-            raise ValueError("external VM lifecycle requires a host")
-        return (
-            RemoteCommandOperation(
-                operation_id="repo.sync_to_vm",
-                summary="Sync repository into VM",
-                argv=tuple(
-                    repo_rsync_command(
-                        source=context.repo_root,
-                        user=vm_request.user,
-                        host=vm_request.host,
-                        destination=destination,
-                        ssh_rsh=repo_sync_ssh_rsh(
-                            _find_ssh_private_key_path(find_ssh_public_key())
-                            if discover_private_key
-                            else None
-                        ),
-                    )
-                ),
-            ),
-        )
-
     return (
-        RemoteCommandOperation(
+        _rsync_operation(
+            context.vm_request,
             operation_id="repo.sync_to_vm",
             summary="Sync repository into VM",
-            argv=tuple(
-                repo_rsync_command(
-                    source=context.repo_root,
-                    user=vm_request.user,
-                    host=f"<multipass-ip:{vm_request.name or 'nanofaas-e2e'}>",
-                    destination=destination,
-                    ssh_rsh=repo_sync_ssh_rsh(
-                        _find_ssh_private_key_path(find_ssh_public_key())
-                        if discover_private_key
-                        else None
-                    ),
-                )
-            ),
+            source=context.repo_root,
+            destination=_remote_project_dir(context.vm_request),
+            discover_private_key=discover_private_key,
+        ),
+    )
+
+
+def plan_assets_sync_to_vm(
+    context: ScenarioExecutionContext,
+    *,
+    discover_private_key: bool = True,
+) -> tuple[ScenarioOperation, ...]:
+    if context.assets_root is None:
+        raise ValueError("assets sync requires context.assets_root")
+    return (
+        _rsync_operation(
+            context.vm_request,
+            operation_id="assets.sync_to_vm",
+            summary="Sync tooling assets into VM",
+            source=context.assets_root,
+            destination=remote_assets_dir(context.vm_request),
+            discover_private_key=discover_private_key,
         ),
     )
 
@@ -214,13 +238,16 @@ def retarget_bootstrap_operation(
                 argv.extend(["--private-key", str(private_key)])
         return replace(operation, argv=tuple(argv))
 
-    if operation.operation_id == "repo.sync_to_vm":
+    if operation.operation_id in ("repo.sync_to_vm", "assets.sync_to_vm"):
         request = context.vm_request
+        assets = operation.operation_id == "assets.sync_to_vm"
+        if assets and context.assets_root is None:
+            raise ValueError("assets sync requires context.assets_root")
         argv = repo_rsync_command(
-            source=context.repo_root,
+            source=cast(Path, context.assets_root) if assets else context.repo_root,
             user=request.user,
             host=host,
-            destination=_remote_project_dir(request),
+            destination=remote_assets_dir(request) if assets else _remote_project_dir(request),
             ssh_rsh=repo_sync_ssh_rsh(private_key, port=port),
         )
         return replace(operation, argv=tuple(argv))

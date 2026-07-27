@@ -295,38 +295,6 @@ def source_test_commands(remote_source_dir: Path) -> tuple[CommandTaskSpec, ...]
             remote_dir=source,
         ),
         CommandTaskSpec(
-            task_id="release.source.controlplane",
-            summary="Run nanolab source tests",
-            argv=(
-                "uv",
-                "run",
-                "--project",
-                ".",
-                "--locked",
-                "pytest",
-                "-q",
-                "tests",
-            ),
-            role="stack",
-            remote_dir=f"{source}/tools/controlplane",
-        ),
-        CommandTaskSpec(
-            task_id="release.source.workflow-tasks",
-            summary="Run workflow-tasks source tests",
-            argv=(
-                "uv",
-                "run",
-                "--project",
-                ".",
-                "--locked",
-                "pytest",
-                "-q",
-                "tests",
-            ),
-            role="stack",
-            remote_dir=f"{source}/tools/workflow-tasks",
-        ),
-        CommandTaskSpec(
             task_id="release.source.python-sdk",
             summary="Run Python SDK and function source tests",
             argv=(

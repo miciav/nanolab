@@ -187,9 +187,7 @@ def build_offload_loadtest_plan(
         home = role_target.home or (
             "/root" if role_target.user == "root" else f"/home/{role_target.user}"
         )
-        # ponytail: remote checkout still carries legacy tool assets; stage nanolab assets
-        # separately when the monorepo copy is removed.
-        script_path = Path(home) / "nanofaas/tools/controlplane/assets/k6/offload-mixed.js"
+        script_path = Path(home) / "nanolab-assets/k6/offload-mixed.js"
         summary_path = Path(home) / "nanofaas-loadtest/k6-summary.json"
     else:
         product_root = tool_root or discover_tool_root()
