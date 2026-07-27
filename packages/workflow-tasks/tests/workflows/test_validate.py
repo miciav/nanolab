@@ -223,7 +223,14 @@ def test_buildpack_changes_only_the_jvm_build_command() -> None:
         )
     )
 
-    assert specs[0].argv == ("./gradlew", ":control-plane:bootBuildImage", "--no-daemon")
+    # The container backend also selects its provider module; buildpack changes
+    # only the Gradle target, which is what this asserts.
+    assert specs[0].argv == (
+        "./gradlew",
+        ":control-plane:bootBuildImage",
+        "-PcontrolPlaneModules=container-deployment-provider",
+        "--no-daemon",
+    )
 
 
 def test_function_commands_use_resolved_data_without_name_conventions() -> None:

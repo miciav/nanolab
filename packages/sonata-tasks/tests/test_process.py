@@ -232,3 +232,33 @@ def test_release_is_a_no_op_for_an_already_exited_process() -> None:
 
     resource.release(TaskInputs.empty(), process)
     assert process.killed is False
+
+
+def test_a_failed_stop_is_noted_without_masking_why_the_process_never_came_up() -> None:
+    """The reason the process never started is the interesting one.
+
+    Before this shared the compensation's note handling, a `terminate` that
+    raised propagated in place of the original error, so the run reported a
+    cleanup problem and hid the fact that the process had never become ready.
+    """
+
+    class Unstoppable(FakeProcess):
+        def terminate(self) -> None:
+            raise OSError("terminate refused")
+
+    resource = managed_process_resource(
+        title="Acquire thing",
+        argv=("run",),
+        ready=lambda: False,
+        spawn=_spawner(Unstoppable(), []),
+        readiness_attempts=2,
+        sleep=lambda _seconds: None,
+    )
+
+    with pytest.raises(RuntimeError, match="never became ready") as captured:
+        resource.acquire(TaskInputs.empty())
+
+    notes = getattr(captured.value, "__notes__", [])
+    assert len(notes) == 1
+    assert "stop for Acquire thing" in notes[0]
+    assert "terminate refused" in notes[0]

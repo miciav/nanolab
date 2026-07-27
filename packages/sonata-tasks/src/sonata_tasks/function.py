@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from sonata_engine import Resource
+from sonata_engine import Resource, TaskInputs
 
 from sonata_tasks.command import CommandTask
 from sonata_tasks.compensation import compensated_resource
@@ -32,11 +32,15 @@ def function_resource(
     happens to list: a slice that keeps this function keeps its dependencies too.
     """
 
+    def acquire(inputs: TaskInputs) -> None:
+        _ = register.run(inputs)
+        for check in readiness:
+            _ = check.run(inputs)
+
     return compensated_resource(
         title=f"Acquire {name}",
-        acquire=(register, *readiness),
-        compensate=delete,
-        value=None,
+        acquire=acquire,
+        compensate=delete.run,
         requires=requires,
         infrastructure=infrastructure,
     )

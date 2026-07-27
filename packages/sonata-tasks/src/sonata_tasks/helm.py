@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from sonata_engine import Resource
+from sonata_engine import Resource, TaskInputs
 from workflow_tasks.execution.bindings import CommandTaskExecutor
 from workflow_tasks.execution.roles import ExecutionRole
 
@@ -106,10 +106,13 @@ def helm_release_resource(
     install = HelmInstallTask(spec, executor=executor)
     uninstall = HelmUninstallTask(spec, executor=executor)
 
+    def acquire(inputs: TaskInputs) -> HelmReleaseSpec:
+        _ = install.run(inputs)
+        return spec
+
     return compensated_resource(
         title=f"Acquire Helm release {spec.release}",
-        acquire=(install,),
-        compensate=uninstall,
-        value=spec,
+        acquire=acquire,
+        compensate=uninstall.run,
         requires=requires,
     )

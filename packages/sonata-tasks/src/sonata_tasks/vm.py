@@ -5,6 +5,8 @@ from workflow_tasks.vm.adapters import VmLifecycleAdapter
 from workflow_tasks.vm.models import VmConfig, VmInfo
 from workflow_tasks.vm.tasks import DestroyVm, EnsureVmRunning
 
+from sonata_tasks.compensation import compensated_resource
+
 
 def vm_resource(
     *,
@@ -32,20 +34,21 @@ def vm_resource(
         ).run()
 
     def acquire(_inputs: TaskInputs) -> VmInfo:
-        try:
-            return ensure.run()
-        except BaseException as error:
-            if not external:
-                try:
-                    destroy(fallback_info)
-                except BaseException as cleanup_error:
-                    error.add_note(
-                        f"Best-effort VM destroy after failed acquire failed: {cleanup_error}"
-                    )
-            raise
+        return ensure.run()
+
+    def compensate(_inputs: TaskInputs) -> None:
+        # fallback_info, not the acquired one: the acquire failed, so there is no
+        # VmInfo to destroy — only the VM it was trying to create.
+        if not external:
+            destroy(fallback_info)
 
     def release(_inputs: TaskInputs, info: VmInfo) -> None:
         if not external:
             destroy(info)
 
-    return Resource(title=title, acquire=acquire, release=release, infrastructure=True)
+    return compensated_resource(
+        title=title,
+        acquire=acquire,
+        compensate=compensate,
+        release=release,
+    )

@@ -8,6 +8,8 @@ from typing import Any, Protocol, TypeVar, overload
 
 from sonata_engine import Resource, TaskInputs
 
+from sonata_tasks.compensation import best_effort
+
 
 class ManagedProcess(Protocol):
     """The lifecycle operations needed from a spawned process."""
@@ -110,12 +112,17 @@ def managed_process_resource(
                 if attempt < readiness_attempts - 1:
                     sleep(readiness_interval)
             raise RuntimeError(f"{title} never became ready")
-        except BaseException:
+        except BaseException as error:
             # The engine never releases an acquire that did not complete, and
             # the wait can end in more ways than "gave up": ready() can raise,
             # or a KeyboardInterrupt can land during the up-to-90s wait. Any of
             # those must still stop the process we just spawned, or it leaks.
-            stop(TaskInputs.empty(), current)
+            #
+            # This cannot use `compensated_resource`: only the acquire holds the
+            # process it started, so nothing outside it could stop that process.
+            # It shares the other half — a failed stop must not replace the
+            # reason the process never came up.
+            best_effort(error, lambda: stop(TaskInputs.empty(), current), what=f"stop for {title}")
             raise
 
     # infrastructure stays False on purpose: `keep_infrastructure` skips the release
