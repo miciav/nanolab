@@ -31,8 +31,6 @@ DEFAULT_TASK_IDS = [
     "build.jvm",
     "images.build.control-plane",
     "images.push.control-plane",
-    "images.build.warm-echo",
-    "images.push.warm-echo",
     "images.build.word-stats-java",
     "images.push.word-stats-java",
     "helm.deploy.control-plane",

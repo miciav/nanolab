@@ -50,12 +50,12 @@ def test_main_menu_uses_the_exact_product_copy() -> None:
         (
             "Validation",
             "validation",
-            "Validate container and Kubernetes execution paths.",
+            "Build this source tree and prove it serves a function on a backend.",
         ),
         (
             "CLI",
             "cli",
-            "Validate the nanofaas CLI against a selected environment.",
+            "Exercise the nanofaas CLI against a control plane it sets up for you.",
         ),
         (
             "Load Testing",

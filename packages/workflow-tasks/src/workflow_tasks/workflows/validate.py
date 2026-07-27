@@ -56,8 +56,6 @@ def _build(request: ValidateWorkflowRequest, role: Literal["host", "stack"]) -> 
         else ":control-plane:bootJar"
     )
     targets = (target,)
-    if request.backend == "k8s" and request.build == "docker":
-        targets += (":services:java:warm-echo:bootJar",)
     modules = {
         "container": "container-deployment-provider",
         "k8s": "k8s-deployment-provider",
@@ -192,18 +190,16 @@ def k8s_deployment_specs(
     tasks = [_task("stack.preflight", "kubectl", "version", "--client", role="stack")]
     if request.build_images:
         tasks.append(_build(request, "stack"))
+        # Only the control plane: `warm-echo` is a reference service nothing in
+        # this workflow deploys or invokes. The chart's demo job that would have
+        # registered it is disabled here (`demos.enabled=false`), so building and
+        # pushing it only cost time on the slowest of the three backends.
         for name, image, dockerfile, context in (
             (
                 "control-plane",
                 f"{request.registry}/nanofaas/control-plane:e2e",
                 "platform/control-plane/Dockerfile",
                 "platform/control-plane",
-            ),
-            (
-                "warm-echo",
-                f"{request.registry}/nanofaas/java-warm-echo:e2e",
-                "services/java/warm-echo/Dockerfile",
-                "services/java/warm-echo",
             ),
         ):
             tasks.append(
