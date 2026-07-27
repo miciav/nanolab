@@ -116,22 +116,22 @@ def test_http_delete_tolerates_an_unreachable_or_absent_target() -> None:
     assert executor.seen[0].expected_exit_codes == frozenset({0, 7, 22})
 
 
-def test_http_tasks_survive_a_shell_when_the_role_is_remote() -> None:
-    """A VM-bound executor hands the argv to a login shell, so the payload has to
-    come back out intact after one round of word splitting."""
+def test_a_remote_role_still_gets_a_plain_argv() -> None:
+    """No shell wrapper, even for a VM: every executor quotes the argv it is
+    handed — multipass with shlex.join, proxmox with shlex.quote per argument,
+    azure structurally. The task pre-quoting as well would be a second round for
+    nobody, and it was only ever there to carry a `$(...)` the endpoint no longer
+    needs."""
     executor = RecordingExecutor()
 
     _ = HttpFunctionRegisterTask(
-        MANIFEST,
-        endpoint="http://cp:8080",
-        executor=executor,
-        role="stack",
-        through_shell=True,
+        MANIFEST, endpoint="http://cp:8080", executor=executor, role="stack"
     ).run(TaskInputs.empty())
 
     argv = executor.seen[0].argv
-    assert argv[:2] == ("bash", "-lc")
-    assert json.dumps(MANIFEST.json()) in argv[2]
+    assert argv[0] == "curl"
+    assert MANIFEST.json() in argv
+    assert executor.seen[0].execution_role == "stack"
 
 
 def test_both_transports_send_a_byte_identical_manifest() -> None:

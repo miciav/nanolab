@@ -32,6 +32,11 @@ from sonata_tasks.helm import (
 )
 from sonata_tasks.resources import ContainerResourceCheckTask, K8sResourceCheckTask
 from sonata_tasks.process import managed_process_resource
+from sonata_tasks.validate import (
+    ValidateFunction,
+    ValidateWorkflowRequest,
+    build_validate_workflow,
+)
 from sonata_tasks.vm import vm_resource
 
 __all__ = [
@@ -62,5 +67,8 @@ __all__ = [
     "helm_release_resource",
     "managed_process_resource",
     "verify_invocation",
+    "ValidateFunction",
+    "ValidateWorkflowRequest",
+    "build_validate_workflow",
     "vm_resource",
 ]

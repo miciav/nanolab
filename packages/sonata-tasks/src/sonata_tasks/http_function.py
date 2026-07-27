@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-import json
+from collections.abc import Callable
 from pathlib import Path
 
+from sonata_engine import Resource
 from workflow_tasks.execution.bindings import CommandTaskExecutor
 from workflow_tasks.execution.roles import ExecutionRole
 
-from sonata_tasks.command import CommandTask
+from sonata_tasks.command import Argv, CommandTask
 from sonata_tasks.invocation import verify_invocation
 from sonata_tasks.manifest import FunctionManifest
 
@@ -15,17 +16,26 @@ from sonata_tasks.manifest import FunctionManifest
 # host and curling from inside a VM reach different network namespaces, and the
 # endpoint that works in one is usually wrong in the other.
 
+Endpoint = str | Resource[str]
+"""Where the control plane answers.
 
-def _curl(*arguments: str, through_shell: bool) -> tuple[str, ...]:
-    """Wrap curl for a remote role, where the whole command crosses a shell.
+A plain string when the workflow knows it up front, as the container backend
+does. A `Resource[str]` when it exists only once something has been created: on
+Kubernetes the address comes from the Service the Helm release installs, so it
+cannot be spelled before that release is acquired.
 
-    A VM-bound executor hands the argv to a login shell, so every argument has to
-    survive one round of word splitting — hence the JSON quoting rather than
-    passing the list through untouched.
-    """
-    if not through_shell:
-        return ("curl", *arguments)
-    return ("bash", "-lc", " ".join(json.dumps(argument) for argument in ("curl", *arguments)))
+The shell version solved the same problem by embedding `$(kubectl get service
+...)` in the URL and running every curl through `bash -lc`, which then meant
+JSON-quoting each argument to survive the extra round of word splitting. Reading
+the value from a resource removes the subshell, and with it the reason for the
+shell — every executor already quotes the argv it is handed.
+"""
+
+
+def _argv(endpoint: Endpoint, build: Callable[[str], tuple[str, ...]]) -> Argv:
+    if isinstance(endpoint, str):
+        return build(endpoint)
+    return lambda inputs: build(inputs.resource(endpoint))
 
 
 class HttpFunctionRegisterTask(CommandTask):
@@ -35,22 +45,24 @@ class HttpFunctionRegisterTask(CommandTask):
         self,
         manifest: FunctionManifest,
         *,
-        endpoint: str,
+        endpoint: Endpoint,
         executor: CommandTaskExecutor,
         role: ExecutionRole,
-        through_shell: bool = False,
         cwd: Path | None = None,
     ) -> None:
         super().__init__(
             title=f"Register {manifest.name}",
-            argv=_curl(
-                "-fsS",
-                "-H",
-                "Content-Type: application/json",
-                "--data",
-                manifest.json(),
-                f"{endpoint}/v1/functions",
-                through_shell=through_shell,
+            argv=_argv(
+                endpoint,
+                lambda base: (
+                    "curl",
+                    "-fsS",
+                    "-H",
+                    "Content-Type: application/json",
+                    "--data",
+                    manifest.json(),
+                    f"{base}/v1/functions",
+                ),
             ),
             executor=executor,
             role=role,
@@ -70,20 +82,16 @@ class HttpFunctionDeleteTask(CommandTask):
         self,
         name: str,
         *,
-        endpoint: str,
+        endpoint: Endpoint,
         executor: CommandTaskExecutor,
         role: ExecutionRole,
-        through_shell: bool = False,
         cwd: Path | None = None,
     ) -> None:
         super().__init__(
             title=f"Delete {name}",
-            argv=_curl(
-                "-fsS",
-                "-X",
-                "DELETE",
-                f"{endpoint}/v1/functions/{name}",
-                through_shell=through_shell,
+            argv=_argv(
+                endpoint,
+                lambda base: ("curl", "-fsS", "-X", "DELETE", f"{base}/v1/functions/{name}"),
             ),
             executor=executor,
             role=role,
@@ -104,22 +112,24 @@ class HttpFunctionInvokeTask(CommandTask):
         name: str,
         *,
         payload: str,
-        endpoint: str,
+        endpoint: Endpoint,
         executor: CommandTaskExecutor,
         role: ExecutionRole,
-        through_shell: bool = False,
         cwd: Path | None = None,
     ) -> None:
         super().__init__(
             title=f"Invoke {name}",
-            argv=_curl(
-                "-fsS",
-                "-H",
-                "Content-Type: application/json",
-                "--data",
-                payload,
-                f"{endpoint}/v1/functions/{name}:invoke",
-                through_shell=through_shell,
+            argv=_argv(
+                endpoint,
+                lambda base: (
+                    "curl",
+                    "-fsS",
+                    "-H",
+                    "Content-Type: application/json",
+                    "--data",
+                    payload,
+                    f"{base}/v1/functions/{name}:invoke",
+                ),
             ),
             executor=executor,
             role=role,

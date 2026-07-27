@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 import pytest
-from sonata_engine import TaskInputs
+from sonata_engine import Resource, TaskInputs
 from workflow_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 from sonata_tasks.cli_function import CliFunctionInvokeTask
@@ -71,21 +71,28 @@ def test_http_invoke_posts_the_payload_to_the_invoke_endpoint() -> None:
     )
 
 
-def test_http_invoke_survives_a_shell_when_it_runs_inside_a_vm() -> None:
+def test_the_endpoint_can_arrive_as_a_resource_value() -> None:
+    """On Kubernetes the address exists only once the Service does, so it is read
+    at run time from the resource that created it rather than spelled up front."""
     executor = RecordingExecutor()
-
-    _ = HttpFunctionInvokeTask(
+    endpoint: Resource[str] = Resource(
+        title="Acquire control plane",
+        acquire=lambda _inputs: "http://10.43.0.7:8080",
+        release=lambda _inputs, _value: None,
+    )
+    task = HttpFunctionInvokeTask(
         "word-stats",
-        payload='{"text":"a b"}',
-        endpoint="http://cp:8080",
+        payload="{}",
+        endpoint=endpoint,
         executor=executor,
         role="stack",
-        through_shell=True,
-    ).run(TaskInputs.empty())
+    )
 
-    argv = executor.seen[0].argv
-    assert argv[:2] == ("bash", "-lc")
-    assert '"--data" "{\\"text\\":\\"a b\\"}"' in argv[2]
+    _ = task.run(TaskInputs._for_resources({endpoint: "http://10.43.0.7:8080"}, {endpoint}))
+
+    assert executor.seen[0].argv[-1] == (
+        "http://10.43.0.7:8080/v1/functions/word-stats:invoke"
+    )
 
 
 def test_cli_invoke_drives_the_binary_instead_of_curl() -> None:

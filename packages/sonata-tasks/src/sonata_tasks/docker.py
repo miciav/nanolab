@@ -106,6 +106,7 @@ class DockerInspectTask(DockerTask):
         executor: CommandTaskExecutor,
         role: ExecutionRole,
         fmt: str = "{{json .HostConfig}}",
+        title: str | None = None,
         cwd: Path | None = None,
         verify: Callable[[TaskResult], None] | None = None,
     ) -> None:
@@ -115,7 +116,7 @@ class DockerInspectTask(DockerTask):
             container,
             executor=executor,
             role=role,
-            title=f"Inspect {container}",
+            title=title or f"Inspect {container}",
             cwd=cwd,
             verify=verify,
         )

@@ -91,6 +91,10 @@ class ContainerResourceCheckTask(DockerInspectTask):
             container=container,
             executor=executor,
             role=role,
+            # Same wording as the Kubernetes half: the two checks are the same
+            # question asked of different backends, and reading a plan should not
+            # make them look like different kinds of step.
+            title=f"Inspect resources of {container}",
             cwd=cwd,
             verify=verify,
         )
