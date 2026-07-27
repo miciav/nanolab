@@ -10,6 +10,7 @@ from workflow_tasks.execution.roles import ExecutionRole
 from workflow_tasks.tasks.models import TaskResult
 
 from sonata_tasks.command import CommandTask
+from sonata_tasks.docker import DockerInspectTask
 
 ResourceSpec = Mapping[str, Any]
 
@@ -83,9 +84,8 @@ def container_resource_check(
 
         verify = check_container
 
-    return CommandTask(
-        title=f"Inspect resources of {container}",
-        argv=("docker", "inspect", "--format={{json .HostConfig}}", container),
+    return DockerInspectTask(
+        container=container,
         executor=executor,
         role=role,
         cwd=cwd,

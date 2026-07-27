@@ -3,6 +3,7 @@
 from sonata_tasks.cli import CliFunction, CliWorkflowRequest, build_cli_workflow
 from sonata_tasks.command import CommandTask
 from sonata_tasks.function import function_resource
+from sonata_tasks.docker import DockerBuildTask, DockerInspectTask, DockerPushTask
 from sonata_tasks.helm import (
     HelmInstallTask,
     HelmReleaseSpec,
@@ -21,6 +22,9 @@ __all__ = [
     "HelmReleaseSpec",
     "HelmUninstallTask",
     "build_cli_workflow",
+    "DockerBuildTask",
+    "DockerInspectTask",
+    "DockerPushTask",
     "container_resource_check",
     "function_resource",
     "helm_release_resource",
