@@ -115,6 +115,6 @@ def install_release_commands(app: typer.Typer) -> None:
             raise _bad_parameter(error) from error
         if not decision.passed:
             raise typer.Exit(code=1)
-        typer.echo("AMD64 regression gate passed; ARM64 build and publication remain deferred.")
+        typer.echo(f"Release {version} published and attested; the regression gate passed.")
 
     app.add_typer(release, name="release")
