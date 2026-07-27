@@ -68,8 +68,6 @@ def test_kubernetes_validation_uses_stack_role_and_inspects_requests_and_limits(
         "build.jvm",
         "images.build.control-plane",
         "images.push.control-plane",
-        "images.build.warm-echo",
-        "images.push.warm-echo",
         "images.build.word-stats-java",
         "images.push.word-stats-java",
         "helm.deploy.control-plane",
@@ -83,7 +81,8 @@ def test_kubernetes_validation_uses_stack_role_and_inspects_requests_and_limits(
     assert specs[-1].argv[3] == "fn-word-stats-java"
 
 
-def test_kubernetes_docker_build_creates_both_core_jars() -> None:
+def test_kubernetes_docker_build_creates_only_the_control_plane_jar() -> None:
+    """`warm-echo` is a reference service this workflow never deploys or invokes."""
     specs = validate_task_specs(
         ValidateWorkflowRequest(backend="k8s", build="docker", functions=(FUNCTION,))
     )
@@ -91,7 +90,6 @@ def test_kubernetes_docker_build_creates_both_core_jars() -> None:
     assert specs[1].argv == (
         "./gradlew",
         ":control-plane:bootJar",
-        ":services:java:warm-echo:bootJar",
         "-PcontrolPlaneModules=k8s-deployment-provider",
         "--no-daemon",
     )
@@ -133,8 +131,6 @@ def test_kubernetes_deployment_specs_can_expose_loadtest_node_ports() -> None:
         "build.jvm",
         "images.build.control-plane",
         "images.push.control-plane",
-        "images.build.warm-echo",
-        "images.push.warm-echo",
         "images.build.word-stats-java",
         "images.push.word-stats-java",
         "helm.deploy.control-plane",

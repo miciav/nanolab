@@ -32,12 +32,12 @@ MAIN_MENU = [
     Choice(
         "Validation",
         "validation",
-        "Validate container and Kubernetes execution paths.",
+        "Build this source tree and prove it serves a function on a backend.",
     ),
     Choice(
         "CLI",
         "cli",
-        "Validate the nanofaas CLI against a selected environment.",
+        "Exercise the nanofaas CLI against a control plane it sets up for you.",
     ),
     Choice(
         "Load Testing",
@@ -52,17 +52,37 @@ MAIN_MENU = [
     Choice("Exit", "exit", "Leave the interactive control-plane tool."),
 ]
 
+# Validation answers "does the code in this checkout work?", so every entry builds
+# from source and ends by reading back the function's declared CPU and memory off
+# the real container or pod. CLI answers "does the client work?", so those entries
+# care about reaching a control plane, not about what built it.
 VALIDATION_MENU = [
-    Choice("Container", "container", "Validate the local container execution path."),
-    Choice("Kubernetes", "kubernetes", "Validate the Kubernetes execution path."),
-    Choice("Offload", "offload", "Validate edge-to-cloud offload with two local instances."),
+    Choice(
+        "Container",
+        "container",
+        "Build, serve a function on local Docker, check its resource limits landed.",
+    ),
+    Choice(
+        "Kubernetes",
+        "kubernetes",
+        "Build and push, deploy with Helm on k3s, check the pod's resource limits.",
+    ),
+    Choice(
+        "Offload",
+        "offload",
+        "Two local control planes: check sync invocations proxy from edge to cloud.",
+    ),
 ]
 CLI_MENU = [
-    Choice("Container", "container", "Validate the nanofaas CLI against a local container."),
+    Choice(
+        "Container",
+        "container",
+        "Start a control plane on local Docker, then drive it with the CLI.",
+    ),
     Choice(
         "Kubernetes (provisioned)",
         "kubernetes",
-        "Provision a VM, install nanofaas, and validate the CLI against Kubernetes.",
+        "Provision a VM with k3s and Helm, then run the CLI inside it.",
     ),
 ]
 LOADTEST_MENU = [

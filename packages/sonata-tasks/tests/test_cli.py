@@ -153,7 +153,7 @@ def test_a_failed_compensation_is_noted_without_masking_the_apply_error() -> Non
 
     notes = getattr(captured.value, "__notes__", [])
     assert len(notes) == 1
-    assert "Best-effort delete after a failed apply failed" in notes[0]
+    assert "Best-effort Delete word-stats-java after a failed acquire failed" in notes[0]
     assert "cleanup unavailable" in notes[0]
 
 

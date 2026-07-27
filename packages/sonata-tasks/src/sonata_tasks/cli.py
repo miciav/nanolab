@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from sonata_engine import Resource, TaskInputs, Workflow
+from sonata_engine import Resource, Workflow
 from workflow_tasks.execution.bindings import (
     CommandTaskExecutor,
     RoleBindings,
@@ -15,7 +15,11 @@ from workflow_tasks.execution.bindings import (
 from workflow_tasks.execution.roles import ExecutionRole
 from workflow_tasks.tasks.models import TaskResult
 
+from sonata_tasks.cli_function import CliFunctionApplyTask, CliFunctionDeleteTask
 from sonata_tasks.command import CommandTask
+from sonata_tasks.function import function_resource
+from sonata_tasks.kubectl import KubectlTask
+from sonata_tasks.manifest import FunctionManifest
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,35 +85,6 @@ def _cli_argv(request: CliWorkflowRequest, *arguments: str) -> tuple[str, ...]:
     )
 
 
-def _apply_script(request: CliWorkflowRequest, function: CliFunction) -> str:
-    """Shell that writes the manifest next to the CLI and applies it.
-
-    The manifest is created with `mktemp` on the target on purpose. Writing it
-    here with `tempfile` would work on the host role and silently break on the
-    stack role, where the CLI runs elsewhere and would never see a local path.
-    """
-    body: dict[str, object] = {
-        "name": function.name,
-        "image": function.image,
-        "executionMode": "DEPLOYMENT",
-        "timeoutMs": 5000,
-        "concurrency": 2,
-        "queueSize": 20,
-        "maxRetries": 3,
-    }
-    if function.resources is not None:
-        body["resources"] = function.resources
-    manifest = json.dumps(body, separators=(",", ":"))
-    apply_command = " ".join(
-        shlex.quote(value)
-        for value in _cli_argv(request, "fn", "apply", "--file", "$manifest")
-    ).replace("'$manifest'", '"$manifest"')
-    return (
-        f"manifest=$(mktemp); trap 'rm -f \"$manifest\"' EXIT; "
-        f"printf '%s' {shlex.quote(manifest)} > \"$manifest\"; " + apply_command
-    )
-
-
 def _readiness_tasks(
     request: CliWorkflowRequest,
     function: CliFunction,
@@ -139,19 +114,15 @@ def _readiness_tasks(
             role=request.cli_role,
             cwd=cwd,
         ),
-        CommandTask(
-            title=f"Roll out deployment/{deployment}",
-            argv=(
-                "kubectl",
-                "-n",
-                request.namespace,
-                "rollout",
-                "status",
-                f"deployment/{deployment}",
-                f"--timeout={timeout_seconds}s",
-            ),
+        KubectlTask(
+            "rollout",
+            "status",
+            f"deployment/{deployment}",
+            f"--timeout={timeout_seconds}s",
             executor=executor,
             role=request.cli_role,
+            namespace=request.namespace,
+            title=f"Roll out deployment/{deployment}",
             cwd=cwd,
         ),
     )
@@ -168,27 +139,20 @@ def _function_resource(
 ) -> Resource[None]:
     """The registered function as an acquire/release pair.
 
-    Sonata splices the apply before the first task that needs the function and
-    the delete after the last one, and runs the delete even when a consumer
-    fails. That is why the old separate `cleanup_specs` list is gone.
-
-    `requires` (e.g. a Helm release the function's Deployment depends on) is a
-    real compiled edge, not just something every consumer happens to also list:
-    a slice that keeps this function keeps `requires` too.
+    Only the commands are CLI-specific: applying a manifest through the nanofaas
+    binary. The lifecycle around them — splicing, compensation on a partial
+    register, readiness — belongs to `function_resource`, which every other
+    workflow reuses with its own register and delete commands.
     """
-    apply_task = CommandTask(
-        title=f"Apply {function.name}",
-        argv=("bash", "-lc", _apply_script(request, function)),
-        executor=executor,
-        role=request.cli_role,
-        cwd=cwd,
+    manifest = FunctionManifest(
+        name=function.name, image=function.image, resources=function.resources
     )
-    delete_task = CommandTask(
-        title=f"Delete {function.name}",
-        argv=_cli_argv(request, "fn", "delete", function.name),
-        executor=executor,
-        role=request.cli_role,
-        cwd=cwd,
+    prefix = _cli_argv(request)
+    apply_task = CliFunctionApplyTask(
+        manifest, cli_argv=prefix, executor=executor, role=request.cli_role, cwd=cwd
+    )
+    delete_task = CliFunctionDeleteTask(
+        function.name, cli_argv=prefix, executor=executor, role=request.cli_role, cwd=cwd
     )
     ready_tasks = (
         _readiness_tasks(request, function, executor, cwd, readiness_timeout_seconds)
@@ -196,31 +160,12 @@ def _function_resource(
         else ()
     )
 
-    def acquire(_inputs: TaskInputs) -> None:
-        try:
-            _ = apply_task.run(TaskInputs.empty())
-            for ready_task in ready_tasks:
-                _ = ready_task.run(TaskInputs.empty())
-        except BaseException as error:
-            # The apply may have registered the function before failing, or the
-            # readiness wait may have timed out after a real apply. Either way
-            # the engine will not release an acquire that did not pass, so the
-            # compensation has to happen here, best-effort.
-            try:
-                _ = delete_task.run(TaskInputs.empty())
-            except BaseException as cleanup_error:
-                error.add_note(f"Best-effort delete after a failed apply failed: {cleanup_error}")
-            raise
-
-    def release(_inputs: TaskInputs, _value: None) -> None:
-        _ = delete_task.run(TaskInputs.empty())
-
-    return Resource(
-        title=f"Acquire {function.name}",
-        acquire=acquire,
-        release=release,
+    return function_resource(
+        name=function.name,
+        register=apply_task,
+        delete=delete_task,
+        readiness=ready_tasks,
         requires=requires,
-        infrastructure=True,
     )
 
 
