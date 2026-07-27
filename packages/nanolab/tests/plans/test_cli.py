@@ -282,7 +282,7 @@ def test_pool_backend_is_rejected() -> None:
         )
 
 
-def test_provisioned_k8s_plan_compiles_the_expected_14_task_topology() -> None:
+def test_provisioned_k8s_plan_compiles_the_expected_12_task_topology() -> None:
     plan = _provisioned_plan(RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor()))
 
     assert [task.task_id for task in plan.compile().tasks] == [
@@ -290,17 +290,28 @@ def test_provisioned_k8s_plan_compiles_the_expected_14_task_topology() -> None:
         "002.acquire-stack-vm",
         "003.provision-base-vm-dependencies",
         "004.install-k3s",
-        "005.ensure-local-registry-container",
-        "006.configure-k3s-registry-access",
-        "007.sync-repository-into-vm",
-        "008.acquire-control-plane-helm-release",
-        "009.acquire-word-stats-java",
-        "010.list-functions",
-        "011.invoke-word-stats-java",
-        "012.release-word-stats-java",
-        "013.release-control-plane-helm-release",
-        "014.release-stack-vm",
+        "005.sync-repository-into-vm",
+        "006.acquire-control-plane-helm-release",
+        "007.acquire-word-stats-java",
+        "008.list-functions",
+        "009.invoke-word-stats-java",
+        "010.release-word-stats-java",
+        "011.release-control-plane-helm-release",
+        "012.release-stack-vm",
     ]
+
+
+def test_provisioned_k8s_bootstrap_sets_up_no_local_registry() -> None:
+    """Images come from GHCR, so a registry nothing reads must not be provisioned.
+
+    Pinned because the bootstrap sequence is borrowed from `validate`, which does
+    build and push locally — reusing it wholesale silently reintroduces both steps.
+    """
+    plan = _provisioned_plan(RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor()))
+
+    task_ids = [task.task_id for task in plan.compile().tasks]
+
+    assert not any("registry" in task_id for task_id in task_ids)
 
 
 def test_provisioned_k8s_uses_the_published_release_images() -> None:
@@ -377,7 +388,7 @@ def test_provisioned_k8s_plan_compilation_does_not_discover_ssh_credentials(
         environment=_multipass_environment(),
     )
 
-    assert len(plan.compile().tasks) == 14
+    assert len(plan.compile().tasks) == 12
 
 
 def test_provisioned_k8s_builds_the_cli_on_host_and_runs_everything_else_on_stack() -> None:
@@ -390,8 +401,6 @@ def test_provisioned_k8s_builds_the_cli_on_host_and_runs_everything_else_on_stac
         "Build nanofaas-cli",
         "Provision base VM dependencies",
         "Install k3s",
-        "Ensure local registry container",
-        "Configure k3s registry access",
         "Sync repository into VM",
     ]
     assert [spec.summary for spec in stack.seen] == [
@@ -434,8 +443,8 @@ def test_provisioned_k8s_helm_requires_the_vm_and_the_function_requires_helm() -
     plan = _provisioned_plan(RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor()))
 
     tasks = {task.task_id: task for task in plan.compile().tasks}
-    helm_acquire = tasks["008.acquire-control-plane-helm-release"]
-    function_acquire = tasks["009.acquire-word-stats-java"]
+    helm_acquire = tasks["006.acquire-control-plane-helm-release"]
+    function_acquire = tasks["007.acquire-word-stats-java"]
     assert helm_acquire.resource is not None
     assert function_acquire.resource is not None
     assert [resource.title for resource in helm_acquire.resource.requires] == ["Acquire stack VM"]

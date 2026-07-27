@@ -95,7 +95,7 @@ _SCENARIO_FILES = {
     ("validation", "kubernetes"): "validate-k8s.yaml",
     ("validation", "offload"): "validate-offload.yaml",
     ("cli", "container"): "cli-container.yaml",
-    ("cli", "kubernetes"): "cli.yaml",
+    ("cli", "kubernetes"): "cli-k8s.yaml",
     ("loadtest", "run"): "loadtest.yaml",
     ("loadtest", "offload"): "offload-loadtest.yaml",
 }

@@ -282,7 +282,7 @@ def test_tools_inspect_selects_only_stable_scenarios_and_renders_validated_json(
         "validate-k8s.yaml",
         "validate-offload.yaml",
         "cli-container.yaml",
-        "cli.yaml",
+        "cli-k8s.yaml",
         "loadtest.yaml",
         "offload-loadtest.yaml",
     ]
@@ -775,7 +775,7 @@ def test_kubernetes_provisioned_rejects_local_environment(
         controller=controller,
         console=RecordingConsole(),
         input_stream=RecordingInput(tty=False),
-    )._workflow_menu("cli.yaml")
+    )._workflow_menu("cli-k8s.yaml")
 
     assert [call[0] for call in helper_calls] == ["scenario", "environment"]
     assert frame_calls[0]["title"] == "Configuration error"
@@ -809,7 +809,7 @@ def test_kubernetes_provisioned_run_skips_provision_menu_forces_provision_and_av
     controller = RecordingController()
     chooser = ScriptedChooser(iter([str(environment_path), "run", "cleanup"]))
 
-    NanofaasTUI(choose=chooser, controller=controller)._workflow_menu("cli.yaml")
+    NanofaasTUI(choose=chooser, controller=controller)._workflow_menu("cli-k8s.yaml")
 
     # No "Provision environment?" question anywhere in the flow.
     assert [message for message, _ in chooser.calls] == [
@@ -825,7 +825,7 @@ def test_kubernetes_provisioned_run_skips_provision_menu_forces_provision_and_av
     assert [call[3]["provision"] for call in workflow_calls] == [True, True]
     assert workflow.run_calls == 1
     assert controller.calls[0]["summary_lines"] == [
-        "Scenario: cli.yaml",
+        "Scenario: cli-k8s.yaml",
         "Environment: local.yaml",
         "Provision: yes",
         "Cleanup: cleanup",
@@ -864,7 +864,7 @@ def test_kubernetes_provisioned_keep_sets_keep_infrastructure_without_entering_l
     NanofaasTUI(
         choose=ScriptedChooser(iter([str(environment_path), "run", "keep"])),
         controller=controller,
-    )._workflow_menu("cli.yaml")
+    )._workflow_menu("cli-k8s.yaml")
 
     assert provision_calls == []
     assert preview.keep_infrastructure is False
@@ -872,7 +872,7 @@ def test_kubernetes_provisioned_keep_sets_keep_infrastructure_without_entering_l
     assert workflow.keep_infrastructure is True
     assert workflow.run_calls == 1
     assert controller.calls[0]["summary_lines"] == [
-        "Scenario: cli.yaml",
+        "Scenario: cli-k8s.yaml",
         "Environment: local.yaml",
         "Provision: yes",
         "Cleanup: keep",
@@ -897,7 +897,7 @@ def test_kubernetes_provisioned_back_from_cleanup_returns_to_action(
 
     NanofaasTUI(
         choose=chooser, controller=RecordingController()
-    )._workflow_menu("cli.yaml")
+    )._workflow_menu("cli-k8s.yaml")
 
     # Back from Cleanup returns straight to Action (the "Provision environment?"
     # state is never inserted for this path), and this is not local-environment
