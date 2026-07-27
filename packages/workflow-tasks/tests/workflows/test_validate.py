@@ -38,10 +38,6 @@ def _ids(backend: str) -> list[str]:
     ]
 
 
-def test_pool_validation_is_the_small_local_regression_suite() -> None:
-    assert _ids("pool") == ["build.jvm", "validate.pool"]
-
-
 def test_container_validation_includes_explicit_resource_inspection() -> None:
     assert _ids("container") == [
         "build.jvm",
@@ -221,7 +217,7 @@ def test_k8s_build_can_include_additional_control_plane_modules() -> None:
 def test_buildpack_changes_only_the_jvm_build_command() -> None:
     specs = validate_task_specs(
         ValidateWorkflowRequest(
-            backend="pool",
+            backend="container",
             build="buildpack",
             functions=(FUNCTION,),
         )

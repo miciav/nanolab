@@ -8,7 +8,7 @@ from typing import Literal
 from workflow_tasks.components.helm import control_plane_helm_values
 from workflow_tasks.tasks.models import CommandTaskSpec
 
-Backend = Literal["pool", "container", "k8s"]
+Backend = Literal["container", "k8s"]
 Build = Literal["docker", "buildpack"]
 
 
@@ -296,19 +296,6 @@ def registration_specs(request: ValidateWorkflowRequest) -> tuple[CommandTaskSpe
 
 def validate_task_specs(request: ValidateWorkflowRequest) -> tuple[CommandTaskSpec, ...]:
     """Render the validate workflow without depending on an execution provider."""
-    if request.backend == "pool":
-        return (
-            _build(request, "host"),
-            _task(
-                "validate.pool",
-                "./gradlew",
-                ":control-plane:test",
-                "--tests",
-                "*Pool*",
-                "--no-daemon",
-            ),
-        )
-
     role: Literal["host", "stack"] = "stack" if request.backend == "k8s" else "host"
     if request.backend == "k8s":
         tasks = list(
@@ -365,8 +352,6 @@ def validate_task_specs(request: ValidateWorkflowRequest) -> tuple[CommandTaskSp
 def validate_cleanup_specs(
     request: ValidateWorkflowRequest,
 ) -> tuple[CommandTaskSpec, ...]:
-    if request.backend == "pool":
-        return ()
     role: Literal["host", "stack"] = "stack" if request.backend == "k8s" else "host"
     endpoint = _endpoint(request)
     cleanup = [

@@ -323,8 +323,6 @@ def build_cli_plan(
 ) -> Workflow:
     if config.workflow != "cli":
         raise ValueError("CLI plan requires a cli scenario")
-    if config.backend not in ("container", "k8s"):
-        raise ValueError(f"cli workflow supports container or k8s, not {config.backend!r}")
     root = repo_root or Path.cwd()
     local = config.backend == "container"
     if local and cli_role != "host":

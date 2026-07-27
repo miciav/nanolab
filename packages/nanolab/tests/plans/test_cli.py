@@ -274,14 +274,6 @@ def test_container_backend_runs_only_on_the_host_role() -> None:
         )
 
 
-def test_pool_backend_is_rejected() -> None:
-    with pytest.raises(ValueError, match="cli workflow supports"):
-        build_cli_plan(
-            _scenario(backend="pool"),
-            RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor()),
-        )
-
-
 def test_provisioned_k8s_plan_compiles_the_expected_12_task_topology() -> None:
     plan = _provisioned_plan(RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor()))
 
