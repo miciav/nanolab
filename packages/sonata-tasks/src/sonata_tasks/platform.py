@@ -56,6 +56,7 @@ class PlatformFunction:
     build_argv: tuple[str, ...]
     resources: dict[str, Any] | None = None
     scaling_config: dict[str, Any] | None = None
+    offload: dict[str, Any] | None = None
     timeout_ms: int = 5000
     concurrency: int = 2
     queue_size: int = 20
@@ -71,6 +72,7 @@ class PlatformFunction:
             max_retries=self.max_retries,
             resources=self.resources,
             scaling_config=self.scaling_config,
+            offload=self.offload,
         )
 
 
@@ -89,6 +91,16 @@ class PlatformRequest:
     helm_release: str = "nanofaas"
     helm_chart: str = "deploy/helm/nanofaas"
     helm_values: tuple[str, ...] = ()
+    # Overrides the role the backend implies. `offload-loadtest` puts two
+    # platforms on two clusters at once, so one of them cannot be "stack".
+    execution_role: ExecutionRole | None = None
+    # Names the side in every title this platform contributes. Empty for the
+    # workflows with one platform; without it a plan holding two shows
+    # "Check kubectl is usable" twice and a reader cannot tell which cluster.
+    label: str = ""
+
+    def titled(self, title: str) -> str:
+        return f"{title} on the {self.label}" if self.label else title
 
     def __post_init__(self) -> None:
         if not self.functions:
@@ -99,6 +111,8 @@ class PlatformRequest:
     @property
     def role(self) -> ExecutionRole:
         """Kubernetes work happens on the VM holding the cluster; container work here."""
+        if self.execution_role is not None:
+            return self.execution_role
         return "stack" if self.backend == "k8s" else "host"
 
     def control_plane_image_reference(self) -> str:
@@ -118,7 +132,7 @@ def _control_plane_build(
     modules = (_MODULES[request.backend], *request.additional_modules)
     return GradleTask(
         target,
-        title="Build control plane",
+        title=request.titled("Build control plane"),
         executor=executor,
         role=request.role,
         properties={"controlPlaneModules": ",".join(modules)},
@@ -156,7 +170,7 @@ def _helm_release_with_endpoint(
     )
     uninstall = HelmUninstallTask(spec, executor=executor, cwd=cwd)
     acquire = Steps(
-        title=f"Acquire Helm release {spec.release}",
+        title=request.titled(f"Acquire Helm release {spec.release}"),
         steps=(
             HelmInstallTask(spec, executor=executor, cwd=cwd),
             KubectlTask(
@@ -175,7 +189,7 @@ def _helm_release_with_endpoint(
     )
 
     return compensated_resource(
-        title=f"Acquire Helm release {spec.release}",
+        title=request.titled(f"Acquire Helm release {spec.release}"),
         acquire=lambda inputs: cast(str, acquire.run(inputs).value),
         compensate=uninstall.run,
         requires=requires,
@@ -224,7 +238,7 @@ def add_platform(
                 "--client",
                 executor=executor,
                 role=request.role,
-                title="Check kubectl is usable",
+                title=request.titled("Check kubectl is usable"),
                 cwd=cwd,
             )
         )
@@ -273,7 +287,7 @@ def add_platform(
 
     functions = tuple(
         function_resource(
-            name=function.name,
+            name=request.titled(function.name),
             # Registering only asks the control plane to create the Deployment;
             # it answers before the pod does. A live run invoked 0.4s later and
             # got POOL_ERROR: Connection refused against a Service whose
