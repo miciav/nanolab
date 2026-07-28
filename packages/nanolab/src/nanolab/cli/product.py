@@ -35,7 +35,7 @@ def uses_sonata(scenario: ScenarioConfig) -> bool:
     Shrinks as the migration proceeds: `loadtest`, `offload` and
     `offload-loadtest` are what is left on the legacy engine.
     """
-    return scenario.workflow in ("cli", "validate", "loadtest")
+    return scenario.workflow in ("cli", "validate", "loadtest", "offload")
 
 
 def _read(path: Path) -> dict[str, object]:
