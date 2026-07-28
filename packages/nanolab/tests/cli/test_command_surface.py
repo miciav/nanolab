@@ -8,7 +8,8 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-from sonata_engine import Selection
+from sonata_engine import Selection, Task, TaskInputs, TaskOutcome
+from sonata_engine import Workflow as SonataWorkflow
 
 # These tests pass repo-relative paths (scenarios-v2/..., environments/...) to the
 # CLI, so they must run from the project root regardless of pytest's cwd.
@@ -33,6 +34,27 @@ class _Task:
 
     def run(self) -> None:
         pass
+
+
+def _sonata_workflow(*, fails: str | None = None) -> SonataWorkflow:
+    """A real one-task Sonata workflow, for scenarios the CLI now runs on Sonata.
+
+    A real workflow rather than a fake: the CLI calls compile() and run(select=)
+    on these, and a stand-in that only grew those two methods would prove less
+    than the engine itself does."""
+
+    class _One(Task[None]):
+        title = "Test task"
+
+        def run(self, inputs: TaskInputs) -> TaskOutcome[None]:
+            del inputs
+            if fails is not None:
+                raise RuntimeError(fails)
+            return TaskOutcome()
+
+    workflow = SonataWorkflow(workflow_id="test")
+    workflow.add(_One())
+    return workflow
 
 
 def test_top_level_exposes_only_six_product_commands() -> None:
@@ -95,7 +117,7 @@ def test_run_renders_normalized_task_progress(monkeypatch) -> None:
         lambda *args, **kwargs: Workflow(tasks=[_Task()]),
     )
 
-    result = CliRunner().invoke(app, ["run", "scenarios-v2/loadtest.yaml"])
+    result = CliRunner().invoke(app, ["run", "scenarios-v2/validate-offload.yaml"])
 
     assert result.exit_code == 0
     assert "[test.task] running" in result.stdout
@@ -283,7 +305,7 @@ def test_plan_provisioned_k8s_cli_shows_the_twelve_task_workflow() -> None:
 
 def test_run_provisions_before_executing_workflow(monkeypatch, tmp_path: Path) -> None:
     actions: list[str] = []
-    workflow = Workflow(tasks=[_Task()])
+    workflow = _sonata_workflow()
 
     @contextmanager
     def provision(*args, **kwargs):
@@ -308,7 +330,9 @@ def test_run_provisions_before_executing_workflow(monkeypatch, tmp_path: Path) -
             "http://stack:30090",
         ),
     )
-    monkeypatch.setattr(workflow, "run", lambda: actions.append("run"))
+    # Sonata's run takes `select`; the point here is the ordering of provisioning
+    # around it, not what it runs.
+    monkeypatch.setattr(workflow, "run", lambda **_kwargs: actions.append("run"))
     monkeypatch.setattr(
         "nanolab.cli.product._git_provenance",
         lambda *args: actions.append("provenance")
@@ -381,17 +405,9 @@ def test_git_provenance_fingerprints_tracked_and_untracked_content(tmp_path: Pat
 
 
 def test_failed_loadtest_writes_failure_metadata(monkeypatch, tmp_path: Path) -> None:
-    @dataclass
-    class _FailTask:
-        task_id: str = "loadtest.fail"
-        title: str = "Fail load test"
-
-        def run(self) -> None:
-            raise RuntimeError("load exploded")
-
     monkeypatch.setattr(
         "nanolab.cli.product._workflow",
-        lambda *args, **kwargs: Workflow(tasks=[_FailTask()]),
+        lambda *args, **kwargs: _sonata_workflow(fails="load exploded"),
     )
     monkeypatch.setattr(
         "nanolab.cli.product.resolve_loadtest_urls",
@@ -479,8 +495,10 @@ def test_plan_builds_loadtest_with_operational_defaults(tmp_path: Path) -> None:
     result = CliRunner().invoke(app, ["plan", str(scenario)])
 
     assert result.exit_code == 0
-    assert "loadgen.run_k6" in result.stdout
-    assert "metrics.prometheus_snapshot" in result.stdout
+    # The eight load steps are one composite now, so the plan names the load test
+    # rather than its internals.
+    assert "009.run-the-load-test" in result.stdout
+    assert "007.acquire-helm-release-nanofaas" in result.stdout
 
 
 def test_plan_renders_the_compiled_cli_workflow() -> None:
