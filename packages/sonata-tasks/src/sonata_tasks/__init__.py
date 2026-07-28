@@ -27,11 +27,13 @@ from sonata_tasks.loadtest import (
     WriteReportTask,
     WriteSummaryTask,
     build_loadtest_workflow,
+    load_outcome,
     loadtest_composite,
 )
 from sonata_tasks.compensation import compensated_resource
 from sonata_tasks.manifest import FunctionManifest
 from sonata_tasks.metrics import PrometheusScrapeCheckTask
+from sonata_tasks.offload_loadtest import EvaluateConservationTask
 from sonata_tasks.offload import (
     OffloadFunction,
     OffloadWorkflowRequest,
@@ -111,5 +113,7 @@ __all__ = [
     "OffloadFunction",
     "OffloadWorkflowRequest",
     "build_offload_workflow",
+    "load_outcome",
+    "EvaluateConservationTask",
     "vm_resource",
 ]

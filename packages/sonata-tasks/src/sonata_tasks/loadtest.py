@@ -52,7 +52,13 @@ class LoadtestOutcome:
     summary: Path | None = None
 
 
-def _upstream(inputs: TaskInputs, title: str) -> LoadtestOutcome:
+def load_outcome(inputs: TaskInputs, title: str) -> LoadtestOutcome:
+    """The load run's outcome from the preceding step, or a legible refusal.
+
+    Public because `offload_loadtest` reconciles the same run from its own
+    module: a step that needs what the load produced should not have to reach
+    for a private helper to say so.
+    """
     value = inputs.upstream()
     if not isinstance(value, LoadtestOutcome):
         raise RuntimeError(
@@ -106,7 +112,7 @@ class VerifyAutoscalingTask(Task[LoadtestOutcome]):
 
     @override
     def run(self, inputs: TaskInputs) -> TaskOutcome[LoadtestOutcome]:
-        outcome = _upstream(inputs, self.title)
+        outcome = load_outcome(inputs, self.title)
         return TaskOutcome(value=replace(outcome, autoscaling=self._verifier.run()))
 
 
@@ -129,7 +135,7 @@ class CapturePrometheusTask(Task[LoadtestOutcome]):
 
     @override
     def run(self, inputs: TaskInputs) -> TaskOutcome[LoadtestOutcome]:
-        outcome = _upstream(inputs, self.title)
+        outcome = load_outcome(inputs, self.title)
         window = TimeWindow(start=outcome.k6.started_at, end=outcome.k6.ended_at)
         return TaskOutcome(
             value=replace(outcome, prometheus_snapshot=self._snapshot(window).run())
@@ -145,7 +151,7 @@ class WriteReportTask(Task[LoadtestOutcome]):
 
     @override
     def run(self, inputs: TaskInputs) -> TaskOutcome[LoadtestOutcome]:
-        outcome = _upstream(inputs, self.title)
+        outcome = load_outcome(inputs, self.title)
         return TaskOutcome(value=replace(outcome, report=self._report.run()))
 
 
@@ -163,7 +169,7 @@ class WriteSummaryTask(Task[LoadtestOutcome]):
 
     @override
     def run(self, inputs: TaskInputs) -> TaskOutcome[LoadtestOutcome]:
-        outcome = _upstream(inputs, self.title)
+        outcome = load_outcome(inputs, self.title)
         written = self._summary(outcome.autoscaling).run()
         return TaskOutcome(value=replace(outcome, summary=written))
 
@@ -180,7 +186,7 @@ class EvaluateGateTask(Task[LoadtestOutcome]):
 
     @override
     def run(self, inputs: TaskInputs) -> TaskOutcome[LoadtestOutcome]:
-        outcome = _upstream(inputs, self.title)
+        outcome = load_outcome(inputs, self.title)
         if not outcome.k6.passed:
             raise RuntimeError("k6 thresholds failed; see report.html")
         return TaskOutcome(value=outcome)
@@ -195,7 +201,7 @@ class FetchResultsTask(Task[LoadtestOutcome]):
 
     @override
     def run(self, inputs: TaskInputs) -> TaskOutcome[LoadtestOutcome]:
-        outcome = _upstream(inputs, self.title)
+        outcome = load_outcome(inputs, self.title)
         _ = self._fetch.run()
         return TaskOutcome(value=outcome)
 
