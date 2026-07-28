@@ -67,9 +67,10 @@ class FakeWorkflow:
 class FakeSonataWorkflow:
     """Sonata-shaped fake: no `.tasks`, only `.compile().tasks`."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, on_run: Callable[[], None] | None = None) -> None:
         self.keep_infrastructure = False
         self.run_calls = 0
+        self._on_run = on_run
         self._compiled_tasks = [
             SimpleNamespace(
                 task_id="001.build-nanofaas-cli",
@@ -84,8 +85,10 @@ class FakeSonataWorkflow:
     def compile(self) -> SimpleNamespace:
         return SimpleNamespace(tasks=self._compiled_tasks)
 
-    def run(self) -> None:
+    def run(self, **_kwargs: Any) -> None:
         self.run_calls += 1
+        if self._on_run is not None:
+            self._on_run()
 
 
 class RecordingSink:
@@ -625,7 +628,7 @@ def test_loadtest_resolves_urls_before_building_workflow(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     environment_path = _install_paths(monkeypatch, tmp_path)
-    workflow = FakeWorkflow()
+    workflow = FakeSonataWorkflow()
     calls: list[tuple[Any, ...]] = []
     _install_workflow_helpers(
         monkeypatch,
@@ -948,8 +951,8 @@ def test_nonlocal_loadtest_runs_provision_build_and_cleanup_inside_live_sink(
 ) -> None:
     environment_path = _install_paths(monkeypatch, tmp_path)
     events: list[tuple[Any, ...]] = []
-    preview = FakeWorkflow()
-    workflow = FakeWorkflow(on_run=lambda: events.append(("run",)))
+    preview = FakeSonataWorkflow()
+    workflow = FakeSonataWorkflow(on_run=lambda: events.append(("run",)))
     _install_workflow_helpers(
         monkeypatch,
         environment_path=environment_path,
@@ -990,7 +993,10 @@ def test_nonlocal_loadtest_runs_provision_build_and_cleanup_inside_live_sink(
             events.append(("live",))
             action = kwargs["action"]
             assert callable(action)
-            assert kwargs["planned_steps"] == [task.title for task in preview.tasks]
+            # Sonata plans name compiled units, whose title lives on the task.
+            assert kwargs["planned_steps"] == [
+                compiled.task.title for compiled in preview.compile().tasks
+            ]
             with bind_workflow_sink(self.sink):
                 action(None, self.sink)
             events.append(("live-final",))

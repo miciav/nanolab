@@ -1,0 +1,249 @@
+from __future__ import annotations
+
+from collections.abc import Callable
+from dataclasses import dataclass, replace
+from pathlib import Path
+from typing import Any, override
+
+from sonata_engine import Resource, Steps, Task, TaskInputs, TaskOutcome, Workflow
+from workflow_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
+from workflow_tasks.loadtest.autoscaling import (
+    AutoscalingSummary,
+    ReplicaWatcher,
+    VerifyAutoscalingReplicas,
+)
+from workflow_tasks.loadtest.models import K6RunResult, TimeWindow
+from workflow_tasks.loadtest.tasks import (
+    CapturePrometheusSnapshot,
+    FetchVmResults,
+    RunK6,
+    WriteK6Report,
+    WriteLoadtestSummary,
+)
+
+from sonata_tasks.command import CommandTask
+from sonata_tasks.platform import PlatformRequest, add_platform
+
+# Sonata steps over the load-test implementations in `workflow_tasks.loadtest`,
+# which are ordinary classes with a `run()` and no dependency on the legacy
+# engine — so they are reused rather than rewritten. What changes is how they
+# find each other's results.
+
+
+@dataclass(frozen=True, slots=True)
+class LoadtestOutcome:
+    """What the load run produced, accumulated as the steps go.
+
+    The legacy tasks read each other's results off attributes: the Prometheus
+    snapshot took `lambda: run_k6.result.started_at`, the summary took the
+    verifier object, and the gate took the RunK6 instance. That is a temporal
+    coupling held together by convention — `RunK6.result` raises
+    "has not been called" if anyone gets the order wrong, which is exactly what
+    happens to `--only metrics.evaluate_gate` today.
+
+    Here it travels forward through `inputs.upstream()` instead, so a step can
+    only see what genuinely ran before it.
+    """
+
+    k6: K6RunResult
+    autoscaling: AutoscalingSummary | None = None
+    prometheus_snapshot: Path | None = None
+    report: Path | None = None
+    summary: Path | None = None
+
+
+def _upstream(inputs: TaskInputs, title: str) -> LoadtestOutcome:
+    value = inputs.upstream()
+    if not isinstance(value, LoadtestOutcome):
+        raise RuntimeError(
+            f"{title}: expected the load run's outcome, got {type(value).__name__}"
+        )
+    return value
+
+
+class RunK6Task(Task[LoadtestOutcome]):
+    """Run k6, optionally sampling replica counts while it runs.
+
+    The watcher wraps the run rather than sitting beside it: sampling has to
+    start before the load and stop after it, whatever the load does.
+    """
+
+    def __init__(
+        self,
+        *,
+        run_k6: RunK6,
+        watcher: ReplicaWatcher | None = None,
+        title: str = "Run k6",
+    ) -> None:
+        self.title = title
+        self._run_k6 = run_k6
+        self._watcher = watcher
+
+    @override
+    def run(self, inputs: TaskInputs) -> TaskOutcome[LoadtestOutcome]:
+        del inputs
+        if self._watcher is None:
+            return TaskOutcome(value=LoadtestOutcome(k6=self._run_k6.run()))
+        self._watcher.start()
+        try:
+            result = self._run_k6.run()
+        finally:
+            self._watcher.stop()
+        return TaskOutcome(value=LoadtestOutcome(k6=result))
+
+
+class VerifyAutoscalingTask(Task[LoadtestOutcome]):
+    """Assert the replica count rose under load and fell after it."""
+
+    def __init__(
+        self,
+        *,
+        verifier: VerifyAutoscalingReplicas,
+        title: str = "Verify autoscaling replicas",
+    ) -> None:
+        self.title = title
+        self._verifier = verifier
+
+    @override
+    def run(self, inputs: TaskInputs) -> TaskOutcome[LoadtestOutcome]:
+        outcome = _upstream(inputs, self.title)
+        return TaskOutcome(value=replace(outcome, autoscaling=self._verifier.run()))
+
+
+class CapturePrometheusTask(Task[LoadtestOutcome]):
+    """Snapshot the metrics for exactly the window k6 ran in.
+
+    The window comes from the upstream outcome, so it cannot be captured for a
+    run that did not happen — the legacy version resolved it through a lambda
+    closing over a task whose `result` might not exist yet.
+    """
+
+    def __init__(
+        self,
+        *,
+        snapshot: Callable[[TimeWindow], CapturePrometheusSnapshot],
+        title: str = "Capture Prometheus snapshot",
+    ) -> None:
+        self.title = title
+        self._snapshot = snapshot
+
+    @override
+    def run(self, inputs: TaskInputs) -> TaskOutcome[LoadtestOutcome]:
+        outcome = _upstream(inputs, self.title)
+        window = TimeWindow(start=outcome.k6.started_at, end=outcome.k6.ended_at)
+        return TaskOutcome(
+            value=replace(outcome, prometheus_snapshot=self._snapshot(window).run())
+        )
+
+
+class WriteReportTask(Task[LoadtestOutcome]):
+    """Render the HTML report from what the run left on disk."""
+
+    def __init__(self, *, report: WriteK6Report, title: str = "Write the report") -> None:
+        self.title = title
+        self._report = report
+
+    @override
+    def run(self, inputs: TaskInputs) -> TaskOutcome[LoadtestOutcome]:
+        outcome = _upstream(inputs, self.title)
+        return TaskOutcome(value=replace(outcome, report=self._report.run()))
+
+
+class WriteSummaryTask(Task[LoadtestOutcome]):
+    """Write summary.json, including the autoscaling numbers when there are any."""
+
+    def __init__(
+        self,
+        *,
+        summary: Callable[[AutoscalingSummary | None], WriteLoadtestSummary],
+        title: str = "Write the summary",
+    ) -> None:
+        self.title = title
+        self._summary = summary
+
+    @override
+    def run(self, inputs: TaskInputs) -> TaskOutcome[LoadtestOutcome]:
+        outcome = _upstream(inputs, self.title)
+        written = self._summary(outcome.autoscaling).run()
+        return TaskOutcome(value=replace(outcome, summary=written))
+
+
+class EvaluateGateTask(Task[LoadtestOutcome]):
+    """Fail the run when k6 breached its thresholds.
+
+    Last on purpose: k6 exits 99 on a breach having still written its summary,
+    so the report and the snapshot are produced before this decides.
+    """
+
+    def __init__(self, *, title: str = "Evaluate the thresholds") -> None:
+        self.title = title
+
+    @override
+    def run(self, inputs: TaskInputs) -> TaskOutcome[LoadtestOutcome]:
+        outcome = _upstream(inputs, self.title)
+        if not outcome.k6.passed:
+            raise RuntimeError("k6 thresholds failed; see report.html")
+        return TaskOutcome(value=outcome)
+
+
+class FetchResultsTask(Task[LoadtestOutcome]):
+    """Bring a remote loadgen's summary back to the run directory."""
+
+    def __init__(self, *, fetch: FetchVmResults, title: str = "Fetch k6 results") -> None:
+        self.title = title
+        self._fetch = fetch
+
+    @override
+    def run(self, inputs: TaskInputs) -> TaskOutcome[LoadtestOutcome]:
+        outcome = _upstream(inputs, self.title)
+        _ = self._fetch.run()
+        return TaskOutcome(value=outcome)
+
+
+def loadtest_composite(
+    *,
+    preflight: CommandTask,
+    prepare: CommandTask,
+    run_k6: RunK6Task,
+    steps_after_run: tuple[Task[Any], ...],
+    title: str = "Run the load test",
+) -> Steps:
+    """The whole load test as one compiled unit.
+
+    One unit because the steps are not independently runnable: every one after
+    the run needs what the run produced. The legacy workflow made them separate
+    tasks that reached into each other's attributes, so selecting one on its own
+    raised "RunK6.run() has not been called" — a granularity that looked real
+    and was not. Here the steps show up in the event stream instead, and
+    `--only` names the load test, which is the thing you can actually re-run.
+    """
+    return Steps(title=title, steps=(preflight, prepare, run_k6, *steps_after_run))
+
+
+def build_loadtest_workflow(
+    request: PlatformRequest,
+    bindings: RoleBindings,
+    *,
+    load: Steps,
+    workflow_id: str = "loadtest",
+    cwd: Path | None = None,
+    requires: tuple[Resource[Any], ...] = (),
+) -> Workflow:
+    """Deploy the platform, register the functions, then put them under load.
+
+    The platform half is `add_platform`, shared with `validate`: the two differ
+    only in what they do once it is up. The load half arrives already assembled,
+    because building it needs a k6 runner, a Prometheus client and a run
+    directory — none of which this package should know how to obtain.
+
+    The load composite declares every function resource, so the compiler
+    releases them after it rather than before, and a failed load test still
+    deregisters what it registered.
+    """
+    executor = RoleBoundCommandTaskExecutor(bindings)
+    workflow = Workflow(workflow_id=workflow_id)
+    platform = add_platform(
+        workflow, request, executor=executor, cwd=cwd, requires=requires
+    )
+    workflow.add(load, requires=(*requires, *platform.resources, *platform.functions))
+    return workflow

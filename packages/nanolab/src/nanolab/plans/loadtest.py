@@ -1,34 +1,82 @@
 from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
-from workflow_tasks.core.workflow import Workflow
-from workflow_tasks.execution.bindings import RoleBindings
-from workflow_tasks.loadtest.ports import PrometheusClient, RemoteFileFetcher
-from workflow_tasks.workflows.loadtest import (
-    LoadtestWorkflowRequest,
+from sonata_engine import Task, Workflow
+from sonata_tasks.command import CommandTask
+from sonata_tasks.loadtest import (
+    CapturePrometheusTask,
+    EvaluateGateTask,
+    FetchResultsTask,
+    RunK6Task,
+    VerifyAutoscalingTask,
+    WriteReportTask,
+    WriteSummaryTask,
     build_loadtest_workflow,
-    default_prometheus_queries,
+    loadtest_composite,
 )
-from workflow_tasks.workflows.validate import (
-    ValidateWorkflowRequest,
-    k8s_deployment_specs,
-    registration_specs,
-    validate_cleanup_specs,
+from sonata_tasks.platform import PlatformRequest
+from workflow_tasks.components.helm import control_plane_helm_values
+from workflow_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
+from workflow_tasks.execution.roles import ExecutionRole
+from workflow_tasks.loadtest.autoscaling import (
+    ReplicaProbe,
+    ReplicaWatcher,
+    VerifyAutoscalingReplicas,
 )
+from workflow_tasks.loadtest.models import K6Config, K6Stage
+from workflow_tasks.loadtest.ports import PrometheusClient, RemoteFileFetcher
+from workflow_tasks.loadtest.tasks import (
+    CapturePrometheusSnapshot,
+    FetchVmResults,
+    RunK6,
+    WriteK6Report,
+    WriteLoadtestSummary,
+)
+from workflow_tasks.tasks.models import CommandTaskSpec
+from workflow_tasks.workflows.loadtest import default_prometheus_queries
 
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
-from nanolab.plans._assembly import workflow_from_specs
-from nanolab.plans.validate import _resolve_function
+from nanolab.plans.validate import _resolve_function, _set_args, _sonata_function
 from nanolab.workspace.paths import discover_tool_root
+
+_REMOTE_DIR = "."
 
 
 def _home(user: str, explicit: str | None) -> str:
     if explicit:
         return explicit
     return "/root" if user == "root" else f"/home/{user}"
+
+
+class _RoleRunner:
+    """The VM-command shape `RunK6` and the replica probe expect, bound to a role."""
+
+    def __init__(self, bindings: RoleBindings, role: ExecutionRole) -> None:
+        self._executor = bindings.executor_for(role)
+        self._role: ExecutionRole = role
+
+    def run_vm_command(
+        self,
+        argv: tuple[str, ...],
+        *,
+        env: dict[str, str],
+        remote_dir: str | None,
+        dry_run: bool,
+    ) -> Any:
+        return self._executor.run(
+            CommandTaskSpec(
+                task_id="",
+                summary="Run k6",
+                argv=argv,
+                role=self._role,
+                env=env,
+                remote_dir=remote_dir,
+            ),
+            dry_run=dry_run,
+        )
 
 
 def build_loadtest_plan(
@@ -46,6 +94,15 @@ def build_loadtest_plan(
     prebuilt_control_plane_image: str | None = None,
     prebuilt_function_images: Mapping[str, str] | None = None,
 ) -> Workflow:
+    """Compile the loadtest scenario into a Sonata workflow.
+
+    Two halves. The platform — build, push, install the chart, register the
+    functions — is `add_platform`, the same code `validate` uses; the legacy
+    version reached into the validate module for `k8s_deployment_specs` to get
+    it. The load itself is one composite, assembled here because it needs the
+    k6 runner, the Prometheus client and the run directory, none of which
+    belong in the task catalogue.
+    """
     if config.workflow != "loadtest":
         raise ValueError("load-test plan requires a loadtest scenario")
     scaling_config: dict[str, object] | None = None
@@ -56,7 +113,7 @@ def build_loadtest_plan(
             "maxReplicas": 5,
             "metrics": [{"type": "in_flight", "target": "2"}],
         }
-    functions = tuple(
+    resolved = tuple(
         _resolve_function(config, key, tool_root=tool_root) for key in config.functions
     )
     prebuilt = prebuilt_control_plane_image is not None or prebuilt_function_images is not None
@@ -64,14 +121,15 @@ def build_loadtest_plan(
         if prebuilt_function_images is None:
             raise ValueError("prebuilt function images are required in prebuilt mode")
         missing = [
-            function.key for function in functions if not prebuilt_function_images.get(function.key)
+            function.key for function in resolved if not prebuilt_function_images.get(function.key)
         ]
         if missing:
             raise ValueError("missing prebuilt function images: " + ", ".join(missing))
-        functions = tuple(
+        resolved = tuple(
             replace(function, image=prebuilt_function_images[function.key])
-            for function in functions
+            for function in resolved
         )
+    functions = tuple(_sonata_function(function) for function in resolved)
     if scaling_config is not None:
         functions = tuple(
             replace(
@@ -87,18 +145,18 @@ def build_loadtest_plan(
     dedicated = "loadgen" in environment.roles
     remote = environment.provider != "local"
     root = repo_root or Path.cwd()
+    script_name = "autoscaling.js" if config.autoscaling else "two-vm-function-invoke.js"
     if remote:
         role_target = environment.target("loadgen" if dedicated else "stack")
         home = _home(role_target.user, role_target.home)
-        script_name = "autoscaling.js" if config.autoscaling else "two-vm-function-invoke.js"
         script_path = Path(home) / f"nanolab-assets/k6/{script_name}"
         summary_path = Path(home) / "nanofaas-loadtest/k6-summary.json"
     else:
-        script_name = "autoscaling.js" if config.autoscaling else "two-vm-function-invoke.js"
         product_root = tool_root or discover_tool_root()
         script_path = product_root / "assets" / "k6" / script_name
         summary_path = run_dir / "k6-summary.json"
-    deployment = ValidateWorkflowRequest(
+
+    request = PlatformRequest(
         backend="k8s",
         build=config.build,
         functions=functions,
@@ -108,39 +166,153 @@ def build_loadtest_plan(
         build_images=not prebuilt,
         control_plane_image=prebuilt_control_plane_image,
     )
-    stack = workflow_from_specs(
-        k8s_deployment_specs(
-            deployment,
-            expose_node_ports=True,
-            metrics_profile="advanced",
+    # NodePort because the load generator reaches the control plane from outside
+    # the cluster, unlike validate which curls it from within the VM.
+    request = replace(
+        request,
+        helm_values=_set_args(
+            control_plane_helm_values(
+                namespace=request.namespace,
+                control_plane_image=request.control_plane_image_reference(),
+                expose_node_port=True,
+                metrics_profile="advanced",
+            )
+        ),
+    )
+
+    load_role: ExecutionRole = "loadgen" if dedicated else "stack"
+    executor = RoleBoundCommandTaskExecutor(bindings)
+    run_k6 = RunK6(
+        task_id="",
+        title="Run k6",
+        runner=_RoleRunner(bindings, load_role),
+        config=K6Config(
+            script_path=script_path,
+            target_url=control_plane_url,
+            summary_output_path=summary_path,
+            stages=tuple(
+                K6Stage(duration=duration, target=count)
+                for duration, count in (
+                    stages
+                    or (
+                        (("10s", 10), ("20s", 20), ("90s", 20), ("10s", 0))
+                        if config.autoscaling
+                        else (("15s", 1), ("30s", 3))
+                    )
+                )
+            ),
+            env={"NANOFAAS_URL": control_plane_url, "NANOFAAS_FUNCTION": target.name},
+        ),
+        remote_dir=_REMOTE_DIR,
+    )
+
+    watcher: ReplicaWatcher | None = None
+    after: list[Task[Any]] = []
+    if config.autoscaling:
+        watcher = ReplicaWatcher(
+            ReplicaProbe(
+                runner=_RoleRunner(bindings, "stack"),
+                namespace=request.namespace,
+                deployment_name=f"fn-{target.name}",
+                remote_dir=_REMOTE_DIR,
+            )
         )
-        + registration_specs(deployment),
+    if remote:
+        after.append(
+            FetchResultsTask(
+                fetch=FetchVmResults(
+                    task_id="",
+                    title="Fetch k6 results",
+                    fetcher=cast(RemoteFileFetcher, fetcher),
+                    remote_source=str(summary_path),
+                    local_dest=run_dir,
+                )
+            )
+        )
+    if watcher is not None:
+        after.append(
+            VerifyAutoscalingTask(
+                verifier=VerifyAutoscalingReplicas(
+                    task_id="",
+                    title="Verify autoscaling replicas",
+                    runner=_RoleRunner(bindings, "stack"),
+                    namespace=request.namespace,
+                    deployment_name=f"fn-{target.name}",
+                    remote_dir=_REMOTE_DIR,
+                    watcher=watcher,
+                )
+            )
+        )
+    after.extend(
+        (
+            CapturePrometheusTask(
+                snapshot=lambda window: CapturePrometheusSnapshot(
+                    task_id="",
+                    title="Capture Prometheus snapshot",
+                    client=prometheus_client,
+                    queries=default_prometheus_queries(target.name),
+                    window=window,
+                    output_dir=run_dir,
+                )
+            ),
+            WriteReportTask(
+                report=WriteK6Report(
+                    task_id="", title="Write the report", data_dir=run_dir, output_dir=run_dir
+                )
+            ),
+            WriteSummaryTask(
+                summary=lambda autoscaling: WriteLoadtestSummary(
+                    task_id="",
+                    title="Write the summary",
+                    data_dir=run_dir,
+                    output_dir=run_dir,
+                    # Cast, not a lie: WriteLoadtestSummary reads `.result` and
+                    # nothing else. Widening its annotation would touch a class
+                    # three workflows still share, for a shim the last of them
+                    # will delete.
+                    autoscaling=(
+                        cast(VerifyAutoscalingReplicas, _AsResult(autoscaling))
+                        if autoscaling is not None
+                        else None
+                    ),
+                )
+            ),
+            EvaluateGateTask(),
+        )
+    )
+
+    return build_loadtest_workflow(
+        request,
         bindings,
         cwd=root,
-    )
-    load = build_loadtest_workflow(
-        LoadtestWorkflowRequest(
-            control_plane_url=control_plane_url,
-            function_name=target.name,
-            script_path=script_path,
-            summary_path=summary_path,
-            run_dir=run_dir,
-            stages=stages or (
-                (("10s", 10), ("20s", 20), ("90s", 20), ("10s", 0))
-                if config.autoscaling
-                else (("15s", 1), ("30s", 3))
+        load=loadtest_composite(
+            preflight=CommandTask(
+                title="Check k6 is usable",
+                argv=("k6", "version"),
+                executor=executor,
+                role=load_role,
+                cwd=root,
             ),
-            prometheus_queries=default_prometheus_queries(target.name),
-            dedicated_loadgen=dedicated,
-            fetch_results=remote,
-            autoscaling=config.autoscaling,
+            prepare=CommandTask(
+                title="Prepare the run directory",
+                argv=("mkdir", "-p", str(summary_path.parent)),
+                executor=executor,
+                role=load_role,
+                cwd=root,
+            ),
+            run_k6=RunK6Task(run_k6=run_k6, watcher=watcher),
+            steps_after_run=tuple(after),
         ),
-        bindings,
-        prometheus_client=prometheus_client,
-        fetcher=cast(RemoteFileFetcher | None, fetcher),
     )
-    stack.tasks.extend(load.tasks)
-    stack.cleanup_tasks = workflow_from_specs(
-        validate_cleanup_specs(deployment), bindings, cwd=root
-    ).tasks
-    return stack
+
+
+class _AsResult:
+    """Adapt a plain summary to the `.result` attribute WriteLoadtestSummary reads.
+
+    That class takes the verifier object and reads `.result` off it. Here the
+    numbers arrive as a value through the composite, so this hands them over in
+    the shape it expects rather than changing a class three workflows share.
+    """
+
+    def __init__(self, result: Any) -> None:
+        self.result = result

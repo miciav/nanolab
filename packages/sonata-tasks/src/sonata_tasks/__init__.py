@@ -15,9 +15,22 @@ from sonata_tasks.http_function import (
     HttpFunctionRegisterTask,
 )
 from sonata_tasks.invocation import verify_invocation
-from sonata_tasks.kubectl import ClusterIpEndpointTask, KubectlTask
+from sonata_tasks.kubectl import ClusterIpEndpointTask, KubectlTask, k8s_deployment_readiness
+from sonata_tasks.loadtest import (
+    CapturePrometheusTask,
+    EvaluateGateTask,
+    FetchResultsTask,
+    LoadtestOutcome,
+    RunK6Task,
+    VerifyAutoscalingTask,
+    WriteReportTask,
+    WriteSummaryTask,
+    build_loadtest_workflow,
+    loadtest_composite,
+)
 from sonata_tasks.compensation import compensated_resource
 from sonata_tasks.manifest import FunctionManifest
+from sonata_tasks.platform import Platform, PlatformFunction, PlatformRequest, add_platform
 from sonata_tasks.docker import (
     DockerBuildTask,
     DockerInspectTask,
@@ -71,5 +84,20 @@ __all__ = [
     "ValidateFunction",
     "ValidateWorkflowRequest",
     "build_validate_workflow",
+    "CapturePrometheusTask",
+    "EvaluateGateTask",
+    "FetchResultsTask",
+    "LoadtestOutcome",
+    "RunK6Task",
+    "VerifyAutoscalingTask",
+    "WriteReportTask",
+    "WriteSummaryTask",
+    "loadtest_composite",
+    "k8s_deployment_readiness",
+    "build_loadtest_workflow",
+    "Platform",
+    "PlatformFunction",
+    "PlatformRequest",
+    "add_platform",
     "vm_resource",
 ]

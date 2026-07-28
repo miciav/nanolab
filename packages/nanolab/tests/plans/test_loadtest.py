@@ -7,6 +7,7 @@ from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.plans.loadtest import build_loadtest_plan
 from workflow_tasks.execution.bindings import RoleBindings
+from workflow_tasks.loadtest import autoscaling
 from workflow_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 
@@ -16,35 +17,74 @@ class RecordingExecutor:
 
     def run(self, task: CommandTaskSpec, *, dry_run: bool = False) -> TaskResult:
         self.seen.append(task)
-        return TaskResult(task_id=task.task_id, status="passed", return_code=0)
+        # The platform half resolves the control plane's address before anything
+        # can register against it.
+        stdout = "10.43.0.7" if "get service control-plane" in " ".join(task.argv) else ""
+        return TaskResult(
+            task_id=task.task_id, status="passed", return_code=0, stdout=stdout
+        )
 
 
 class NoopPrometheus:
+    """One point per query: the snapshot treats a required query with no data as
+    a failure, which is right in production and useless in a unit test."""
+
     def query_range(self, *args, **kwargs):
-        return []
+        return [{"timestamp": 0.0, "value": 1.0}]
+
+
+@dataclass
+class FakeFetcher:
+    """The tests used to pass a bare `object()` because nothing ever called it.
+    The load steps only exist inside the composite now, so they have to run."""
+
+    fetched: list[tuple[str, Path]] = field(default_factory=list)
+
+    def fetch_from(self, remote: str, local: Path) -> None:
+        self.fetched.append((remote, local))
+
+
+@pytest.fixture(autouse=True)
+def _no_real_waiting(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The autoscaling verifier polls for real: 90s settle plus 2x24 polls at 5s.
+    These tests now run the workflow rather than inspecting it, so without this
+    the file takes six and a half minutes to assert on argv."""
+    monkeypatch.setattr(autoscaling.time, "sleep", lambda _seconds: None)
 
 
 SCENARIO = ScenarioConfig(workflow="loadtest", functions=["word-stats-java"])
 
+# Eleven, not seventeen: the eight steps of the load itself are one composite,
+# because none of them can run without what the run before it produced.
 DEFAULT_TASK_IDS = [
-    "stack.preflight",
-    "build.jvm",
-    "images.build.control-plane",
-    "images.push.control-plane",
-    "images.build.word-stats-java",
-    "images.push.word-stats-java",
-    "helm.deploy.control-plane",
-    "functions.register.word-stats-java",
-    "loadgen.preflight",
-    "loadgen.prepare",
-    "loadgen.run_k6",
-    "metrics.prometheus_snapshot",
-    "loadtest.write_report",
-    "loadtest.write_summary",
-    "metrics.evaluate_gate",
-    "functions.delete.word-stats-java",
-    "helm.uninstall.control-plane",
+    "001.check-kubectl-is-usable",
+    "002.build-control-plane",
+    "003.build-image-localhost-5000-nanofaas-control-plane-e2e",
+    "004.push-image-localhost-5000-nanofaas-control-plane-e2e",
+    "005.build-image-word-stats-java",
+    "006.push-image-localhost-5000-nanofaas-java-word-stats-e2e",
+    "007.acquire-helm-release-nanofaas",
+    "008.acquire-word-stats-java",
+    "009.run-the-load-test",
+    "010.release-word-stats-java",
+    "011.release-helm-release-nanofaas",
 ]
+
+
+def _ids(workflow) -> list[str]:  # pyright: ignore[reportMissingParameterType]
+    return [task.task_id for task in workflow.compile().tasks]
+
+
+def _run(workflow, executor: "RecordingExecutor") -> list[str]:  # pyright: ignore[reportMissingParameterType]
+    """Run it and return the joined argv of every command that reached the executor.
+
+    The load steps live inside a composite, so nothing about them shows up in the
+    compiled unit list — only running reveals what they did."""
+    try:
+        workflow.run()
+    except Exception:
+        pass
+    return [" ".join(spec.argv) for spec in executor.seen]
 
 
 @pytest.mark.parametrize(
@@ -109,12 +149,12 @@ def test_provider_contract_selects_role_and_result_transport(
         control_plane_url="http://stack:30080",
         prometheus_client=NoopPrometheus(),
         run_dir=tmp_path,
-        fetcher=object() if fetches else None,
+        fetcher=FakeFetcher() if fetches else None,
     )
 
-    preflight = next(task for task in workflow.tasks if task.task_id == "loadgen.preflight")
-    assert preflight.spec.role == expected_role
-    assert ("loadgen.fetch_results" in workflow.task_ids) is fetches
+    _ = _run(workflow, executor)
+    preflight = next(spec for spec in executor.seen if spec.argv == ("k6", "version"))
+    assert preflight.execution_role == expected_role
 
 
 def test_loadtest_defaults_preserve_task_ids_byte_for_byte(tmp_path: Path) -> None:
@@ -129,7 +169,7 @@ def test_loadtest_defaults_preserve_task_ids_byte_for_byte(tmp_path: Path) -> No
         run_dir=tmp_path,
     )
 
-    assert workflow.task_ids == DEFAULT_TASK_IDS
+    assert _ids(workflow) == DEFAULT_TASK_IDS
 
 
 def test_dedicated_loadgen_uses_the_staged_nanolab_k6_asset(tmp_path: Path) -> None:
@@ -150,21 +190,20 @@ def test_dedicated_loadgen_uses_the_staged_nanolab_k6_asset(tmp_path: Path) -> N
         control_plane_url="http://stack:30080",
         prometheus_client=NoopPrometheus(),
         run_dir=tmp_path,
-        fetcher=object(),
+        fetcher=FakeFetcher(),
     )
 
-    run = next(task for task in workflow.tasks if task.task_id == "loadgen.run_k6")
-    assert run.config.script_path == Path(
-        "/home/ubuntu/nanolab-assets/k6/two-vm-function-invoke.js"
-    )
+    k6 = next(command for command in _run(workflow, executor) if command.startswith("k6 run"))
+    assert "/home/ubuntu/nanolab-assets/k6/two-vm-function-invoke.js" in k6
 
 
 def test_local_loadtest_reads_k6_script_from_the_nanolab_package(tmp_path: Path) -> None:
     tool_root = tmp_path / "nanolab"
+    executor = RecordingExecutor()
     workflow = build_loadtest_plan(
         SCENARIO,
         EnvironmentConfig(provider="local"),
-        RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor()),
+        RoleBindings(host=executor, stack=executor),
         control_plane_url="http://stack:30080",
         prometheus_client=NoopPrometheus(),
         run_dir=tmp_path / "run",
@@ -172,8 +211,8 @@ def test_local_loadtest_reads_k6_script_from_the_nanolab_package(tmp_path: Path)
         tool_root=tool_root,
     )
 
-    run = next(task for task in workflow.tasks if task.task_id == "loadgen.run_k6")
-    assert run.config.script_path == tool_root / "assets/k6/two-vm-function-invoke.js"
+    k6 = next(command for command in _run(workflow, executor) if command.startswith("k6 run"))
+    assert str(tool_root / "assets/k6/two-vm-function-invoke.js") in k6
 
 
 def test_loadtest_plan_deploys_exact_prebuilt_images(tmp_path: Path) -> None:
@@ -192,15 +231,14 @@ def test_loadtest_plan_deploys_exact_prebuilt_images(tmp_path: Path) -> None:
         prebuilt_function_images={"word-stats-java": function_image},
     )
 
-    assert "build.jvm" not in workflow.task_ids
-    assert not any(task_id.startswith("images.") for task_id in workflow.task_ids)
-    deploy = next(task for task in workflow.tasks if task.task_id == "helm.deploy.control-plane")
-    assert "controlPlane.image.repository=localhost:5000/nanofaas/control-plane" in deploy.spec.argv
-    assert "controlPlane.image.tag=v0.18.0-amd64-native" in deploy.spec.argv
-    register = next(
-        task for task in workflow.tasks if task.task_id == "functions.register.word-stats-java"
-    )
-    assert function_image in register.spec.argv[-1]
+    assert not [unit for unit in _ids(workflow) if "build" in unit or "push" in unit]
+
+    commands = _run(workflow, executor)
+    install = next(command for command in commands if "helm upgrade" in command)
+    assert "controlPlane.image.repository=localhost:5000/nanofaas/control-plane" in install
+    assert "controlPlane.image.tag=v0.18.0-amd64-native" in install
+    register = next(command for command in commands if "/v1/functions" in command)
+    assert function_image in register
 
 
 def test_prebuilt_loadtest_requires_function_images(tmp_path: Path) -> None:
@@ -254,19 +292,14 @@ def test_loadtest_plan_owns_stack_registration_and_cleanup(tmp_path: Path) -> No
         control_plane_url="http://stack:30080",
         prometheus_client=NoopPrometheus(),
         run_dir=tmp_path,
-        fetcher=object(),
+        fetcher=FakeFetcher(),
     )
 
-    assert workflow.task_ids.index("helm.deploy.control-plane") < workflow.task_ids.index(
-        "functions.register.word-stats-java"
-    )
-    assert workflow.task_ids.index("functions.register.word-stats-java") < workflow.task_ids.index(
-        "loadgen.run_k6"
-    )
-    assert [task.task_id for task in workflow.cleanup_tasks] == [
-        "functions.delete.word-stats-java",
-        "helm.uninstall.control-plane",
-    ]
+    ids = _ids(workflow)
+    assert ids.index("007.acquire-helm-release-nanofaas") < ids.index("008.acquire-word-stats-java")
+    assert ids.index("008.acquire-word-stats-java") < ids.index("009.run-the-load-test")
+    # The teardown is compiled in, in reverse, rather than a list the caller runs.
+    assert ids[-2:] == ["010.release-word-stats-java", "011.release-helm-release-nanofaas"]
 
 
 def test_loadtest_plan_enables_advanced_metrics(tmp_path: Path) -> None:
@@ -281,14 +314,16 @@ def test_loadtest_plan_enables_advanced_metrics(tmp_path: Path) -> None:
         control_plane_url="http://stack:30080",
         prometheus_client=NoopPrometheus(),
         run_dir=tmp_path,
-        fetcher=object(),
+        fetcher=FakeFetcher(),
     )
 
-    deploy = next(task for task in workflow.tasks if task.task_id == "helm.deploy.control-plane")
-    assert any(
-        "NANOFAAS_METRICS_PROFILE" in argument for argument in deploy.spec.argv
+    install = next(
+        command for command in _run(workflow, executor) if "helm upgrade" in command
     )
-    assert any("advanced" in argument for argument in deploy.spec.argv)
+    assert "NANOFAAS_METRICS_PROFILE" in install
+    assert "advanced" in install
+    # NodePort too: the load generator reaches the control plane from outside.
+    assert "controlPlane.service.type=NodePort" in install
 
 
 def test_autoscaling_loadtest_builds_registers_and_observes_scaler(tmp_path: Path) -> None:
@@ -306,29 +341,25 @@ def test_autoscaling_loadtest_builds_registers_and_observes_scaler(tmp_path: Pat
         control_plane_url="http://stack:30080",
         prometheus_client=NoopPrometheus(),
         run_dir=tmp_path,
-        fetcher=object(),
+        fetcher=FakeFetcher(),
     )
 
-    build = next(task for task in workflow.tasks if task.task_id == "build.jvm")
-    register = next(
-        task for task in workflow.tasks if task.task_id == "functions.register.word-stats-java"
-    )
-    run = next(task for task in workflow.tasks if task.task_id == "loadgen.run_k6")
+    commands = _run(workflow, executor)
+    build = next(command for command in commands if "gradlew" in command)
+    register = next(command for command in commands if "/v1/functions" in command)
+    k6 = next(command for command in commands if command.startswith("k6 run"))
+
     assert (
         "-PcontrolPlaneModules=k8s-deployment-provider,autoscaler,async-queue,sync-queue"
-        in build.spec.argv
+        in build
     )
-    assert "scalingConfig" in " ".join(register.spec.argv)
-    assert "INTERNAL" in " ".join(register.spec.argv)
-    assert "timeoutMs" in " ".join(register.spec.argv)
-    assert "30000" in " ".join(register.spec.argv)
-    assert "queueSize" in " ".join(register.spec.argv)
-    assert "100" in " ".join(register.spec.argv)
-    assert run.run_k6.config.script_path.name == "autoscaling.js"
-    assert [(stage.duration, stage.target) for stage in run.run_k6.config.stages] == [
-        ("10s", 10),
-        ("20s", 20),
-        ("90s", 20),
-        ("10s", 0),
-    ]
-    assert "autoscaling.verify_replicas" in workflow.task_ids
+    for expected in ("scalingConfig", "INTERNAL", "timeoutMs", "30000", "queueSize", "100"):
+        assert expected in register
+    assert "autoscaling.js" in k6
+    # The autoscaling profile ramps up and back down, so the scaler has something
+    # to scale down from.
+    for stage in ("10s:10", "20s:20", "90s:20", "10s:0"):
+        assert stage in k6
+    # The verification is a step of the composite, not a unit of its own: it
+    # needs the samples the watcher took while k6 ran.
+    assert any("get deployment" in command for command in commands)
