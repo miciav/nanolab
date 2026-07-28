@@ -25,10 +25,12 @@ from sonata_tasks.loadtest import (
     VerifyAutoscalingTask,
     WriteReportTask,
     WriteSummaryTask,
+    build_loadtest_workflow,
     loadtest_composite,
 )
 from sonata_tasks.compensation import compensated_resource
 from sonata_tasks.manifest import FunctionManifest
+from sonata_tasks.platform import Platform, PlatformFunction, PlatformRequest, add_platform
 from sonata_tasks.docker import (
     DockerBuildTask,
     DockerInspectTask,
@@ -92,5 +94,10 @@ __all__ = [
     "WriteSummaryTask",
     "loadtest_composite",
     "k8s_deployment_readiness",
+    "build_loadtest_workflow",
+    "Platform",
+    "PlatformFunction",
+    "PlatformRequest",
+    "add_platform",
     "vm_resource",
 ]

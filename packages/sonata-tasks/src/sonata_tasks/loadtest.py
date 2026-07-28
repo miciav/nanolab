@@ -5,7 +5,8 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, override
 
-from sonata_engine import Steps, Task, TaskInputs, TaskOutcome
+from sonata_engine import Resource, Steps, Task, TaskInputs, TaskOutcome, Workflow
+from workflow_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
 from workflow_tasks.loadtest.autoscaling import (
     AutoscalingSummary,
     ReplicaWatcher,
@@ -21,6 +22,7 @@ from workflow_tasks.loadtest.tasks import (
 )
 
 from sonata_tasks.command import CommandTask
+from sonata_tasks.platform import PlatformRequest, add_platform
 
 # Sonata steps over the load-test implementations in `workflow_tasks.loadtest`,
 # which are ordinary classes with a `run()` and no dependency on the legacy
@@ -216,3 +218,32 @@ def loadtest_composite(
     `--only` names the load test, which is the thing you can actually re-run.
     """
     return Steps(title=title, steps=(preflight, prepare, run_k6, *steps_after_run))
+
+
+def build_loadtest_workflow(
+    request: PlatformRequest,
+    bindings: RoleBindings,
+    *,
+    load: Steps,
+    workflow_id: str = "loadtest",
+    cwd: Path | None = None,
+    requires: tuple[Resource[Any], ...] = (),
+) -> Workflow:
+    """Deploy the platform, register the functions, then put them under load.
+
+    The platform half is `add_platform`, shared with `validate`: the two differ
+    only in what they do once it is up. The load half arrives already assembled,
+    because building it needs a k6 runner, a Prometheus client and a run
+    directory — none of which this package should know how to obtain.
+
+    The load composite declares every function resource, so the compiler
+    releases them after it rather than before, and a failed load test still
+    deregisters what it registered.
+    """
+    executor = RoleBoundCommandTaskExecutor(bindings)
+    workflow = Workflow(workflow_id=workflow_id)
+    platform = add_platform(
+        workflow, request, executor=executor, cwd=cwd, requires=requires
+    )
+    workflow.add(load, requires=(*requires, *platform.resources, *platform.functions))
+    return workflow

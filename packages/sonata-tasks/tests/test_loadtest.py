@@ -67,7 +67,10 @@ class RecordingExecutor:
 
     def run(self, task: CommandTaskSpec, *, dry_run: bool = False) -> TaskResult:
         self.seen.append(task)
-        return TaskResult(task_id="", status="passed", return_code=0, stdout="")
+        # The platform half resolves the control plane's address before anything
+        # can register against it.
+        stdout = "10.43.0.7" if "get service control-plane" in " ".join(task.argv) else ""
+        return TaskResult(task_id="", status="passed", return_code=0, stdout=stdout)
 
 
 class Sink:
@@ -241,3 +244,95 @@ def test_a_breached_threshold_fails_the_whole_unit() -> None:
 
     with pytest.raises(RuntimeError, match="thresholds failed"):
         workflow.run()
+
+
+def _platform_request(**changes: Any) -> Any:
+    from sonata_tasks.platform import PlatformFunction, PlatformRequest
+
+    base: dict[str, Any] = {
+        "backend": "k8s",
+        "functions": (
+            PlatformFunction(
+                name="word-stats-java",
+                image="localhost:5000/nanofaas/java-word-stats:e2e",
+                payload="{}",
+                build_argv=("./gradlew", ":functions:java:word-stats:bootBuildImage"),
+            ),
+        ),
+    }
+    return PlatformRequest(**{**base, **changes})
+
+
+def _load(executor: RecordingExecutor) -> Any:
+    from sonata_tasks.loadtest import loadtest_composite
+
+    return loadtest_composite(
+        preflight=CommandTask(
+            title="Check k6 is usable", argv=("k6", "version"), executor=executor, role="loadgen"
+        ),
+        prepare=CommandTask(
+            title="Prepare the run directory", argv=("mkdir",), executor=executor, role="loadgen"
+        ),
+        run_k6=RunK6Task(run_k6=FakeRunK6()),
+        steps_after_run=(EvaluateGateTask(),),
+    )
+
+
+def test_loadtest_reuses_the_platform_validate_deploys() -> None:
+    """The two workflows differ only in what they do once the platform is up, so
+    the eight deployment units are the shared half rather than a second copy."""
+    from sonata_engine import Workflow as SonataWorkflow
+    from workflow_tasks.execution.bindings import RoleBindings
+
+    from sonata_tasks.loadtest import build_loadtest_workflow
+
+    executor = RecordingExecutor()
+    workflow: SonataWorkflow = build_loadtest_workflow(
+        _platform_request(),
+        RoleBindings(host=executor, stack=executor, loadgen=executor),
+        load=_load(executor),
+    )
+
+    assert [task.task_id for task in workflow.compile().tasks] == [
+        "001.check-kubectl-is-usable",
+        "002.build-control-plane",
+        "003.build-image-localhost-5000-nanofaas-control-plane-e2e",
+        "004.push-image-localhost-5000-nanofaas-control-plane-e2e",
+        "005.build-image-word-stats-java",
+        "006.push-image-localhost-5000-nanofaas-java-word-stats-e2e",
+        "007.acquire-helm-release-nanofaas",
+        "008.acquire-word-stats-java",
+        "009.run-the-load-test",
+        "010.release-word-stats-java",
+        "011.release-helm-release-nanofaas",
+    ]
+
+
+def test_a_failed_load_test_still_deregisters_what_it_registered() -> None:
+    from workflow_tasks.execution.bindings import RoleBindings
+
+    from sonata_tasks.loadtest import build_loadtest_workflow, loadtest_composite
+
+    executor = RecordingExecutor()
+    breached = loadtest_composite(
+        preflight=CommandTask(
+            title="Check k6 is usable", argv=("k6", "version"), executor=executor, role="loadgen"
+        ),
+        prepare=CommandTask(
+            title="Prepare the run directory", argv=("mkdir",), executor=executor, role="loadgen"
+        ),
+        run_k6=RunK6Task(run_k6=FakeRunK6(result_value=_k6(passed=False))),
+        steps_after_run=(EvaluateGateTask(),),
+    )
+    workflow = build_loadtest_workflow(
+        _platform_request(),
+        RoleBindings(host=executor, stack=executor, loadgen=executor),
+        load=breached,
+    )
+
+    with pytest.raises(RuntimeError, match="thresholds failed"):
+        workflow.run()
+
+    commands = [" ".join(spec.argv) for spec in executor.seen]
+    assert any("-X DELETE" in command for command in commands)
+    assert any("helm uninstall" in command for command in commands)
