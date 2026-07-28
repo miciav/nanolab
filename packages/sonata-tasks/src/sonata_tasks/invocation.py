@@ -23,6 +23,24 @@ def verify_invocation(result: TaskResult) -> None:
     if not isinstance(response, dict):
         raise RuntimeError(f"invocation response was not JSON object: {result.stdout[:200]!r}")
     if response.get("status") != "success":
-        raise RuntimeError(f"invocation did not report success: {response.get('status')!r}")
+        raise RuntimeError(
+            f"invocation did not report success: {response.get('status')!r}"
+            f"{_reason(response.get('error'))}"
+        )
     if "output" not in response:
         raise RuntimeError("invocation carried no output")
+
+
+def _reason(error: object) -> str:
+    """The control plane's own account of the failure, if it gave one.
+
+    `InvocationResponse` carries an `ErrorInfo(code, message)` beside the
+    status. Reporting only the status turned a run that said exactly what went
+    wrong into one that said 'error' — leaving the reader to guess between a
+    function that threw, a pod that was not ready, and a dispatch that never
+    found an endpoint.
+    """
+    if not isinstance(error, dict):
+        return ""
+    parts = [str(part) for part in (error.get("code"), error.get("message")) if part]
+    return f" ({': '.join(parts)})" if parts else ""
