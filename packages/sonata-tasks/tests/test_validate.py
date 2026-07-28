@@ -395,3 +395,35 @@ def test_the_address_travels_between_steps_rather_than_being_read_by_hand() -> N
 
     # Whitespace trimmed, port applied, and the registration used the result.
     assert executor.argv_for("v1/functions")[-1] == "http://10.43.9.9:8080/v1/functions"
+
+
+def test_kubernetes_waits_for_the_pod_before_invoking_it() -> None:
+    """A live run invoked 0.4s after registering and got POOL_ERROR: Connection
+    refused — the Service existed, nothing was listening behind it. Registering
+    asks the control plane to create the Deployment; it answers before the pod
+    does."""
+    executor = ScriptedExecutor()
+
+    build_validate_workflow(_request(backend="k8s"), _bindings(executor)).run()
+
+    commands = [" ".join(spec.argv) for spec in executor.seen]
+    appeared = next(i for i, c in enumerate(commands) if "get deployment/fn-word-stats-java" in c)
+    rolled_out = next(i for i, c in enumerate(commands) if "rollout status" in c)
+    invoked = next(i for i, c in enumerate(commands) if ":invoke" in c)
+
+    assert appeared < rolled_out < invoked
+
+
+def test_the_container_backend_has_no_deployment_to_wait_for() -> None:
+    executor = ScriptedExecutor()
+
+    build_validate_workflow(_request(), _bindings(executor)).run()
+
+    assert not [spec for spec in executor.seen if "rollout" in " ".join(spec.argv)]
+
+
+def test_waiting_does_not_add_units_to_the_plan() -> None:
+    """Readiness shares the register's fate, so it belongs inside the function's
+    acquire rather than beside it: a timeout must still delete what register
+    created."""
+    assert len(build_validate_workflow(_request(backend="k8s"), _bindings(ScriptedExecutor())).compile().tasks) == 12

@@ -25,7 +25,11 @@ from sonata_tasks.http_function import (
     HttpFunctionInvokeTask,
     HttpFunctionRegisterTask,
 )
-from sonata_tasks.kubectl import ClusterIpEndpointTask, KubectlTask
+from sonata_tasks.kubectl import (
+    ClusterIpEndpointTask,
+    KubectlTask,
+    k8s_deployment_readiness,
+)
 from sonata_tasks.manifest import FunctionManifest
 from sonata_tasks.resources import ContainerResourceCheckTask, K8sResourceCheckTask
 
@@ -293,6 +297,21 @@ def build_validate_workflow(
         manifest = function.manifest()
         registered = function_resource(
             name=function.name,
+            # Registering only asks the control plane to create the Deployment;
+            # it answers before the pod does. A live run invoked 0.4s later and
+            # got POOL_ERROR: Connection refused against a Service whose
+            # ClusterIP already existed.
+            readiness=(
+                k8s_deployment_readiness(
+                    deployment=f"fn-{function.name}",
+                    namespace=request.namespace,
+                    executor=executor,
+                    role=request.role,
+                    cwd=cwd,
+                )
+                if request.backend == "k8s"
+                else ()
+            ),
             register=HttpFunctionRegisterTask(
                 manifest,
                 endpoint=endpoint,

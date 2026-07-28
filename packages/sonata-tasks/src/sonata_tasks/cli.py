@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import shlex
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -21,7 +20,7 @@ from sonata_tasks.cli_function import (
 from sonata_tasks.command import CommandTask
 from sonata_tasks.function import function_resource
 from sonata_tasks.gradle import GradleTask
-from sonata_tasks.kubectl import KubectlTask
+from sonata_tasks.kubectl import k8s_deployment_readiness
 from sonata_tasks.manifest import FunctionManifest
 
 
@@ -67,49 +66,6 @@ def _cli_argv(request: CliWorkflowRequest, *arguments: str) -> tuple[str, ...]:
     )
 
 
-def _readiness_tasks(
-    request: CliWorkflowRequest,
-    function: CliFunction,
-    executor: CommandTaskExecutor,
-    cwd: Path | None,
-    timeout_seconds: int,
-) -> tuple[CommandTask, CommandTask]:
-    """Wait for the k8s Deployment to exist, then for its rollout to finish.
-
-    Both run under `request.cli_role`, same as apply/delete: in the provisioned
-    k8s path that role is bound to an executor running inside the VM.
-    """
-    deployment = f"fn-{function.name}"
-    attempts = max(1, timeout_seconds // 2)
-    wait_script = (
-        f"for _ in $(seq 1 {attempts}); do "
-        f"kubectl -n {shlex.quote(request.namespace)} get deployment/{shlex.quote(deployment)} "
-        ">/dev/null 2>&1 && exit 0; sleep 2; done; "
-        f"echo {shlex.quote(f'deployment {deployment} did not appear within {timeout_seconds}s')} >&2; "
-        "exit 1"
-    )
-    return (
-        CommandTask(
-            title=f"Wait for deployment/{deployment}",
-            argv=("bash", "-lc", wait_script),
-            executor=executor,
-            role=request.cli_role,
-            cwd=cwd,
-        ),
-        KubectlTask(
-            "rollout",
-            "status",
-            f"deployment/{deployment}",
-            f"--timeout={timeout_seconds}s",
-            executor=executor,
-            role=request.cli_role,
-            namespace=request.namespace,
-            title=f"Roll out deployment/{deployment}",
-            cwd=cwd,
-        ),
-    )
-
-
 def _function_resource(
     request: CliWorkflowRequest,
     function: CliFunction,
@@ -137,7 +93,14 @@ def _function_resource(
         function.name, cli_argv=prefix, executor=executor, role=request.cli_role, cwd=cwd
     )
     ready_tasks = (
-        _readiness_tasks(request, function, executor, cwd, readiness_timeout_seconds)
+        k8s_deployment_readiness(
+            deployment=f"fn-{function.name}",
+            namespace=request.namespace,
+            executor=executor,
+            role=request.cli_role,
+            timeout_seconds=readiness_timeout_seconds,
+            cwd=cwd,
+        )
         if readiness_timeout_seconds is not None
         else ()
     )

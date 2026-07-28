@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shlex
 from collections.abc import Callable
 from pathlib import Path
 from typing import override
@@ -72,3 +73,52 @@ class ClusterIpEndpointTask(Task[str]):
         if not address:
             raise RuntimeError(f"service {self._service} reported no ClusterIP")
         return TaskOutcome(value=f"http://{address}:{self._port}")
+
+
+def k8s_deployment_readiness(
+    *,
+    deployment: str,
+    namespace: str,
+    executor: CommandTaskExecutor,
+    role: ExecutionRole,
+    timeout_seconds: int = 120,
+    cwd: Path | None = None,
+) -> tuple[CommandTask, CommandTask]:
+    """Wait for a Deployment to exist, then for its rollout to finish.
+
+    Two commands because `kubectl rollout status` fails outright on a Deployment
+    that is not there yet, and registering a function only asks the control plane
+    to create one — it returns before the object exists.
+
+    Without this, an invocation races the pod's startup. A live run failed with
+    `POOL_ERROR: Connection refused` against a Service whose ClusterIP already
+    existed: the Service was there, nothing was listening behind it yet.
+    """
+    attempts = max(1, timeout_seconds // 2)
+    appeared = (
+        f"for _ in $(seq 1 {attempts}); do "
+        f"kubectl -n {shlex.quote(namespace)} get deployment/{shlex.quote(deployment)} "
+        ">/dev/null 2>&1 && exit 0; sleep 2; done; "
+        f"echo {shlex.quote(f'deployment {deployment} did not appear within {timeout_seconds}s')} >&2; "
+        "exit 1"
+    )
+    return (
+        CommandTask(
+            title=f"Wait for deployment/{deployment}",
+            argv=("bash", "-lc", appeared),
+            executor=executor,
+            role=role,
+            cwd=cwd,
+        ),
+        KubectlTask(
+            "rollout",
+            "status",
+            f"deployment/{deployment}",
+            f"--timeout={timeout_seconds}s",
+            executor=executor,
+            role=role,
+            namespace=namespace,
+            title=f"Roll out deployment/{deployment}",
+            cwd=cwd,
+        ),
+    )
