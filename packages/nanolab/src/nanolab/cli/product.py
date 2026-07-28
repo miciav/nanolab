@@ -30,12 +30,14 @@ from nanolab.workspace.paths import default_tool_paths, discover_tool_root
 
 
 def uses_sonata(scenario: ScenarioConfig) -> bool:
-    """Whether this scenario is already executed by Sonata.
+    """Whether this scenario is executed by Sonata. All of them are.
 
-    Shrinks as the migration proceeds: `loadtest`, `offload` and
-    `offload-loadtest` are what is left on the legacy engine.
+    Kept rather than deleted along with its `else` branch: the legacy engine
+    still exists in `workflow_tasks`, and removing it is its own step. Once it
+    goes, so does this.
     """
-    return scenario.workflow in ("cli", "validate", "loadtest", "offload")
+    del scenario
+    return True
 
 
 def _read(path: Path) -> dict[str, object]:

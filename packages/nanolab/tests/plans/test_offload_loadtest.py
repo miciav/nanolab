@@ -7,9 +7,9 @@ import yaml
 
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
+from nanolab.plans import offload_loadtest as offload_loadtest_plan
 from nanolab.plans.offload_loadtest import build_offload_loadtest_plan
 from workflow_tasks.execution.bindings import RoleBindings
-from workflow_tasks.loadtest.tasks import FetchVmResults, RunK6
 from workflow_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 NANOFAAS_ROOT = Path(os.environ["NANOFAAS_ROOT"]).resolve()
@@ -28,7 +28,12 @@ class RecordingExecutor:
 
     def run(self, task: CommandTaskSpec, *, dry_run: bool = False) -> TaskResult:
         self.seen.append(task)
-        return TaskResult(task_id=task.task_id, status="passed", return_code=0)
+        # Each platform resolves its control plane's address before anything can
+        # register against it.
+        stdout = "10.43.0.7" if "get service control-plane" in " ".join(task.argv) else ""
+        return TaskResult(
+            task_id=task.task_id, status="passed", return_code=0, stdout=stdout
+        )
 
 
 def _local_environment() -> EnvironmentConfig:
@@ -50,6 +55,28 @@ def _external_environment() -> EnvironmentConfig:
 
 def _bindings(executor: RecordingExecutor) -> RoleBindings:
     return RoleBindings(host=executor, stack=executor, loadgen=executor, cloud=executor)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_network(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The conservation check scrapes two Prometheus endpoints over urllib. These
+    tests run the workflow rather than inspecting it, so without this each one
+    waits out two connection timeouts — the file took two minutes."""
+    monkeypatch.setattr(
+        offload_loadtest_plan, "_fetch_text", lambda _url, **_kwargs: ""
+    )
+
+
+def _run(workflow, executor: RecordingExecutor) -> list[CommandTaskSpec]:  # pyright: ignore[reportMissingParameterType]
+    """Run it and return every spec that reached the executor.
+
+    The load steps live inside a composite, so nothing about them appears in the
+    compiled unit list — only running reveals what they did."""
+    try:
+        workflow.run()
+    except Exception:
+        pass
+    return executor.seen
 
 
 def test_rejects_non_offload_loadtest_scenario() -> None:
@@ -83,55 +110,67 @@ def test_deployment_then_registration_then_k6_then_evaluation_ordering(tmp_path:
         repo_root=NANOFAAS_ROOT,
     )
 
-    ids = [task.task_id for task in workflow.tasks]
-    last_cloud_deploy = max(i for i, t in enumerate(ids) if t.startswith("cloud."))
-    first_edge_deploy = min(
-        i for i, t in enumerate(ids) if t == "helm.deploy.control-plane"
-    )
-    first_registration = min(
-        i for i, t in enumerate(ids) if t.startswith("offload-loadtest.register.")
-    )
-    run_k6_index = ids.index("offload-loadtest.run_k6")
-    evaluate_index = ids.index("offload-loadtest.evaluate_conservation")
+    ids = [task.task_id for task in workflow.compile().tasks]
 
-    assert last_cloud_deploy < first_edge_deploy
-    assert first_edge_deploy < first_registration
-    assert first_registration < run_k6_index
-    assert run_k6_index < evaluate_index
-    assert ids[-1] == "offload-loadtest.evaluate_conservation"
+    # The cloud is up before the edge, so the edge's chart comes up pointing at
+    # something that answers. k6 and the reconciliation are steps of one unit,
+    # so the plan names the load test rather than its internals.
+    assert ids.index("015.acquire-helm-release-nanofaas-on-the-cloud") < ids.index(
+        "017.acquire-helm-release-nanofaas-on-the-edge"
+    )
+    assert ids.index("017.acquire-helm-release-nanofaas-on-the-edge") < ids.index(
+        "018.acquire-word-stats-java-on-the-edge"
+    )
+    assert ids.index("018.acquire-word-stats-java-on-the-edge") < ids.index(
+        "020.run-the-offload-load-test"
+    )
 
 
 def test_local_provider_runs_k6_on_stack_without_fetch(tmp_path: Path) -> None:
     tool_root = tmp_path / "nanolab"
+    executor = RecordingExecutor()
     workflow = build_offload_loadtest_plan(
         SCENARIO,
         _local_environment(),
-        _bindings(RecordingExecutor()),
+        _bindings(executor),
         run_dir=tmp_path,
         repo_root=NANOFAAS_ROOT,
         tool_root=tool_root,
     )
 
-    run_k6 = next(task for task in workflow.tasks if isinstance(task, RunK6))
-    assert run_k6.runner._role == "stack"  # noqa: SLF001
-    assert run_k6.config.script_path == tool_root / "assets/k6/offload-mixed.js"
-    assert not any(isinstance(task, FetchVmResults) for task in workflow.tasks)
+    commands = _run(workflow, executor)
+    preflight = next(spec for spec in commands if spec.argv == ("k6", "version"))
+    k6 = next(" ".join(spec.argv) for spec in commands if spec.argv[0] == "k6" and "run" in spec.argv)
+
+    assert preflight.execution_role == "stack"
+    assert str(tool_root / "assets/k6/offload-mixed.js") in k6
 
 
 def test_dedicated_loadgen_runs_k6_on_loadgen_and_fetches_results(tmp_path: Path) -> None:
+    fetched: list[tuple[str, Path]] = []
+
+    class Fetcher:
+        def fetch_from(self, remote: str, local: Path) -> None:
+            fetched.append((remote, local))
+
+    executor = RecordingExecutor()
     workflow = build_offload_loadtest_plan(
         SCENARIO,
         _external_environment(),
-        _bindings(RecordingExecutor()),
+        _bindings(executor),
         run_dir=tmp_path,
         repo_root=NANOFAAS_ROOT,
-        fetcher=object(),
+        fetcher=Fetcher(),
     )
 
-    run_k6 = next(task for task in workflow.tasks if isinstance(task, RunK6))
-    assert run_k6.runner._role == "loadgen"  # noqa: SLF001
-    assert run_k6.config.script_path == Path("/home/ubuntu/nanolab-assets/k6/offload-mixed.js")
-    assert any(isinstance(task, FetchVmResults) for task in workflow.tasks)
+    commands = _run(workflow, executor)
+    preflight = next(spec for spec in commands if spec.argv == ("k6", "version"))
+    k6 = next(" ".join(spec.argv) for spec in commands if spec.argv[0] == "k6" and "run" in spec.argv)
+
+    assert preflight.execution_role == "loadgen"
+    assert "/home/ubuntu/nanolab-assets/k6/offload-mixed.js" in k6
+    # A remote load generator writes its summary there, so it has to come back.
+    assert fetched == [("/home/ubuntu/nanofaas-loadtest/k6-summary.json", tmp_path)]
 
 
 def test_dedicated_loadgen_requires_a_fetcher(tmp_path: Path) -> None:
@@ -146,18 +185,22 @@ def test_dedicated_loadgen_requires_a_fetcher(tmp_path: Path) -> None:
 
 
 def test_edge_offload_target_points_at_the_cloud_role(tmp_path: Path) -> None:
+    executor = RecordingExecutor()
     workflow = build_offload_loadtest_plan(
         SCENARIO,
         _external_environment(),
-        _bindings(RecordingExecutor()),
+        _bindings(executor),
         run_dir=tmp_path,
         repo_root=NANOFAAS_ROOT,
         fetcher=object(),
     )
 
-    helm = next(task for task in workflow.tasks if task.task_id == "helm.deploy.control-plane")
-    joined = " ".join(helm.spec.argv)
-    assert "].value=http://cloud.example:30080" in joined
+    installs = [
+        " ".join(spec.argv) for spec in _run(workflow, executor) if "helm upgrade" in " ".join(spec.argv)
+    ]
+    # Only the edge's chart is told where to offload to; the cloud is the target.
+    assert sum("NANOFAAS_OFFLOAD_TARGETURL" in command for command in installs) == 1
+    assert any("].value=http://cloud.example:30080" in command for command in installs)
 
 
 def test_cleanup_covers_both_control_planes(tmp_path: Path) -> None:
@@ -169,13 +212,17 @@ def test_cleanup_covers_both_control_planes(tmp_path: Path) -> None:
         repo_root=NANOFAAS_ROOT,
     )
 
-    cleanup_ids = {task.task_id for task in workflow.cleanup_tasks}
-    assert "functions.delete.word-stats-java" in cleanup_ids
-    assert "functions.delete.json-transform-java" in cleanup_ids
-    assert "helm.uninstall.control-plane" in cleanup_ids
-    assert "cloud.functions.delete.word-stats-java" in cleanup_ids
-    assert "cloud.helm.uninstall.control-plane" in cleanup_ids
-    assert "cloud.functions.delete.json-transform-java" not in cleanup_ids
+    ids = [task.task_id for task in workflow.compile().tasks]
+
+    # Compiled in, in reverse, rather than a list the runner has to remember —
+    # and the control function exists only on the edge.
+    assert ids[-5:] == [
+        "021.release-json-transform-java-on-the-edge",
+        "022.release-word-stats-java-on-the-edge",
+        "023.release-helm-release-nanofaas-on-the-edge",
+        "024.release-word-stats-java-on-the-cloud",
+        "025.release-helm-release-nanofaas-on-the-cloud",
+    ]
 
 
 def test_scenario_file_parses_with_two_ordered_functions() -> None:

@@ -67,10 +67,20 @@ class FakeWorkflow:
 class FakeSonataWorkflow:
     """Sonata-shaped fake: no `.tasks`, only `.compile().tasks`."""
 
-    def __init__(self, *, on_run: Callable[[], None] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        on_run: Callable[[], None] | None = None,
+        error: Exception | None = None,
+        cleanup_tasks: list[Any] | None = None,
+    ) -> None:
         self.keep_infrastructure = False
         self.run_calls = 0
         self._on_run = on_run
+        self._error = error
+        # Sonata compiles the teardown in; kept only because some tests still
+        # hand one in to assert the TUI ignores it.
+        self.cleanup_tasks = cleanup_tasks if cleanup_tasks is not None else []
         self._compiled_tasks = [
             SimpleNamespace(
                 task_id="001.build-nanofaas-cli",
@@ -89,6 +99,8 @@ class FakeSonataWorkflow:
         self.run_calls += 1
         if self._on_run is not None:
             self._on_run()
+        if self._error is not None:
+            raise self._error
 
 
 class RecordingSink:
@@ -404,7 +416,7 @@ def test_plan_uses_cli_helpers_and_renders_without_running(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     environment_path = _install_paths(monkeypatch, tmp_path)
-    workflow = FakeWorkflow()
+    workflow = FakeSonataWorkflow()
     helper_calls: list[tuple[Any, ...]] = []
     _install_workflow_helpers(
         monkeypatch,
@@ -448,7 +460,7 @@ def test_static_plan_acknowledges_only_for_an_input_tty(
     _install_workflow_helpers(
         monkeypatch,
         environment_path=environment_path,
-        workflow=FakeWorkflow(),
+        workflow=FakeSonataWorkflow(),
     )
     frame = object()
     frame_calls: list[dict[str, object]] = []
@@ -510,7 +522,7 @@ def test_run_preview_error_uses_static_view_without_starting_live_dashboard(
     _install_workflow_helpers(
         monkeypatch,
         environment_path=environment_path,
-        workflow=FakeWorkflow(),
+        workflow=FakeSonataWorkflow(),
     )
     monkeypatch.setattr(
         tui_app,
@@ -544,7 +556,7 @@ def test_run_passes_phase_titles_and_exact_summary_to_live_controller(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     environment_path = _install_paths(monkeypatch, tmp_path)
-    workflow = FakeWorkflow()
+    workflow = FakeSonataWorkflow()
     helper_calls: list[tuple[Any, ...]] = []
     _install_workflow_helpers(
         monkeypatch,
@@ -561,7 +573,9 @@ def test_run_passes_phase_titles_and_exact_summary_to_live_controller(
 
     assert len(controller.calls) == 1
     assert controller.calls[0]["title"] == "CLI"
-    assert controller.calls[0]["planned_steps"] == [task.title for task in workflow.tasks]
+    assert controller.calls[0]["planned_steps"] == [
+        compiled.task.title for compiled in workflow.compile().tasks
+    ]
     assert controller.calls[0]["summary_lines"] == [
         "Scenario: cli-container.yaml",
         "Environment: local.yaml",
@@ -571,33 +585,6 @@ def test_run_passes_phase_titles_and_exact_summary_to_live_controller(
     assert workflow.run_calls == 1
     loaded_scenario = next(call[1] for call in helper_calls if call[0] == "workflow")
     assert loaded_scenario.backend == "container"
-
-
-def test_legacy_run_planned_steps_include_cleanup_titles(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    environment_path = _install_paths(monkeypatch, tmp_path)
-    workflow = FakeWorkflow(
-        cleanup_tasks=[SimpleNamespace(task_id="cleanup", title="Delete function")]
-    )
-    _install_workflow_helpers(
-        monkeypatch,
-        environment_path=environment_path,
-        workflow=workflow,
-        scenario_kind="offload-loadtest",
-    )
-    controller = RecordingController()
-
-    NanofaasTUI(
-        choose=ScriptedChooser(iter([str(environment_path), "run", "cleanup"])),
-        controller=controller,
-    )._workflow_menu("validate-container.yaml")
-
-    assert controller.calls[0]["planned_steps"] == [
-        "Prepare environment",
-        "Run checks",
-        "Delete function",
-    ]
 
 
 def test_sonata_run_planned_steps_come_from_compiled_workflow(
@@ -665,7 +652,7 @@ def test_local_run_never_offers_or_enters_provisioning(
     _install_workflow_helpers(
         monkeypatch,
         environment_path=environment_path,
-        workflow=FakeWorkflow(),
+        workflow=FakeSonataWorkflow(),
     )
     provision_calls: list[object] = []
     monkeypatch.setattr(
@@ -918,7 +905,7 @@ def test_non_local_run_enters_existing_provisioning_context(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     environment_path = _install_paths(monkeypatch, tmp_path)
-    workflow = FakeWorkflow()
+    workflow = FakeSonataWorkflow()
     _install_workflow_helpers(
         monkeypatch,
         environment_path=environment_path,
@@ -1039,7 +1026,7 @@ def test_provision_cleanup_error_reaches_real_controller_dashboard_and_acknowled
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     environment_path = _install_paths(monkeypatch, tmp_path)
-    workflow = FakeWorkflow()
+    workflow = FakeSonataWorkflow()
     _install_workflow_helpers(
         monkeypatch,
         environment_path=environment_path,
@@ -1099,8 +1086,8 @@ def test_keep_applies_to_provisioning_and_workflow_cleanup(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     environment_path = _install_paths(monkeypatch, tmp_path)
-    preview = FakeWorkflow()
-    workflow = FakeWorkflow()
+    preview = FakeSonataWorkflow()
+    workflow = FakeSonataWorkflow()
     _install_workflow_helpers(
         monkeypatch,
         environment_path=environment_path,
@@ -1136,7 +1123,7 @@ def test_reselecting_local_environment_resets_remote_provisioning_choice(
     local_path = _install_paths(monkeypatch, tmp_path)
     remote_path = local_path.parent / "remote.yaml"
     remote_path.write_text("provider: multipass\n", encoding="utf-8")
-    workflow = FakeWorkflow()
+    workflow = FakeSonataWorkflow()
     # FakeWorkflow is legacy-shaped; use a legacy scenario so uses_sonata() takes
     # the `.tasks`-based path instead of trying to `.compile()` it.
     monkeypatch.setattr(tui_app, "_scenario", lambda _path: SimpleNamespace(workflow="offload-loadtest"))
@@ -1187,7 +1174,7 @@ def test_workflow_failure_returns_to_the_previous_submenu(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     environment_path = _install_paths(monkeypatch, tmp_path)
-    workflow = FakeWorkflow(error=RuntimeError("workflow failed"))
+    workflow = FakeSonataWorkflow(error=RuntimeError("workflow failed"))
     _install_workflow_helpers(
         monkeypatch,
         environment_path=environment_path,
@@ -1368,7 +1355,7 @@ def test_provider_setup_never_loads_template_as_executable_yaml(
         "provider: azure\n", encoding="utf-8"
     )
     loaded_paths: list[Path] = []
-    workflow = FakeWorkflow()
+    workflow = FakeSonataWorkflow()
     _install_workflow_helpers(
         monkeypatch,
         environment_path=environment_path,
@@ -1443,7 +1430,7 @@ def test_workflow_back_navigation_returns_to_exact_parent(
     _install_workflow_helpers(
         monkeypatch,
         environment_path=environment_path,
-        workflow=FakeWorkflow(),
+        workflow=FakeSonataWorkflow(),
         provider=provider,
     )
     resolved_answers = iter(
@@ -1509,7 +1496,7 @@ def test_ctrl_c_from_every_workflow_depth_propagates_to_exit(
     _install_workflow_helpers(
         monkeypatch,
         environment_path=environment_path,
-        workflow=FakeWorkflow(),
+        workflow=FakeSonataWorkflow(),
         provider=provider,
     )
     resolved_answers = iter([

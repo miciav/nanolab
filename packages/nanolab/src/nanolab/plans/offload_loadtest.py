@@ -3,33 +3,33 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 import json
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, Literal
 import urllib.request
 
 from multipass import MultipassClient
-from workflow_tasks.core.workflow import Workflow
-from workflow_tasks.execution.bindings import RoleBindings
+from sonata_engine import Steps, Workflow
+from sonata_tasks.command import CommandTask
+from sonata_tasks.loadtest import FetchResultsTask, RunK6Task
+from sonata_tasks.offload_loadtest import (
+    EvaluateConservationTask,
+    OffloadLoadtestRequest,
+    build_offload_loadtest_workflow,
+)
+from sonata_tasks.platform import PlatformFunction, PlatformRequest
+from workflow_tasks.components.helm import control_plane_helm_values
+from workflow_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
 from workflow_tasks.loadtest.models import K6Config
 from workflow_tasks.loadtest.offload_conservation import evaluate_conservation
 from workflow_tasks.loadtest.ports import RemoteFileFetcher
 from workflow_tasks.loadtest.tasks import FetchVmResults, RunK6
-from workflow_tasks.tasks.command_task import CommandTask
 from workflow_tasks.tasks.models import CommandTaskSpec
 from workflow_tasks.vm.models import VmRequest
 from workflow_tasks.vm.multipass import resolve_connection_host
-from workflow_tasks.workflows.offload_loadtest import (
-    OffloadLoadtestRequest,
-    cloud_deployment_specs,
-    edge_deployment_specs,
-    offload_cleanup_specs,
-    offload_registration_specs,
-)
 
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
-from nanolab.plans._assembly import workflow_from_specs
-from nanolab.plans.validate import _resolve_function
 from nanolab.workspace.paths import discover_tool_root
+from nanolab.plans.validate import _resolve_function, _set_args, _sonata_function
 
 _ACTUATOR_PORT = 30081
 _CONTROL_PLANE_PORT = 30080
@@ -132,6 +132,55 @@ class EvaluateOffloadConservation:
         return {"passed": report.passed}
 
 
+
+
+def _offload_target(values: dict[str, str], target_url: str) -> dict[str, str]:
+    """Tell the edge's control plane where to offload to.
+
+    The chart takes extra environment as an indexed list, so the entry goes
+    after whatever `control_plane_helm_values` already put there — appending at
+    a fixed index would overwrite one of them.
+    """
+    used = [
+        int(key.split("[", 1)[1].split("]", 1)[0])
+        for key in values
+        if key.startswith("controlPlane.extraEnv[")
+    ]
+    index = max(used) + 1 if used else 0
+    return {
+        **values,
+        f"controlPlane.extraEnv[{index}].name": "NANOFAAS_OFFLOAD_TARGETURL",
+        f"controlPlane.extraEnv[{index}].value": target_url,
+    }
+
+
+def _platform(
+    functions: tuple[PlatformFunction, ...],
+    *,
+    label: str,
+    role: Literal["stack", "cloud"],
+    build: str,
+    offload_target: str | None = None,
+) -> PlatformRequest:
+    request = PlatformRequest(
+        backend="k8s",
+        build=build,  # pyright: ignore[reportArgumentType]
+        functions=functions,
+        additional_modules=("offload", "async-queue", "sync-queue"),
+        execution_role=role,
+        label=label,
+    )
+    values = control_plane_helm_values(
+        namespace=request.namespace,
+        control_plane_image=request.control_plane_image_reference(),
+        expose_node_port=True,
+        metrics_profile="advanced",
+    )
+    if offload_target is not None:
+        values = _offload_target(values, offload_target)
+    return replace(request, helm_values=_set_args(values))
+
+
 def build_offload_loadtest_plan(
     config: ScenarioConfig,
     environment: EnvironmentConfig,
@@ -143,6 +192,13 @@ def build_offload_loadtest_plan(
     fetcher: RemoteFileFetcher | None = None,
     dry_run: bool = False,
 ) -> Workflow:
+    """Compile the offload-loadtest scenario into a Sonata workflow.
+
+    Two clusters, each `add_platform` — the same code validate and loadtest use.
+    The legacy builder had its own `cloud_deployment_specs` and
+    `edge_deployment_specs`, both re-roled copies of validate's, plus a cleanup
+    list the runner had to remember for four registrations across two clusters.
+    """
     if config.workflow != "offload-loadtest":
         raise ValueError("offload load-test plan requires an offload-loadtest scenario")
     if len(config.functions) != 2:
@@ -154,17 +210,19 @@ def build_offload_loadtest_plan(
     # locally once it elapses) — the default 5s is too tight for a cross-VM hop
     # to a function pod that may still be warming up under real load.
     offloadable = replace(
-        _resolve_function(config, offloadable_key, tool_root=tool_root),
+        _sonata_function(_resolve_function(config, offloadable_key, tool_root=tool_root)),
         concurrency=2,
         queue_size=8,
         timeout_ms=15000,
     )
     control = replace(
-        _resolve_function(config, control_key, tool_root=tool_root),
+        _sonata_function(_resolve_function(config, control_key, tool_root=tool_root)),
         concurrency=2,
         queue_size=8,
+        # The control must never be offloaded: if it were, the conservation
+        # check could not tell offloaded traffic from ordinary traffic.
+        offload={"enabled": False},
     )
-    request = OffloadLoadtestRequest(offloadable=offloadable, control=control, build=config.build)
 
     root = repo_root or Path.cwd()
     edge_host = _role_host(environment, "stack", dry_run=dry_run)
@@ -172,12 +230,24 @@ def build_offload_loadtest_plan(
     edge_url = f"http://{edge_host}:{_CONTROL_PLANE_PORT}"
     cloud_url = f"http://{cloud_host}:{_CONTROL_PLANE_PORT}"
 
-    deployment_specs = (
-        cloud_deployment_specs(request)
-        + edge_deployment_specs(request, cloud_url)
-        + offload_registration_specs(request)
+    request = OffloadLoadtestRequest(
+        # The cloud absorbs whatever the edge sheds, so it must not reproduce the
+        # edge's own admission pressure: registering it with the edge's tight
+        # concurrency made the cloud reject most offloaded calls itself.
+        cloud=_platform(
+            (replace(offloadable, concurrency=20, queue_size=100),),
+            label="cloud",
+            role="cloud",
+            build=config.build,
+        ),
+        edge=_platform(
+            (offloadable, control),
+            label="edge",
+            role="stack",
+            build=config.build,
+            offload_target=cloud_url,
+        ),
     )
-    workflow = workflow_from_specs(deployment_specs, bindings, cwd=root)
 
     dedicated_loadgen = "loadgen" in environment.roles
     k6_role: Literal["stack", "loadgen"] = "loadgen" if dedicated_loadgen else "stack"
@@ -194,36 +264,26 @@ def build_offload_loadtest_plan(
         script_path = product_root / "assets/k6/offload-mixed.js"
         summary_path = run_dir / "k6-summary.json"
 
-    preflight_spec = CommandTaskSpec(
-        task_id="offload-loadtest.k6.preflight",
-        summary="Check k6 is installed",
-        argv=("k6", "version"),
-        role=k6_role,
-    )
-    prepare_spec = CommandTaskSpec(
-        task_id="offload-loadtest.k6.prepare",
-        summary="Prepare k6 summary directory",
-        argv=("mkdir", "-p", str(summary_path.parent)),
-        role=k6_role,
-    )
-    executor = cast(Any, bindings.executor_for(k6_role))
-    workflow.tasks.extend(
-        (
-            CommandTask(
-                task_id=preflight_spec.task_id,
-                title=preflight_spec.summary,
-                spec=preflight_spec,
-                executor=executor,
-            ),
-            CommandTask(
-                task_id=prepare_spec.task_id,
-                title=prepare_spec.summary,
-                spec=prepare_spec,
-                executor=executor,
-            ),
-            RunK6(
-                task_id="offload-loadtest.run_k6",
-                title="Run mixed-policy offload k6 script",
+    executor = RoleBoundCommandTaskExecutor(bindings)
+    steps: list[Any] = [
+        CommandTask(
+            title="Check k6 is usable",
+            argv=("k6", "version"),
+            executor=executor,
+            role=k6_role,
+            cwd=root,
+        ),
+        CommandTask(
+            title="Prepare the run directory",
+            argv=("mkdir", "-p", str(summary_path.parent)),
+            executor=executor,
+            role=k6_role,
+            cwd=root,
+        ),
+        RunK6Task(
+            run_k6=RunK6(
+                task_id="",
+                title="Run k6",
                 runner=_RoleRunner(bindings, k6_role),
                 config=K6Config(
                     script_path=script_path,
@@ -240,38 +300,45 @@ def build_offload_loadtest_plan(
                 ),
                 remote_dir=".",
             ),
-        )
-    )
+            title="Run the mixed-policy k6 script",
+        ),
+    ]
 
     local_summary_path = summary_path
     if remote:
         if fetcher is None:
             raise ValueError("fetcher is required to retrieve remote k6 results")
-        workflow.tasks.append(
-            FetchVmResults(
-                task_id="offload-loadtest.fetch_results",
-                title="Fetch k6 results",
-                fetcher=fetcher,
-                remote_source=str(summary_path),
-                local_dest=run_dir,
+        steps.append(
+            FetchResultsTask(
+                fetch=FetchVmResults(
+                    task_id="",
+                    title="Fetch k6 results",
+                    fetcher=fetcher,
+                    remote_source=str(summary_path),
+                    local_dest=run_dir,
+                )
             )
         )
         local_summary_path = run_dir / summary_path.name
 
-    workflow.tasks.append(
-        EvaluateOffloadConservation(
-            task_id="offload-loadtest.evaluate_conservation",
-            title="Evaluate offload conservation",
-            k6_summary_path=local_summary_path,
-            edge_metrics_url=f"http://{edge_host}:{_ACTUATOR_PORT}/actuator/prometheus",
-            cloud_metrics_url=f"http://{cloud_host}:{_ACTUATOR_PORT}/actuator/prometheus",
-            offloadable=offloadable.name,
-            control=control.name,
-            output_path=run_dir / "offload-report.json",
+    steps.append(
+        EvaluateConservationTask(
+            evaluate=EvaluateOffloadConservation(
+                task_id="",
+                title="Evaluate offload conservation",
+                k6_summary_path=local_summary_path,
+                edge_metrics_url=f"http://{edge_host}:{_ACTUATOR_PORT}/actuator/prometheus",
+                cloud_metrics_url=f"http://{cloud_host}:{_ACTUATOR_PORT}/actuator/prometheus",
+                offloadable=offloadable.name,
+                control=control.name,
+                output_path=run_dir / "offload-report.json",
+            )
         )
     )
 
-    workflow.cleanup_tasks = workflow_from_specs(
-        offload_cleanup_specs(request), bindings, cwd=root
-    ).tasks
-    return workflow
+    return build_offload_loadtest_workflow(
+        request,
+        bindings,
+        cwd=root,
+        load=Steps(title="Run the offload load test", steps=tuple(steps)),
+    )
