@@ -113,7 +113,7 @@ _SECTION_TITLES = {
 _SCENARIO_FILES = {
     ("validation", "container"): "validate-container.yaml",
     ("validation", "kubernetes"): "validate-k8s.yaml",
-    ("validation", "offload"): "validate-offload.yaml",
+    ("validation", "offload"): "offload.yaml",
     ("cli", "container"): "cli-container.yaml",
     ("cli", "kubernetes"): "cli-k8s.yaml",
     ("loadtest", "run"): "loadtest.yaml",
