@@ -135,6 +135,9 @@ def test_requires_is_carried_onto_the_resource() -> None:
     assert [dependency.title for dependency in resource.requires] == ["Acquire helm release"]
 
 
-def test_it_is_infrastructure_by_default_so_keep_preserves_it() -> None:
-    assert _resource(ScriptedExecutor()).infrastructure is True
-    assert _resource(ScriptedExecutor(), infrastructure=False).infrastructure is False
+def test_a_function_is_not_infrastructure() -> None:
+    """`--keep` is for the VM and the platform on it, both expensive to rebuild.
+    A registration costs a second to redo and, left behind, makes the next run
+    fail with 409 — which it did, twice, before this default changed."""
+    assert _resource(ScriptedExecutor()).infrastructure is False
+    assert _resource(ScriptedExecutor(), infrastructure=True).infrastructure is True

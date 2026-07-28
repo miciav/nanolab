@@ -463,7 +463,10 @@ def test_provisioned_k8s_slice_keeps_the_vm_helm_and_function() -> None:
     ]
 
 
-def test_provisioned_k8s_keep_preserves_the_vm_helm_and_function() -> None:
+def test_provisioned_k8s_keep_preserves_the_vm_and_helm_but_not_the_function() -> None:
+    """`--keep` is for what is expensive to rebuild — the VM and the chart on it.
+    A registration costs a second, and left behind it makes the next run fail
+    with 409, which it did twice against a real cluster."""
     stack = RecordingExecutor()
     orchestrator = FakeMultipassOrchestrator()
 
@@ -475,7 +478,7 @@ def test_provisioned_k8s_keep_preserves_the_vm_helm_and_function() -> None:
 
     summaries = [spec.summary for spec in stack.seen]
     assert "Uninstall Helm release control-plane" not in summaries
-    assert "Delete word-stats-java" not in summaries
+    assert "Delete word-stats-java" in summaries
     assert orchestrator.torn_down == []
 
 
