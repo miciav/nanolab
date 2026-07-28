@@ -24,6 +24,7 @@ class FunctionManifest:
     max_retries: int = 3
     resources: dict[str, Any] | None = None
     scaling_config: dict[str, Any] | None = None
+    offload: dict[str, Any] | None = None
 
     def body(self) -> dict[str, Any]:
         body: dict[str, Any] = {
@@ -39,6 +40,8 @@ class FunctionManifest:
             body["resources"] = self.resources
         if self.scaling_config is not None:
             body["scalingConfig"] = self.scaling_config
+        if self.offload is not None:
+            body["offload"] = self.offload
         return body
 
     def json(self) -> str:
