@@ -3,9 +3,9 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
-from sonata_engine import Resource, TaskInputs, Workflow
+from sonata_engine import Resource, Steps, Workflow
 from workflow_tasks.execution.bindings import (
     CommandTaskExecutor,
     RoleBindings,
@@ -25,12 +25,15 @@ from sonata_tasks.http_function import (
     HttpFunctionInvokeTask,
     HttpFunctionRegisterTask,
 )
-from sonata_tasks.kubectl import KubectlTask
+from sonata_tasks.kubectl import ClusterIpEndpointTask, KubectlTask
 from sonata_tasks.manifest import FunctionManifest
 from sonata_tasks.resources import ContainerResourceCheckTask, K8sResourceCheckTask
 
 Backend = Literal["container", "k8s"]
 Build = Literal["docker", "buildpack"]
+
+CONTROL_PLANE_SERVICE = "control-plane"
+CONTROL_PLANE_PORT = 8080
 
 _MODULES: dict[Backend, str] = {
     "container": "container-deployment-provider",
@@ -131,14 +134,18 @@ def _helm_release_with_endpoint(
 ) -> Resource[str]:
     """The control plane's Helm release, whose value is where it answers.
 
-    Built here from `HelmInstallTask`/`HelmUninstallTask` rather than through
-    `helm_release_resource`, because this release's value is not its spec: the
-    address only exists once the Service does, so a second acquire step reads it
-    and becomes the resource's value.
+    A `Steps` composite rather than `helm_release_resource`, because this
+    release's value is not its spec: the address exists only once the Service
+    does. Three steps, each doing one thing and handing on what it produced —
+    install, read the ClusterIP, say where that is.
 
-    The lookup runs inside the acquire, so a cluster that installs the chart but
-    never exposes a ClusterIP fails the acquire — and therefore uninstalls —
-    rather than leaving a release behind for a later task to trip over.
+    Still one compiled unit, so ordinals and `Selection` are unaffected; the
+    steps show up in the event stream, where a run that used to sit silent
+    through a chart install now says which half it is in.
+
+    Resolving inside the acquire is what makes a chart that installs but never
+    exposes a ClusterIP fail the acquire — and therefore uninstall — instead of
+    leaving a release behind for a later task to trip over.
     """
     spec = HelmReleaseSpec(
         release=request.helm_release,
@@ -147,30 +154,29 @@ def _helm_release_with_endpoint(
         values=request.helm_values,
         role=request.role,
     )
-    install = HelmInstallTask(spec, executor=executor, cwd=cwd)
     uninstall = HelmUninstallTask(spec, executor=executor, cwd=cwd)
-    lookup = KubectlTask(
-        "get",
-        "service",
-        "control-plane",
-        "-o=jsonpath={.spec.clusterIP}",
-        executor=executor,
-        role=request.role,
-        namespace=request.namespace,
-        title="Resolve control plane address",
-        cwd=cwd,
+    acquire = Steps(
+        title=f"Acquire Helm release {spec.release}",
+        steps=(
+            HelmInstallTask(spec, executor=executor, cwd=cwd),
+            KubectlTask(
+                "get",
+                "service",
+                CONTROL_PLANE_SERVICE,
+                "-o=jsonpath={.spec.clusterIP}",
+                executor=executor,
+                role=request.role,
+                namespace=request.namespace,
+                title=f"Read the {CONTROL_PLANE_SERVICE} address",
+                cwd=cwd,
+            ),
+            ClusterIpEndpointTask(service=CONTROL_PLANE_SERVICE, port=CONTROL_PLANE_PORT),
+        ),
     )
-
-    def acquire(inputs: TaskInputs) -> str:
-        _ = install.run(inputs)
-        address = lookup.run(inputs).value
-        if address is None or not address.stdout.strip():
-            raise RuntimeError("control plane Service reported no ClusterIP")
-        return f"http://{address.stdout.strip()}:8080"
 
     return compensated_resource(
         title=f"Acquire Helm release {spec.release}",
-        acquire=acquire,
+        acquire=lambda inputs: cast(str, acquire.run(inputs).value),
         compensate=uninstall.run,
         requires=requires,
     )
