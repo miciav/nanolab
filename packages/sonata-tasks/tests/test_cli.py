@@ -299,7 +299,10 @@ def test_delete_keeps_real_cli_failures_visible() -> None:
     assert delete_spec.expected_exit_codes == frozenset({0})
 
 
-def test_keep_infrastructure_skips_the_delete() -> None:
+def test_keep_infrastructure_still_deletes_the_function() -> None:
+    """`--keep` is for the VM and the platform on it, both expensive to rebuild.
+    A registration costs a second to redo and, left behind, makes the next run
+    fail with 409 — which it did, twice, before this changed."""
     executor = ScriptedExecutor()
     workflow = build_cli_workflow(
         CliWorkflowRequest(functions=(FUNCTION,)), _bindings(executor)
@@ -308,12 +311,12 @@ def test_keep_infrastructure_skips_the_delete() -> None:
 
     workflow.run()
 
-    assert "Delete word-stats-java" not in executor.titles
     assert executor.titles == [
         "Build nanofaas-cli",
         "Apply word-stats-java",
         "List functions",
         "Invoke word-stats-java",
+        "Delete word-stats-java",
     ]
 
 

@@ -15,13 +15,21 @@ def function_resource(
     delete: CommandTask,
     readiness: tuple[CommandTask, ...] = (),
     requires: tuple[Resource[Any], ...] = (),
-    infrastructure: bool = True,
+    infrastructure: bool = False,
 ) -> Resource[None]:
     """A registered nanoFaaS function as an acquire/release pair.
 
     The commands are injected because every workflow registers differently — the
     CLI applies a manifest through its own binary, others POST with curl — while
     the lifecycle around them is `compensated_resource`, shared with Helm.
+
+    `infrastructure` is False for the same reason `managed_process_resource`
+    keeps it False: `keep_infrastructure` skips the release of infrastructure,
+    and a function still registered after the run is not something `--keep` was
+    asked for — it is what makes the next run fail. It did, twice: a `--keep`
+    run left `word-stats-java` registered, and the following one died on
+    `register ... 409`. `--keep` means keep the VM and the platform on it, both
+    expensive to rebuild; re-registering a function costs a second.
 
     `readiness` runs after a successful register, for backends where the function
     answers only once its container or pod is up; it shares the register's failure
