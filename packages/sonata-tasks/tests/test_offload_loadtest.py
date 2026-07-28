@@ -191,3 +191,16 @@ def test_two_platforms_on_one_role_is_refused() -> None:
 
     with pytest.raises(ValueError, match="different roles"):
         _ = OffloadLoadtestRequest(cloud=same, edge=same)
+
+
+def test_every_step_of_both_platforms_says_which_one_it_is() -> None:
+    """The image build and push were the two that did not, so a plan showed
+    "Build image …control-plane:e2e" twice with nothing to tell them apart —
+    while the Gradle build right above it did say which side."""
+    ids = [task.task_id for task in _workflow(ScriptedExecutor()).compile().tasks]
+    platform_ids = [unit for unit in ids if "run-the-offload-load-test" not in unit]
+
+    assert all(
+        unit.endswith("-on-the-cloud") or unit.endswith("-on-the-edge")
+        for unit in platform_ids
+    ), [unit for unit in platform_ids if not unit.endswith(("-on-the-cloud", "-on-the-edge"))]

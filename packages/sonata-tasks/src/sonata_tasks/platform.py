@@ -254,16 +254,23 @@ def add_platform(
                     context="platform/control-plane",
                     executor=executor,
                     role=request.role,
+                    title=request.titled(f"Build image {image}"),
                     cwd=cwd,
                 )
             )
             workflow.add(
-                DockerPushTask(image=image, executor=executor, role=request.role, cwd=cwd)
+                DockerPushTask(
+                    image=image,
+                    executor=executor,
+                    role=request.role,
+                    title=request.titled(f"Push image {image}"),
+                    cwd=cwd,
+                )
             )
         for function in request.functions:
             workflow.add(
                 CommandTask(
-                    title=f"Build image {function.name}",
+                    title=request.titled(f"Build image {function.name}"),
                     argv=function.build_argv,
                     executor=executor,
                     role=request.role,
@@ -273,7 +280,11 @@ def add_platform(
             if request.backend == "k8s":
                 workflow.add(
                     DockerPushTask(
-                        image=function.image, executor=executor, role=request.role, cwd=cwd
+                        image=function.image,
+                        executor=executor,
+                        role=request.role,
+                        title=request.titled(f"Push image {function.image}"),
+                        cwd=cwd,
                     )
                 )
 

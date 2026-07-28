@@ -55,6 +55,7 @@ class DockerBuildTask(DockerTask):
         context: str,
         executor: CommandTaskExecutor,
         role: ExecutionRole,
+        title: str | None = None,
         cwd: Path | None = None,
     ) -> None:
         super().__init__(
@@ -66,7 +67,7 @@ class DockerBuildTask(DockerTask):
             context,
             executor=executor,
             role=role,
-            title=f"Build image {image}",
+            title=title or f"Build image {image}",
             cwd=cwd,
         )
 
@@ -80,6 +81,7 @@ class DockerPushTask(DockerTask):
         image: str,
         executor: CommandTaskExecutor,
         role: ExecutionRole,
+        title: str | None = None,
         cwd: Path | None = None,
     ) -> None:
         super().__init__(
@@ -87,7 +89,7 @@ class DockerPushTask(DockerTask):
             image,
             executor=executor,
             role=role,
-            title=f"Push image {image}",
+            title=title or f"Push image {image}",
             cwd=cwd,
         )
 
