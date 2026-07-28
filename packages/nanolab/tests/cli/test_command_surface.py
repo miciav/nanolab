@@ -117,7 +117,7 @@ def test_run_renders_normalized_task_progress(monkeypatch) -> None:
         lambda *args, **kwargs: Workflow(tasks=[_Task()]),
     )
 
-    result = CliRunner().invoke(app, ["run", "scenarios-v2/validate-offload.yaml"])
+    result = CliRunner().invoke(app, ["run", "scenarios-v2/offload-loadtest.yaml"])
 
     assert result.exit_code == 0
     assert "[test.task] running" in result.stdout
@@ -463,11 +463,15 @@ def test_task_slice_keeps_only_cleanup_for_selected_acquisitions() -> None:
     """Still the legacy slicer, now exercised through a workflow that still uses
     it: `validate` moved to Sonata, whose Selection filters before compiling."""
     workflow = _workflow(
-        ScenarioConfig(workflow="offload", functions=["word-stats-java"]),
+        ScenarioConfig(
+            workflow="offload-loadtest",
+            backend="k8s",
+            functions=["word-stats-java", "json-transform-java"],
+        ),
         EnvironmentConfig(provider="local"),
     )
 
-    _slice(workflow, only="offload.build.control-plane", start=None, until=None)
+    _slice(workflow, only="stack.preflight", start=None, until=None)
 
     assert workflow.cleanup_tasks == []
 

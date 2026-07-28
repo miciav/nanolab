@@ -5,7 +5,6 @@ import pytest
 
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.plans.offload import build_offload_plan
-from workflow_tasks.core.resource_task import ResourceTask
 from workflow_tasks.execution.bindings import RoleBindings
 from workflow_tasks.tasks.models import TaskResult
 
@@ -32,35 +31,45 @@ def test_offload_scenario_rejects_a_backend() -> None:
         ScenarioConfig(workflow="offload", backend="container", functions=["word-stats-java"])
 
 
-def test_plan_starts_cloud_then_edge_as_managed_resources() -> None:
+def _ids() -> list[str]:
     workflow = build_offload_plan(_scenario(), _bindings(), repo_root=NANOFAAS_ROOT)
-
-    resources = [task for task in workflow.tasks if isinstance(task, ResourceTask)]
-    assert [task.task_id for task in resources] == ["offload.start.cloud", "offload.start.edge"]
-    ids = [task.task_id for task in workflow.tasks]
-    assert ids.index("offload.start.cloud") < ids.index("offload.start.edge")
-    # both processes start before any registration or check
-    first_register = next(i for i, name in enumerate(ids) if name.startswith("offload.register"))
-    assert ids.index("offload.start.edge") < first_register
+    return [task.task_id for task in workflow.compile().tasks]
 
 
-def test_plan_ends_with_the_no_fallback_negative_check_and_cleans_up() -> None:
-    workflow = build_offload_plan(_scenario(), _bindings(), repo_root=NANOFAAS_ROOT)
+def test_plan_starts_both_control_planes_before_anything_registers() -> None:
+    ids = _ids()
 
-    ids = [task.task_id for task in workflow.tasks]
-    assert ids[-1] == "offload.verify.remote-missing.word-stats-java"
-    cleanup_ids = {task.task_id for task in workflow.cleanup_tasks}
-    assert cleanup_ids == {
-        "offload.delete.edge.word-stats-java",
-        "offload.delete.cloud.word-stats-java",
-    }
+    assert ids.index("003.acquire-cloud-control-plane") < ids.index(
+        "004.acquire-edge-control-plane"
+    )
+    first_register = next(
+        index for index, name in enumerate(ids) if "-on-the-" in name and "acquire" in name
+    )
+    assert ids.index("004.acquire-edge-control-plane") < first_register
+
+
+def test_plan_ends_with_the_negative_check_then_releases_everything() -> None:
+    """The teardown is compiled in, not a cleanup list the caller has to run,
+    and the negative check comes before it: deleting the remote copy has to
+    happen while the edge still knows the function, or it answers 404."""
+    ids = _ids()
+
+    assert ids[-4:] == [
+        "010.release-word-stats-java-on-the-edge",
+        "011.release-word-stats-java-on-the-cloud",
+        "012.release-edge-control-plane",
+        "013.release-cloud-control-plane",
+    ]
+    assert ids.index("009.verify-word-stats-java-has-no-local-fallback") < ids.index(
+        "010.release-word-stats-java-on-the-edge"
+    )
 
 
 def test_offload_scenario_file_parses() -> None:
     import yaml
 
     payload = yaml.safe_load(
-        (NANOLAB_ROOT / "scenarios-v2/validate-offload.yaml").read_text()
+        (NANOLAB_ROOT / "scenarios-v2/offload.yaml").read_text()
     )
     config = ScenarioConfig.model_validate(payload)
     assert config.workflow == "offload"

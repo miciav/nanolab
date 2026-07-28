@@ -11,6 +11,7 @@ from sonata_tasks.function import function_resource
 from sonata_tasks.gradle import GradleTask
 from sonata_tasks.http_function import (
     HttpFunctionDeleteTask,
+    HttpStatusCheckTask,
     HttpFunctionInvokeTask,
     HttpFunctionRegisterTask,
 )
@@ -30,6 +31,12 @@ from sonata_tasks.loadtest import (
 )
 from sonata_tasks.compensation import compensated_resource
 from sonata_tasks.manifest import FunctionManifest
+from sonata_tasks.metrics import PrometheusScrapeCheckTask
+from sonata_tasks.offload import (
+    OffloadFunction,
+    OffloadWorkflowRequest,
+    build_offload_workflow,
+)
 from sonata_tasks.platform import Platform, PlatformFunction, PlatformRequest, add_platform
 from sonata_tasks.docker import (
     DockerBuildTask,
@@ -99,5 +106,10 @@ __all__ = [
     "PlatformFunction",
     "PlatformRequest",
     "add_platform",
+    "HttpStatusCheckTask",
+    "PrometheusScrapeCheckTask",
+    "OffloadFunction",
+    "OffloadWorkflowRequest",
+    "build_offload_workflow",
     "vm_resource",
 ]
