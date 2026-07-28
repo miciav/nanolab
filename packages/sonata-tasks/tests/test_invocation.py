@@ -133,3 +133,32 @@ def test_both_transports_reject_a_200_that_carries_an_error(transport: str) -> N
 
     with pytest.raises(RuntimeError, match="did not report success"):
         task.run(TaskInputs.empty())
+
+
+def test_it_repeats_the_reason_the_control_plane_gave() -> None:
+    """A live run once reported only "error", leaving the reader to guess between
+    a function that threw, a pod that was not ready, and a dispatch that found no
+    endpoint. The answer was in the response all along."""
+    with pytest.raises(RuntimeError, match=r"DISPATCH_FAILED: no ready endpoint"):
+        verify_invocation(
+            _result(
+                '{"status":"error","error":{"code":"DISPATCH_FAILED",'
+                '"message":"no ready endpoint"}}'
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    "error",
+    ['"boom"', "null", "{}", '{"code":null,"message":null}'],
+)
+def test_a_response_without_a_usable_reason_still_reports_the_status(error: str) -> None:
+    with pytest.raises(RuntimeError, match=r"did not report success: 'error'$"):
+        verify_invocation(_result('{"status":"error","error":' + error + "}"))
+
+
+def test_it_reports_whichever_half_of_the_reason_exists() -> None:
+    with pytest.raises(RuntimeError, match=r"\(no ready endpoint\)"):
+        verify_invocation(
+            _result('{"status":"error","error":{"message":"no ready endpoint"}}')
+        )
