@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+import pytest
 from sonata_engine import TaskInputs
+from sonata_engine.errors import NoUpstreamValueError
 from workflow_tasks.tasks.models import CommandTaskSpec, TaskResult
 
-from sonata_tasks.kubectl import KubectlTask
+from sonata_tasks.kubectl import ClusterIpEndpointTask, KubectlTask
 
 
 @dataclass
@@ -51,3 +53,47 @@ def test_the_title_defaults_to_the_command_and_can_be_overridden() -> None:
         ).title
         == "List pods"
     )
+
+
+def _with_upstream(value: object) -> TaskInputs:
+    from dataclasses import replace
+
+    return replace(TaskInputs.empty(), _upstream=value)
+
+
+def _result(stdout: str) -> TaskResult:
+    return TaskResult(task_id="", status="passed", return_code=0, stdout=stdout)
+
+
+def test_it_builds_the_url_from_the_address_the_previous_step_read() -> None:
+    task = ClusterIpEndpointTask(service="control-plane", port=8080)
+
+    outcome = task.run(_with_upstream(_result(" 10.43.0.7 \n")))
+
+    assert outcome.value == "http://10.43.0.7:8080"
+    assert task.title == "Resolve where control-plane answers"
+
+
+def test_a_service_with_no_address_fails_rather_than_yielding_a_broken_url() -> None:
+    """`http://:8080` would be accepted by curl and fail much later, somewhere
+    that says nothing about the Service."""
+    task = ClusterIpEndpointTask(service="control-plane", port=8080)
+
+    with pytest.raises(RuntimeError, match="no ClusterIP"):
+        _ = task.run(_with_upstream(_result("   ")))
+
+
+def test_it_refuses_an_upstream_that_is_not_a_command_result() -> None:
+    task = ClusterIpEndpointTask(service="control-plane", port=8080)
+
+    with pytest.raises(RuntimeError, match="expected the previous step's command result"):
+        _ = task.run(_with_upstream("10.43.0.7"))
+
+
+def test_it_says_so_when_nothing_ran_before_it() -> None:
+    """Outside a composite there is no upstream at all — a different mistake
+    from an empty address, and the engine names it."""
+    task = ClusterIpEndpointTask(service="control-plane", port=8080)
+
+    with pytest.raises(NoUpstreamValueError):
+        _ = task.run(TaskInputs.empty())

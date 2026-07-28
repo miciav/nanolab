@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
+from typing import Any
 
 import pytest
 from sonata_engine import Resource, TaskInputs, Workflow
+from sonata_engine.workflow.context import bind_workflow_sink
 from workflow_tasks.execution.bindings import RoleBindings
 from workflow_tasks.tasks.models import CommandTaskSpec, TaskResult
 
@@ -336,3 +339,59 @@ def test_inputs_are_only_readable_where_declared() -> None:
 
     with pytest.raises(Exception):
         _ = TaskInputs.empty().resource(resource)
+
+
+def _started(workflow: Workflow, executor: ScriptedExecutor) -> list[tuple[str, str | None]]:
+    """(task_id, parent_task_id) for every task.started of a real run."""
+
+    class Sink:
+        def __init__(self) -> None:
+            self.events: list[Any] = []
+
+        def emit(self, event: Any) -> None:
+            self.events.append(event)
+
+        def status(self, label: str) -> AbstractContextManager[None]:
+            del label
+            return nullcontext()
+
+    sink = Sink()
+    with bind_workflow_sink(sink):
+        workflow.run()
+    return [
+        (event.task_id, event.parent_task_id)
+        for event in sink.events
+        if event.kind == "task.started"
+    ]
+
+
+def test_the_helm_acquire_reports_its_three_steps_without_becoming_three_units() -> None:
+    """The point of the composite: the plan keeps one line for the release, and a
+    run stops being silent through a chart install that takes minutes."""
+    executor = ScriptedExecutor()
+    workflow = build_validate_workflow(_request(backend="k8s"), _bindings(executor))
+
+    started = _started(workflow, executor)
+    unit = "007.acquire-helm-release-nanofaas"
+
+    assert len(workflow.compile().tasks) == 12
+    assert [task_id for task_id, parent in started if parent == unit] == [
+        f"{unit}/install-helm-release-nanofaas",
+        f"{unit}/read-the-control-plane-address",
+        f"{unit}/resolve-where-control-plane-answers",
+    ]
+
+
+def test_the_address_travels_between_steps_rather_than_being_read_by_hand() -> None:
+    executor = ScriptedExecutor(
+        responses={
+            "get service control-plane": TaskResult(
+                task_id="", status="passed", return_code=0, stdout=" 10.43.9.9 \n"
+            )
+        }
+    )
+
+    build_validate_workflow(_request(backend="k8s"), _bindings(executor)).run()
+
+    # Whitespace trimmed, port applied, and the registration used the result.
+    assert executor.argv_for("v1/functions")[-1] == "http://10.43.9.9:8080/v1/functions"

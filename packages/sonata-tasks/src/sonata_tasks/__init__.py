@@ -15,7 +15,7 @@ from sonata_tasks.http_function import (
     HttpFunctionRegisterTask,
 )
 from sonata_tasks.invocation import verify_invocation
-from sonata_tasks.kubectl import KubectlTask
+from sonata_tasks.kubectl import ClusterIpEndpointTask, KubectlTask
 from sonata_tasks.compensation import compensated_resource
 from sonata_tasks.manifest import FunctionManifest
 from sonata_tasks.docker import (
@@ -45,6 +45,7 @@ __all__ = [
     "CliFunctionApplyTask",
     "CliFunctionDeleteTask",
     "CliFunctionInvokeTask",
+    "ClusterIpEndpointTask",
     "CommandTask",
     "ContainerResourceCheckTask",
     "FunctionManifest",

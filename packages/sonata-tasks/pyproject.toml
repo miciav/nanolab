@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "nanoFaaS workflow tasks built on the Sonata engine."
 requires-python = ">=3.12"
 dependencies = [
-    "sonata-engine @ git+https://github.com/miciav/sonata.git@527d042a83ed55b6cc6334885121241146204fcf",
+    "sonata-engine @ git+https://github.com/miciav/sonata.git@c2ae952c6d201f2e1b997df3fd301480e170185f",
     "workflow-tasks",
 ]
 
