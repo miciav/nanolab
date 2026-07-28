@@ -1073,8 +1073,8 @@ wheels = [
 
 [[package]]
 name = "sonata-engine"
-version = "0.2.0"
-source = { git = "https://github.com/miciav/sonata.git?rev=527d042a83ed55b6cc6334885121241146204fcf#527d042a83ed55b6cc6334885121241146204fcf" }
+version = "0.4.0"
+source = { git = "https://github.com/miciav/sonata.git?rev=c2ae952c6d201f2e1b997df3fd301480e170185f#c2ae952c6d201f2e1b997df3fd301480e170185f" }
 
 [[package]]
 name = "sonata-tasks"
@@ -1097,7 +1097,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "sonata-engine", git = "https://github.com/miciav/sonata.git?rev=527d042a83ed55b6cc6334885121241146204fcf" },
+    { name = "sonata-engine", git = "https://github.com/miciav/sonata.git?rev=c2ae952c6d201f2e1b997df3fd301480e170185f" },
     { name = "workflow-tasks", editable = "packages/workflow-tasks" },
 ]
 
