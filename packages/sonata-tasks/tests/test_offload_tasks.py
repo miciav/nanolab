@@ -3,12 +3,18 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 import pytest
-from sonata_engine import TaskInputs
+from sonata_engine import Resource, TaskInputs, Workflow
+from workflow_tasks.execution.bindings import RoleBindings
 from workflow_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 from sonata_tasks.http_function import HttpFunctionInvokeTask, HttpStatusCheckTask
 from sonata_tasks.manifest import FunctionManifest
 from sonata_tasks.metrics import PrometheusScrapeCheckTask
+from sonata_tasks.offload import (
+    OffloadFunction,
+    OffloadWorkflowRequest,
+    build_offload_workflow,
+)
 
 OFFLOADED = (
     "HTTP/1.1 200 OK\r\n"
@@ -187,3 +193,157 @@ def test_a_working_offload_fails_the_no_fallback_check() -> None:
 
     with pytest.raises(RuntimeError, match="answered 200, expected 502"):
         task.run(TaskInputs.empty())
+
+
+FUNCTION = OffloadFunction(
+    name="word-stats-java",
+    image="localhost:5000/nanofaas/java-word-stats:e2e",
+    payload='{"text":"a b"}',
+    build_argv=("./gradlew", ":functions:java:word-stats:bootBuildImage"),
+)
+
+
+def _request(**changes: object) -> OffloadWorkflowRequest:
+    base: dict[str, object] = {
+        "functions": (FUNCTION,),
+        "cloud_endpoint": "http://127.0.0.1:19090",
+        "edge_endpoint": "http://127.0.0.1:18080",
+        "edge_management": "http://127.0.0.1:18081",
+    }
+    return OffloadWorkflowRequest(**{**base, **changes})  # pyright: ignore[reportArgumentType]
+
+
+def _plane(name: str):  # pyright: ignore[reportMissingParameterType]
+    def factory() -> Resource[None]:
+        return Resource(
+            title=f"Acquire {name} control plane",
+            acquire=lambda _inputs: None,
+            release=lambda _inputs, _value: None,
+        )
+
+    return factory
+
+
+@dataclass
+class WorkflowExecutor(ScriptedExecutor):
+    """Answers each command of a whole offload run plausibly, so a test that
+    exercises the assembly is not stopped by the assertions inside it."""
+
+    def run(self, task: CommandTaskSpec, *, dry_run: bool = False) -> TaskResult:
+        self.seen.append(task)
+        rendered = " ".join(task.argv)
+        if ":invoke" in rendered and "http_code" in rendered:
+            stdout = "502"
+        elif ":invoke" in rendered:
+            stdout = OFFLOADED
+        elif "actuator/prometheus" in rendered:
+            stdout = 'nanofaas_offload_total{function="word-stats-java",trigger="eager"} 1.0\n'
+        else:
+            stdout = ""
+        return TaskResult(task_id="", status="passed", return_code=0, stdout=stdout)
+
+
+def _workflow(executor: ScriptedExecutor) -> Workflow:
+    return build_offload_workflow(
+        _request(),
+        RoleBindings(host=executor, stack=executor),
+        cloud=_plane("cloud"),
+        edge=_plane("edge"),
+    )
+
+
+def test_it_compiles_two_control_planes_two_registrations_and_three_checks() -> None:
+    ids = [task.task_id for task in _workflow(ScriptedExecutor()).compile().tasks]
+
+    assert ids == [
+        "001.build-control-plane",
+        "002.build-image-word-stats-java",
+        "003.acquire-cloud-control-plane",
+        "004.acquire-edge-control-plane",
+        "005.acquire-word-stats-java-on-the-cloud",
+        "006.acquire-word-stats-java-on-the-edge",
+        "007.invoke-word-stats-java",
+        "008.verify-word-stats-java-was-offloaded-eagerly",
+        "009.verify-word-stats-java-has-no-local-fallback",
+        "010.release-word-stats-java-on-the-edge",
+        "011.release-word-stats-java-on-the-cloud",
+        "012.release-edge-control-plane",
+        "013.release-cloud-control-plane",
+    ]
+
+
+def test_the_no_fallback_check_runs_before_the_registrations_are_released() -> None:
+    """It declares the probe's registrations so the compiler keeps them alive
+    until it has run. Without that the releases land first and the edge answers
+    404 — a different failure that would look like the same one."""
+    ids = [task.task_id for task in _workflow(ScriptedExecutor()).compile().tasks]
+
+    assert ids.index("009.verify-word-stats-java-has-no-local-fallback") < ids.index(
+        "010.release-word-stats-java-on-the-edge"
+    )
+
+
+def test_the_two_sides_register_the_same_function_differently() -> None:
+    """The cloud runs it; the edge holds no implementation and must proxy."""
+    cloud = FUNCTION.cloud_manifest().body()
+    edge = FUNCTION.edge_manifest().body()
+
+    assert cloud["executionMode"] == "DEPLOYMENT"
+    assert "offload" not in cloud
+    assert edge["executionMode"] == "LOCAL"
+    assert edge["offload"] == {"mode": "always"}
+    assert cloud["name"] == edge["name"] == "word-stats-java"
+
+
+def test_the_build_selects_the_modules_the_hop_needs() -> None:
+    executor = WorkflowExecutor()
+    _workflow(executor).run()
+
+    build = next(
+        " ".join(spec.argv) for spec in executor.seen if "gradlew" in " ".join(spec.argv)
+    )
+    assert "-PcontrolPlaneModules=offload,container-deployment-provider" in build
+
+
+def test_it_refuses_a_request_with_no_functions() -> None:
+    with pytest.raises(ValueError, match="at least one function"):
+        _ = _request(functions=())
+
+
+def test_a_failed_check_still_deregisters_both_sides_and_stops_both_planes() -> None:
+    """The legacy workflow kept the deletes in a cleanup list the caller had to
+    remember to run; anything that crashed before that call leaked both
+    registrations."""
+    stopped: list[str] = []
+
+    def plane(name: str):  # pyright: ignore[reportMissingParameterType]
+        return lambda: Resource(
+            title=f"Acquire {name} control plane",
+            acquire=lambda _inputs: None,
+            release=lambda _inputs, _value: stopped.append(name),
+        )
+
+    class NeverOffloads(WorkflowExecutor):
+        def run(self, task: CommandTaskSpec, *, dry_run: bool = False) -> TaskResult:
+            result = super().run(task, dry_run=dry_run)
+            if ":invoke" in " ".join(task.argv) and "http_code" not in " ".join(task.argv):
+                return TaskResult(task_id="", status="passed", return_code=0, stdout=LOCAL)
+            return result
+
+    executor = NeverOffloads()
+    workflow = build_offload_workflow(
+        _request(),
+        RoleBindings(host=executor, stack=executor),
+        cloud=plane("cloud"),
+        edge=plane("edge"),
+    )
+
+    with pytest.raises(RuntimeError, match="no X-NanoFaaS-Offloaded header"):
+        workflow.run()
+
+    deletes = [" ".join(spec.argv) for spec in executor.seen if "-X DELETE" in " ".join(spec.argv)]
+    assert len(deletes) == 2
+    assert any("19090" in command for command in deletes)  # cloud
+    assert any("18080" in command for command in deletes)  # edge
+    # Releases run in reverse, so the edge stops before the cloud it proxied to.
+    assert stopped == ["edge", "cloud"]

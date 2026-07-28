@@ -32,6 +32,11 @@ from sonata_tasks.loadtest import (
 from sonata_tasks.compensation import compensated_resource
 from sonata_tasks.manifest import FunctionManifest
 from sonata_tasks.metrics import PrometheusScrapeCheckTask
+from sonata_tasks.offload import (
+    OffloadFunction,
+    OffloadWorkflowRequest,
+    build_offload_workflow,
+)
 from sonata_tasks.platform import Platform, PlatformFunction, PlatformRequest, add_platform
 from sonata_tasks.docker import (
     DockerBuildTask,
@@ -103,5 +108,8 @@ __all__ = [
     "add_platform",
     "HttpStatusCheckTask",
     "PrometheusScrapeCheckTask",
+    "OffloadFunction",
+    "OffloadWorkflowRequest",
+    "build_offload_workflow",
     "vm_resource",
 ]
