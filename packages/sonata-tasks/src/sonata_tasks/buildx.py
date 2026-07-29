@@ -30,18 +30,22 @@ def buildx_builder_resource(
         Otherwise → ``docker buildx rm --force <name>``.
     """
 
-    def _run(inputs: TaskInputs, *args: str) -> TaskResult:
+    def _run(
+        inputs: TaskInputs, *args: str,
+        expected_exit_codes: frozenset[int] = frozenset({0}),
+    ) -> TaskResult:
         result = CommandTask(
             title=f"docker buildx {' '.join(args)}",
             argv=("docker", "buildx", *args),
             executor=executor,
             role=role,
+            expected_exit_codes=expected_exit_codes,
         ).run(inputs).value
         assert result is not None
         return result
 
     def acquire(inputs: TaskInputs) -> str:
-        inspected = _run(inputs, "inspect", name)
+        inspected = _run(inputs, "inspect", name, expected_exit_codes=frozenset({0, 1}))
         if inspected.return_code == 0:
             return "existing"
 
