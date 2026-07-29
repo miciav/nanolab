@@ -8,7 +8,6 @@ from __future__ import annotations
 __version__ = "0.1.0"
 
 from workflow_tasks.core.task import Task
-from workflow_tasks.core.resource_task import ResourceTask
 from workflow_tasks.core.workflow import Workflow
 from workflow_tasks.tasks.adapters import RemoteCommandOperationLike, operation_to_task_spec
 from workflow_tasks.tasks.command_task import CommandTask, command_task_from_operation
@@ -58,7 +57,6 @@ from workflow_tasks.loadtest import (
     CapturePrometheusSnapshot,
     FetchVmResults,
     HttpPrometheusClient,
-    InstallK6,
     K6Config,
     K6RunResult,
     K6Stage,
@@ -80,7 +78,7 @@ from workflow_tasks.infra.ansible import RunPlaybook, install_k6_task
 __all__ = [
     "__version__",
     # core
-    "ResourceTask", "Task", "Workflow",
+    "Task", "Workflow",
     # tasks
     "CommandTaskSpec", "ExecutionTarget", "TaskResult", "TaskStatus",
     "HostCommandTaskExecutor", "VmCommandTaskExecutor",
@@ -107,7 +105,7 @@ __all__ = [
     # loadtest
     "K6Config", "K6Stage", "K6RunResult", "TimeWindow", "PrometheusQuery",
     "RemoteFileFetcher", "PrometheusClient",
-    "InstallK6", "RunK6", "FetchVmResults", "CapturePrometheusSnapshot", "WriteK6Report",
+    "RunK6", "FetchVmResults", "CapturePrometheusSnapshot", "WriteK6Report",
     "query_prometheus_range_series", "HttpPrometheusClient",
     "make_loadtest_k6_config",
     "LoadgenBodyInputs",

@@ -19,7 +19,6 @@ from workflow_tasks.vm.models import VmRequest
 WORKSPACE_ROOT = Path(__file__).resolve().parents[4]
 LIVE_E2E_SCENARIO_IMAGE_CONSUMERS = (
     "packages/workflow-tasks/src/workflow_tasks/components/images.py",
-    "packages/workflow-tasks/src/workflow_tasks/workflows/validate.py",
     "packages/nanolab/src/nanolab/plans/validate.py",
 )
 REMOVED_RELEASE_IMAGE_CLI_SYNTAX = ("--arch-suffix", "--arch multi")

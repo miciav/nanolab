@@ -14,8 +14,7 @@ if TYPE_CHECKING:
     from multipass import MultipassClient
     from workflow_tasks.infra.ansible import AnsibleAdapter
 
-# Re-export for backward compatibility (tests import from here)
-__all__ = ["VmOrchestrator", "repo_rsync_command"]
+__all__ = ["VmOrchestrator"]
 
 
 class VmOrchestrator(MultipassVmProvider):
