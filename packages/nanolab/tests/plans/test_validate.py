@@ -104,22 +104,23 @@ def test_the_container_control_plane_is_a_resource_with_its_own_teardown() -> No
 
     assert ids == [
         "001.build-control-plane",
-        "002.build-image-word-stats-java",
-        "003.acquire-local-control-plane",
-        "004.acquire-word-stats-java",
-        "005.invoke-word-stats-java",
-        "006.inspect-resources-of-nanofaas-word-stats-java-r1",
-        "007.release-word-stats-java",
-        "008.release-local-control-plane",
+        "002.build-application-artifact-word-stats-java",
+        "003.build-image-word-stats-java",
+        "004.acquire-local-control-plane",
+        "005.acquire-word-stats-java",
+        "006.invoke-word-stats-java",
+        "007.inspect-resources-of-nanofaas-word-stats-java-r1",
+        "008.release-word-stats-java",
+        "009.release-local-control-plane",
     ]
 
 
 def test_validate_plan_resolves_build_from_the_function_catalog() -> None:
+    artifact_build = _argv(_plan("container"), "Build application artifact: word-stats-java")
     image_build = _argv(_plan("container"), "Build image word-stats-java")
 
-    assert image_build[0] == "./gradlew"
-    assert image_build[1] == ":functions:java:word-stats:bootBuildImage"
-    assert image_build[2].startswith("-PfunctionImage=")
+    assert artifact_build[:2] == ("./gradlew", ":functions:java:word-stats:bootJar")
+    assert image_build[:2] == ("docker", "build")
 
 
 def test_validate_plan_propagates_resource_requests_and_limits() -> None:

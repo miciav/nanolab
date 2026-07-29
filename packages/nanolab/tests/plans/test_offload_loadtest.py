@@ -119,15 +119,11 @@ def test_deployment_then_registration_then_k6_then_evaluation_ordering(tmp_path:
     # The cloud is up before the edge, so the edge's chart comes up pointing at
     # something that answers. k6 and the reconciliation are steps of one unit,
     # so the plan names the load test rather than its internals.
-    assert ids.index("015.acquire-helm-release-nanofaas-on-the-cloud") < ids.index(
-        "017.acquire-helm-release-nanofaas-on-the-edge"
-    )
-    assert ids.index("017.acquire-helm-release-nanofaas-on-the-edge") < ids.index(
-        "018.acquire-word-stats-java-on-the-edge"
-    )
-    assert ids.index("018.acquire-word-stats-java-on-the-edge") < ids.index(
-        "020.run-the-offload-load-test"
-    )
+    cloud = next(task for task in ids if task.endswith("acquire-helm-release-nanofaas-on-the-cloud"))
+    edge = next(task for task in ids if task.endswith("acquire-helm-release-nanofaas-on-the-edge"))
+    function = next(task for task in ids if task.endswith("acquire-word-stats-java-on-the-edge"))
+    load = next(task for task in ids if task.endswith("run-the-offload-load-test"))
+    assert ids.index(cloud) < ids.index(edge) < ids.index(function) < ids.index(load)
 
 
 def test_local_provider_runs_k6_on_stack_without_fetch(tmp_path: Path) -> None:
@@ -269,12 +265,12 @@ def test_cleanup_covers_both_control_planes(tmp_path: Path) -> None:
 
     # Compiled in, in reverse, rather than a list the runner has to remember —
     # and the control function exists only on the edge.
-    assert ids[-5:] == [
-        "021.release-json-transform-java-on-the-edge",
-        "022.release-word-stats-java-on-the-edge",
-        "023.release-helm-release-nanofaas-on-the-edge",
-        "024.release-word-stats-java-on-the-cloud",
-        "025.release-helm-release-nanofaas-on-the-cloud",
+    assert [task.split(".", 1)[1] for task in ids[-5:]] == [
+        "release-json-transform-java-on-the-edge",
+        "release-word-stats-java-on-the-edge",
+        "release-helm-release-nanofaas-on-the-edge",
+        "release-word-stats-java-on-the-cloud",
+        "release-helm-release-nanofaas-on-the-cloud",
     ]
 
 

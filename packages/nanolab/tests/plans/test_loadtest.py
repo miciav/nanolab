@@ -54,20 +54,21 @@ def _no_real_waiting(monkeypatch: pytest.MonkeyPatch) -> None:
 
 SCENARIO = ScenarioConfig(workflow="loadtest", functions=["word-stats-java"])
 
-# Eleven, not seventeen: the eight steps of the load itself are one composite,
+# Twelve, not eighteen: the eight steps of the load itself are one composite,
 # because none of them can run without what the run before it produced.
 DEFAULT_TASK_IDS = [
     "001.check-kubectl-is-usable",
     "002.build-control-plane",
     "003.build-image-localhost-5000-nanofaas-control-plane-e2e",
     "004.push-image-localhost-5000-nanofaas-control-plane-e2e",
-    "005.build-image-word-stats-java",
-    "006.push-image-localhost-5000-nanofaas-java-word-stats-e2e",
-    "007.acquire-helm-release-nanofaas",
-    "008.acquire-word-stats-java",
-    "009.run-the-load-test",
-    "010.release-word-stats-java",
-    "011.release-helm-release-nanofaas",
+    "005.build-application-artifact-word-stats-java",
+    "006.build-image-word-stats-java",
+    "007.push-image-localhost-5000-nanofaas-java-word-stats-e2e",
+    "008.acquire-helm-release-nanofaas",
+    "009.acquire-word-stats-java",
+    "010.run-the-load-test",
+    "011.release-word-stats-java",
+    "012.release-helm-release-nanofaas",
 ]
 
 
