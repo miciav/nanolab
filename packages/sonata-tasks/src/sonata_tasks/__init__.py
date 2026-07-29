@@ -31,6 +31,13 @@ from sonata_tasks.loadtest import (
     loadtest_composite,
 )
 from sonata_tasks.compensation import compensated_resource
+from sonata_tasks.compose import (
+    DeployDockerCompose,
+    DestroyDockerCompose,
+    DockerComposeProject,
+    WaitForDockerCompose,
+    docker_compose_resource,
+)
 from sonata_tasks.manifest import FunctionManifest
 from sonata_tasks.metrics import PrometheusScrapeCheckTask
 from sonata_tasks.offload_loadtest import EvaluateConservationTask
@@ -82,6 +89,11 @@ __all__ = [
     "HelmUninstallTask",
     "build_cli_workflow",
     "compensated_resource",
+    "DeployDockerCompose",
+    "DestroyDockerCompose",
+    "DockerComposeProject",
+    "WaitForDockerCompose",
+    "docker_compose_resource",
     "DockerBuildTask",
     "DockerInspectTask",
     "DockerPushTask",
