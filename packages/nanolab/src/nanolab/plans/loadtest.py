@@ -6,6 +6,7 @@ from typing import Any, cast
 
 from sonata_engine import Task, Workflow
 from sonata_tasks.command import CommandTask
+from sonata_tasks.compose import DockerComposeProject, docker_compose_resource
 from sonata_tasks.loadtest import (
     CapturePrometheusTask,
     EvaluateGateTask,
@@ -22,8 +23,10 @@ from workflow_tasks.components.helm import control_plane_helm_values
 from workflow_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
 from workflow_tasks.execution.roles import ExecutionRole
 from workflow_tasks.loadtest.autoscaling import (
+    HttpReplicaProbe,
     ReplicaProbe,
     ReplicaWatcher,
+    ReplicaStatusProbe,
     VerifyAutoscalingReplicas,
 )
 from workflow_tasks.loadtest.models import K6Config, K6Stage, PrometheusQuery
@@ -153,6 +156,9 @@ def build_loadtest_plan(
     """
     if config.workflow != "loadtest":
         raise ValueError("load-test plan requires a loadtest scenario")
+    backend = config.backend or "k8s"
+    if backend == "container" and environment.provider != "local":
+        raise ValueError("container load-test requires a local environment")
     scaling_config: dict[str, object] | None = None
     if config.autoscaling:
         scaling_config = {
@@ -205,31 +211,53 @@ def build_loadtest_plan(
         summary_path = run_dir / "k6-summary.json"
 
     request = PlatformRequest(
-        backend="k8s",
+        backend=backend,
         build=config.build,
         functions=functions,
         additional_modules=("autoscaler", "async-queue", "sync-queue")
         if config.autoscaling
         else (),
         build_images=not prebuilt,
+        build_control_plane=backend == "k8s",
+        push_function_images=False,
         control_plane_image=prebuilt_control_plane_image,
     )
-    # NodePort because the load generator reaches the control plane from outside
-    # the cluster, unlike validate which curls it from within the VM.
-    request = replace(
-        request,
-        helm_values=_set_args(
-            control_plane_helm_values(
-                namespace=request.namespace,
-                control_plane_image=request.control_plane_image_reference(),
-                expose_node_port=True,
-                metrics_profile="advanced",
-            )
-        ),
-    )
+    if backend == "k8s":
+        # NodePort because the load generator reaches the control plane from outside
+        # the cluster, unlike validate which curls it from within the VM.
+        request = replace(
+            request,
+            helm_values=_set_args(
+                control_plane_helm_values(
+                    namespace=request.namespace,
+                    control_plane_image=request.control_plane_image_reference(),
+                    expose_node_port=True,
+                    metrics_profile="advanced",
+                )
+            ),
+        )
 
     load_role: ExecutionRole = "loadgen" if dedicated else "stack"
     executor = RoleBoundCommandTaskExecutor(bindings)
+    platform_requires = ()
+    if backend == "container":
+        platform_requires = (
+            docker_compose_resource(
+                DockerComposeProject(
+                    name="nanofaas-loadtest",
+                    file=Path("deploy/compose/compose.yaml"),
+                    ready_url="http://127.0.0.1:8081/actuator/health/readiness",
+                    env={
+                        "NANOFAAS_CONTROL_PLANE_MODULES": (
+                            "container-deployment-provider,autoscaler,"
+                            "async-queue,sync-queue"
+                        )
+                    },
+                ),
+                executor=executor,
+                cwd=root,
+            ),
+        )
     run_k6 = RunK6(
         task_id="",
         title="Run k6",
@@ -255,16 +283,22 @@ def build_loadtest_plan(
     )
 
     watcher: ReplicaWatcher | None = None
+    replica_probe: ReplicaStatusProbe | None = None
     after: list[Task[Any]] = []
     if config.autoscaling:
-        watcher = ReplicaWatcher(
-            ReplicaProbe(
+        if backend == "container":
+            replica_probe = HttpReplicaProbe(
+                endpoint=control_plane_url,
+                function_name=target.name,
+            )
+        else:
+            replica_probe = ReplicaProbe(
                 runner=_RoleRunner(bindings, "stack"),
                 namespace=request.namespace,
                 deployment_name=f"fn-{target.name}",
                 remote_dir=_REMOTE_DIR,
             )
-        )
+        watcher = ReplicaWatcher(replica_probe)
     if remote:
         after.append(
             FetchResultsTask(
@@ -288,6 +322,7 @@ def build_loadtest_plan(
                     deployment_name=f"fn-{target.name}",
                     remote_dir=_REMOTE_DIR,
                     watcher=watcher,
+                    probe=replica_probe,
                 )
             )
         )
@@ -333,6 +368,8 @@ def build_loadtest_plan(
         request,
         bindings,
         cwd=root,
+        requires=platform_requires,
+        local_endpoint=control_plane_url,
         load=loadtest_composite(
             preflight=CommandTask(
                 title="Check k6 is usable",

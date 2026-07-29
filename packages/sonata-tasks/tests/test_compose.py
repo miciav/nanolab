@@ -88,6 +88,29 @@ def test_compose_resource_builds_deploys_and_tears_down_the_project() -> None:
     assert executor.seen[-1].cwd == Path("/nanofaas")
 
 
+def test_compose_resource_passes_project_environment_to_compose() -> None:
+    executor = RecordingExecutor()
+    project = DockerComposeProject(
+        name="nanofaas-loadtest",
+        file=Path("compose.yaml"),
+        ready_url="http://127.0.0.1:8081/actuator/health/readiness",
+        env={
+            "NANOFAAS_CONTROL_PLANE_MODULES": (
+                "container-deployment-provider,autoscaler,async-queue,sync-queue"
+            )
+        },
+    )
+    workflow = Workflow("compose")
+    workflow.add(
+        CommandTask(title="Use deployment", argv=("true",), executor=executor),
+        requires=(docker_compose_resource(project, executor=executor),),
+    )
+
+    workflow.run()
+
+    assert executor.seen[0].env == project.env
+
+
 def test_compose_resource_is_named_as_one_lifecycle_in_the_plan() -> None:
     executor = RecordingExecutor()
     resource = docker_compose_resource(

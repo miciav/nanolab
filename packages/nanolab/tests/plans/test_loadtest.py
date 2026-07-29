@@ -53,6 +53,12 @@ def _no_real_waiting(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 SCENARIO = ScenarioConfig(workflow="loadtest", functions=["word-stats-java"])
+CONTAINER_SCENARIO = ScenarioConfig(
+    workflow="loadtest",
+    backend="container",
+    functions=["word-stats-java"],
+    autoscaling=True,
+)
 
 # Twelve, not eighteen: the eight steps of the load itself are one composite,
 # because none of them can run without what the run before it produced.
@@ -171,6 +177,49 @@ def test_loadtest_defaults_preserve_task_ids_byte_for_byte(tmp_path: Path) -> No
     )
 
     assert _ids(workflow) == DEFAULT_TASK_IDS
+
+
+def test_container_loadtest_uses_compose_without_kubernetes(
+    tmp_path: Path,
+) -> None:
+    executor = RecordingExecutor()
+
+    workflow = build_loadtest_plan(
+        CONTAINER_SCENARIO,
+        EnvironmentConfig(provider="local"),
+        RoleBindings(host=executor, stack=executor),
+        control_plane_url="http://127.0.0.1:8080",
+        prometheus_client=NoopPrometheus(),
+        run_dir=tmp_path,
+        repo_root=Path("/nanofaas"),
+    )
+
+    assert _ids(workflow) == [
+        "001.acquire-docker-compose-project-nanofaas-loadtest",
+        "002.build-application-artifact-word-stats-java",
+        "003.build-image-word-stats-java",
+        "004.acquire-word-stats-java",
+        "005.run-the-load-test",
+        "006.release-word-stats-java",
+        "007.release-docker-compose-project-nanofaas-loadtest",
+    ]
+
+
+def test_container_loadtest_rejects_remote_environment(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="requires a local environment"):
+        build_loadtest_plan(
+            CONTAINER_SCENARIO,
+            EnvironmentConfig.model_validate(
+                {"provider": "multipass", "roles": {"stack": {"name": "stack"}}}
+            ),
+            RoleBindings(
+                host=RecordingExecutor(),
+                stack=RecordingExecutor(),
+            ),
+            control_plane_url="http://127.0.0.1:8080",
+            prometheus_client=NoopPrometheus(),
+            run_dir=tmp_path,
+        )
 
 
 def test_dedicated_loadgen_uses_the_staged_nanolab_k6_asset(tmp_path: Path) -> None:

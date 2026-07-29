@@ -89,6 +89,7 @@ class PlatformRequest:
     additional_modules: tuple[str, ...] = ()
     build_images: bool = True
     build_control_plane: bool = True
+    push_function_images: bool = False
     control_plane_image: str | None = None
     helm_release: str = "nanofaas"
     helm_chart: str = "deploy/helm/nanofaas"
@@ -107,7 +108,11 @@ class PlatformRequest:
     def __post_init__(self) -> None:
         if not self.functions:
             raise ValueError("a platform request needs at least one function")
-        if not self.build_images and self.control_plane_image is None:
+        if (
+            self.backend == "k8s"
+            and not self.build_images
+            and self.control_plane_image is None
+        ):
             raise ValueError("control_plane_image is required when build_images is false")
 
     @property
@@ -238,12 +243,16 @@ def add_platform(
                 role=request.role,
                 title=request.titled("Check kubectl is usable"),
                 cwd=cwd,
-            )
+            ),
+            requires=requires,
         )
 
     if request.build_images:
         if request.build_control_plane:
-            workflow.add(_control_plane_build(request, executor, cwd))
+            workflow.add(
+                _control_plane_build(request, executor, cwd),
+                requires=requires,
+            )
         if request.backend == "k8s":
             image = request.control_plane_image_reference()
             workflow.add(
@@ -255,7 +264,8 @@ def add_platform(
                     role=request.role,
                     title=request.titled(f"Build image {image}"),
                     cwd=cwd,
-                )
+                ),
+                requires=requires,
             )
             workflow.add(
                 DockerPushTask(
@@ -264,7 +274,8 @@ def add_platform(
                     role=request.role,
                     title=request.titled(f"Push image {image}"),
                     cwd=cwd,
-                )
+                ),
+                requires=requires,
             )
         for function in request.functions:
             if function.image_build_argv is not None:
@@ -275,7 +286,8 @@ def add_platform(
                         executor=executor,
                         role=request.role,
                         cwd=cwd,
-                    )
+                    ),
+                    requires=requires,
                 )
             workflow.add(
                 CommandTask(
@@ -284,9 +296,10 @@ def add_platform(
                     executor=executor,
                     role=request.role,
                     cwd=cwd,
-                )
+                ),
+                requires=requires,
             )
-            if request.backend == "k8s":
+            if request.backend == "k8s" or request.push_function_images:
                 workflow.add(
                     DockerPushTask(
                         image=function.image,
@@ -294,7 +307,8 @@ def add_platform(
                         role=request.role,
                         title=request.titled(f"Push image {function.image}"),
                         cwd=cwd,
-                    )
+                    ),
+                    requires=requires,
                 )
 
     resources: tuple[Resource[Any], ...] = ()

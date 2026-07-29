@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from sonata_engine import Resource, Steps, TaskInputs
@@ -19,6 +20,7 @@ class DockerComposeProject:
     file: Path
     ready_url: str
     role: ExecutionRole = "host"
+    env: Mapping[str, str] = field(default_factory=dict)
 
 
 class DeployDockerCompose(CommandTask):
@@ -45,6 +47,7 @@ class DeployDockerCompose(CommandTask):
             ),
             executor=executor,
             role=project.role,
+            env=project.env,
             cwd=cwd,
         )
 
@@ -98,6 +101,7 @@ class DestroyDockerCompose(CommandTask):
             ),
             executor=executor,
             role=project.role,
+            env=project.env,
             cwd=cwd,
         )
 

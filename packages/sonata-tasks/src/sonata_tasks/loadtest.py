@@ -234,6 +234,7 @@ def build_loadtest_workflow(
     workflow_id: str = "loadtest",
     cwd: Path | None = None,
     requires: tuple[Resource[Any], ...] = (),
+    local_endpoint: str = "http://127.0.0.1:18080",
 ) -> Workflow:
     """Deploy the platform, register the functions, then put them under load.
 
@@ -249,7 +250,12 @@ def build_loadtest_workflow(
     executor = RoleBoundCommandTaskExecutor(bindings)
     workflow = Workflow(workflow_id=workflow_id)
     platform = add_platform(
-        workflow, request, executor=executor, cwd=cwd, requires=requires
+        workflow,
+        request,
+        executor=executor,
+        cwd=cwd,
+        local_endpoint=local_endpoint,
+        requires=requires,
     )
     workflow.add(load, requires=(*requires, *platform.resources, *platform.functions))
     return workflow
