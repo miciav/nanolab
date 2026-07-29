@@ -62,6 +62,7 @@ from sonata_tasks.helm import (
 from sonata_tasks.resources import ContainerResourceCheckTask, K8sResourceCheckTask
 from sonata_tasks.registry import RegistryState, docker_registry_resource
 from sonata_tasks.process import managed_process_resource
+from sonata_tasks.transfer import FileTransferTask
 from sonata_tasks.validate import (
     ValidateFunction,
     ValidateWorkflowRequest,
@@ -130,5 +131,6 @@ __all__ = [
     "build_offload_workflow",
     "load_outcome",
     "EvaluateConservationTask",
+    "FileTransferTask",
     "vm_resource",
 ]
