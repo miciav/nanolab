@@ -657,6 +657,12 @@ dev = [
 name = "nanolab-workspace"
 version = "0.0.0"
 source = { virtual = "." }
+dependencies = [
+    { name = "sonata-engine" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "sonata-engine", git = "https://github.com/miciav/sonata.git?rev=c2ae952c6d201f2e1b997df3fd301480e170185f" }]
 
 [[package]]
 name = "nodejs-wheel-binaries"

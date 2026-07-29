@@ -2,7 +2,9 @@
 name = "nanolab-workspace"
 version = "0.0.0"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "sonata-engine",
+]
 
 [tool.uv]
 package = false
@@ -14,3 +16,6 @@ members = [
     "packages/workflow-tasks",
     "packages/tui-toolkit",
 ]
+
+[tool.uv.sources]
+sonata-engine = { git = "https://github.com/miciav/sonata.git", rev = "c2ae952c6d201f2e1b997df3fd301480e170185f" }
