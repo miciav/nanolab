@@ -7,6 +7,7 @@ from sonata_tasks.cli_function import (
     CliFunctionInvokeTask,
 )
 from sonata_tasks.command import CommandTask
+from sonata_tasks.cosign import COSIGN_IMAGE, CosignTask
 from sonata_tasks.function import function_resource
 from sonata_tasks.gradle import GradleTask
 from sonata_tasks.http_function import (
@@ -82,6 +83,8 @@ __all__ = [
     "CliFunctionDeleteTask",
     "CliFunctionInvokeTask",
     "ClusterIpEndpointTask",
+    "COSIGN_IMAGE",
+    "CosignTask",
     "CommandTask",
     "ContainerResourceCheckTask",
     "FunctionManifest",
