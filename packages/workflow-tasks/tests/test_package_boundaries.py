@@ -1,7 +1,27 @@
 from __future__ import annotations
 
 import importlib
+from pathlib import Path
 import sys
+
+
+def test_dead_internal_modules_are_absent() -> None:
+    package = Path(__file__).resolve().parents[1] / "src" / "workflow_tasks"
+    dead_modules = (
+        "components/cleanup.py",
+        "components/function_tasks.py",
+        "components/namespace.py",
+        "components/registry.py",
+        "components/remote_script.py",
+        "components/verification.py",
+        "infra/host_sleep.py",
+        "loadtest/remote_k6.py",
+        "orchestration/__init__.py",
+        "orchestration/models.py",
+        "orchestration/runtime.py",
+    )
+
+    assert [module for module in dead_modules if (package / module).exists()] == []
 
 
 def test_workflow_tasks_does_not_import_tui_toolkit() -> None:
@@ -98,14 +118,6 @@ def test_vm_orchestrator_does_not_import_nanolab() -> None:
     assert not any(k.startswith("nanolab") for k in sys.modules)
 
 
-def test_components_registry_does_not_import_nanolab() -> None:
-    for key in list(sys.modules.keys()):
-        if key.startswith("nanolab"):
-            del sys.modules[key]
-    importlib.import_module("workflow_tasks.components.registry")
-    assert not any(k.startswith("nanolab") for k in sys.modules)
-
-
 def test_components_context_does_not_import_nanolab() -> None:
     for key in list(sys.modules.keys()):
         if key.startswith("nanolab"):
@@ -114,27 +126,11 @@ def test_components_context_does_not_import_nanolab() -> None:
     assert not any(k.startswith("nanolab") for k in sys.modules)
 
 
-def test_components_namespace_does_not_import_nanolab() -> None:
-    for key in list(sys.modules.keys()):
-        if key.startswith("nanolab"):
-            del sys.modules[key]
-    importlib.import_module("workflow_tasks.components.namespace")
-    assert not any(k.startswith("nanolab") for k in sys.modules)
-
-
 def test_components_images_does_not_import_nanolab() -> None:
     for key in list(sys.modules.keys()):
         if key.startswith("nanolab"):
             del sys.modules[key]
     importlib.import_module("workflow_tasks.components.images")
-    assert not any(k.startswith("nanolab") for k in sys.modules)
-
-
-def test_loadtest_remote_k6_does_not_import_nanolab() -> None:
-    for key in list(sys.modules.keys()):
-        if key.startswith("nanolab"):
-            del sys.modules[key]
-    importlib.import_module("workflow_tasks.loadtest.remote_k6")
     assert not any(k.startswith("nanolab") for k in sys.modules)
 
 
@@ -154,41 +150,9 @@ def test_components_helm_does_not_import_nanolab() -> None:
     assert not any(k.startswith("nanolab") for k in sys.modules)
 
 
-def test_components_remote_script_does_not_import_nanolab() -> None:
-    for key in list(sys.modules.keys()):
-        if key.startswith("nanolab"):
-            del sys.modules[key]
-    importlib.import_module("workflow_tasks.components.remote_script")
-    assert not any(k.startswith("nanolab") for k in sys.modules)
-
-
-def test_components_verification_does_not_import_nanolab() -> None:
-    for key in list(sys.modules.keys()):
-        if key.startswith("nanolab"):
-            del sys.modules[key]
-    importlib.import_module("workflow_tasks.components.verification")
-    assert not any(k.startswith("nanolab") for k in sys.modules)
-
-
-def test_components_cleanup_does_not_import_nanolab() -> None:
-    for key in list(sys.modules.keys()):
-        if key.startswith("nanolab"):
-            del sys.modules[key]
-    importlib.import_module("workflow_tasks.components.cleanup")
-    assert not any(k.startswith("nanolab") for k in sys.modules)
-
-
 def test_components_bootstrap_does_not_import_nanolab() -> None:
     for key in list(sys.modules.keys()):
         if key.startswith("nanolab"):
             del sys.modules[key]
     importlib.import_module("workflow_tasks.components.bootstrap")
-    assert not any(k.startswith("nanolab") for k in sys.modules)
-
-
-def test_components_function_tasks_does_not_import_nanolab() -> None:
-    for key in list(sys.modules.keys()):
-        if key.startswith("nanolab"):
-            del sys.modules[key]
-    importlib.import_module("workflow_tasks.components.function_tasks")
     assert not any(k.startswith("nanolab") for k in sys.modules)
