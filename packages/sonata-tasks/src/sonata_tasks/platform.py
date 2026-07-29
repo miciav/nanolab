@@ -88,6 +88,7 @@ class PlatformRequest:
     registry: str = "localhost:5000"
     additional_modules: tuple[str, ...] = ()
     build_images: bool = True
+    build_control_plane: bool = True
     control_plane_image: str | None = None
     helm_release: str = "nanofaas"
     helm_chart: str = "deploy/helm/nanofaas"
@@ -241,7 +242,8 @@ def add_platform(
         )
 
     if request.build_images:
-        workflow.add(_control_plane_build(request, executor, cwd))
+        if request.build_control_plane:
+            workflow.add(_control_plane_build(request, executor, cwd))
         if request.backend == "k8s":
             image = request.control_plane_image_reference()
             workflow.add(

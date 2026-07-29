@@ -1,19 +1,17 @@
 import json
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any
 
 import yaml
-from sonata_engine import Resource, Workflow
-from sonata_tasks.process import managed_process_resource
+from sonata_engine import Workflow
+from sonata_tasks.compose import DockerComposeProject, docker_compose_resource
 from sonata_tasks.validate import ValidateFunction as SonataFunction
 from sonata_tasks.validate import ValidateWorkflowRequest, build_validate_workflow
 from workflow_tasks.components.helm import control_plane_helm_values
-from workflow_tasks.execution.bindings import RoleBindings
+from workflow_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
 
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.functions.catalog import FunctionDefinition, resolve_function_definition
-from nanolab.plans import _local_control_plane
 from nanolab.workspace.paths import discover_tool_root
 
 
@@ -31,16 +29,6 @@ class _ResolvedFunction:
     concurrency: int = 2
     queue_size: int = 20
     max_retries: int = 3
-
-
-def _container_control_plane(repo_root: Path) -> Resource[Any]:
-    """The control plane running on this machine, deploying functions with Docker."""
-    return managed_process_resource(
-        title="Acquire local control plane",
-        argv=_local_control_plane.argv(repo_root),
-        cwd=repo_root,
-        ready=_local_control_plane.ready,
-    )
 
 
 def _function_image(definition: FunctionDefinition) -> str:
@@ -176,6 +164,7 @@ def build_validate_plan(
             for key in config.functions
         ),
         additional_modules=("async-queue", "sync-queue") if kubernetes else (),
+        build_control_plane=kubernetes,
     )
     if kubernetes:
         # Both settings are what this workflow exists to exercise: the JUnit queue
@@ -193,12 +182,23 @@ def build_validate_plan(
                 )
             ),
         )
+    requires = ()
+    if not kubernetes:
+        requires = (
+            docker_compose_resource(
+                DockerComposeProject(
+                    name="nanofaas-validate",
+                    file=Path("deploy/compose/compose.yaml"),
+                    ready_url="http://127.0.0.1:8081/actuator/health/readiness",
+                ),
+                executor=RoleBoundCommandTaskExecutor(bindings),
+                cwd=root,
+            ),
+        )
     return build_validate_workflow(
         request,
         bindings,
         cwd=root,
-        control_plane_process=(
-            None if kubernetes else lambda: _container_control_plane(root)
-        ),
-        local_endpoint=_local_control_plane.ENDPOINT,
+        local_endpoint="http://127.0.0.1:8080",
+        requires=requires,
     )

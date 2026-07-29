@@ -97,22 +97,42 @@ def test_validate_plan_keeps_container_validation_local() -> None:
     assert stack.seen == []
 
 
-def test_the_container_control_plane_is_a_resource_with_its_own_teardown() -> None:
-    """The legacy builder removed this step from the rendered specs by task id and
-    inserted a resource back at the same index; it is now simply a resource."""
+def test_container_validation_builds_and_deploys_the_control_plane_with_compose() -> None:
     ids = [task.task_id for task in _plan("container").compile().tasks]
 
     assert ids == [
-        "001.build-control-plane",
-        "002.build-application-artifact-word-stats-java",
-        "003.build-image-word-stats-java",
-        "004.acquire-local-control-plane",
-        "005.acquire-word-stats-java",
-        "006.invoke-word-stats-java",
-        "007.inspect-resources-of-nanofaas-word-stats-java-r1",
-        "008.release-word-stats-java",
-        "009.release-local-control-plane",
+        "001.build-application-artifact-word-stats-java",
+        "002.build-image-word-stats-java",
+        "003.acquire-docker-compose-project-nanofaas-validate",
+        "004.acquire-word-stats-java",
+        "005.invoke-word-stats-java",
+        "006.inspect-resources-of-nanofaas-word-stats-java-r1",
+        "007.release-word-stats-java",
+        "008.release-docker-compose-project-nanofaas-validate",
     ]
+
+
+def test_container_validation_owns_an_isolated_compose_project() -> None:
+    host = RecordingExecutor()
+    plan = build_validate_plan(
+        ScenarioConfig(
+            workflow="validate",
+            backend="container",
+            functions=["word-stats-java"],
+        ),
+        RoleBindings(host=host, stack=RecordingExecutor()),
+    )
+
+    plan.run()
+
+    assert host.argv_for("docker compose")[:6] == (
+        "docker",
+        "compose",
+        "-f",
+        "deploy/compose/compose.yaml",
+        "-p",
+        "nanofaas-validate",
+    )
 
 
 def test_validate_plan_resolves_build_from_the_function_catalog() -> None:
