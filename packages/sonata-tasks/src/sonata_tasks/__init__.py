@@ -59,6 +59,7 @@ from sonata_tasks.helm import (
     HelmUninstallTask,
     helm_release_resource,
 )
+from sonata_tasks.imagetools import ImagetoolsCreateTask, ImagetoolsInspectTask
 from sonata_tasks.resources import ContainerResourceCheckTask, K8sResourceCheckTask
 from sonata_tasks.registry import RegistryState, docker_registry_resource
 from sonata_tasks.registry_tunnel import registry_tunnel_resource
@@ -132,6 +133,8 @@ __all__ = [
     "PlatformRequest",
     "add_platform",
     "HttpStatusCheckTask",
+    "ImagetoolsCreateTask",
+    "ImagetoolsInspectTask",
     "PrometheusScrapeCheckTask",
     "OffloadFunction",
     "OffloadWorkflowRequest",

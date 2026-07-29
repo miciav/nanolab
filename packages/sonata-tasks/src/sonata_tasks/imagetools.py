@@ -1,0 +1,71 @@
+from __future__ import annotations
+
+from collections.abc import Callable
+from pathlib import Path
+
+from workflow_tasks.execution.bindings import CommandTaskExecutor
+from workflow_tasks.execution.roles import ExecutionRole
+from workflow_tasks.tasks.models import TaskResult
+
+from sonata_tasks.command import CommandTask
+
+
+class ImagetoolsCreateTask(CommandTask):
+    """Create a multi-architecture manifest with ``docker buildx imagetools create``.
+
+    The ``docker_config`` directory is made available to the subprocess via the
+    ``DOCKER_CONFIG`` environment variable so it can read registry credentials
+    from the right location.
+    """
+
+    def __init__(
+        self,
+        *,
+        tag: str,
+        sources: tuple[str, ...],
+        docker_config: str,
+        executor: CommandTaskExecutor,
+        role: ExecutionRole,
+        title: str | None = None,
+        cwd: Path | None = None,
+        verify: Callable[[TaskResult], None] | None = None,
+    ) -> None:
+        super().__init__(
+            title=title or f"Create manifest {tag}",
+            argv=("docker", "buildx", "imagetools", "create", "--tag", tag, *sources),
+            executor=executor,
+            role=role,
+            env={"DOCKER_CONFIG": docker_config},
+            cwd=cwd,
+            verify=verify,
+        )
+
+
+class ImagetoolsInspectTask(CommandTask):
+    """Inspect a multi-architecture manifest with ``docker buildx imagetools inspect``.
+
+    The ``docker_config`` directory is made available to the subprocess via the
+    ``DOCKER_CONFIG`` environment variable so it can read registry credentials
+    from the right location.
+    """
+
+    def __init__(
+        self,
+        *,
+        reference: str,
+        docker_config: str,
+        executor: CommandTaskExecutor,
+        role: ExecutionRole,
+        title: str | None = None,
+        cwd: Path | None = None,
+        verify: Callable[[TaskResult], None] | None = None,
+    ) -> None:
+        super().__init__(
+            title=title or f"Inspect manifest {reference}",
+            argv=("docker", "buildx", "imagetools", "inspect", reference),
+            executor=executor,
+            role=role,
+            env={"DOCKER_CONFIG": docker_config},
+            cwd=cwd,
+            verify=verify,
+        )
