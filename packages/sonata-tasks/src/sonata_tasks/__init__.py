@@ -61,6 +61,7 @@ from sonata_tasks.helm import (
 )
 from sonata_tasks.resources import ContainerResourceCheckTask, K8sResourceCheckTask
 from sonata_tasks.registry import RegistryState, docker_registry_resource
+from sonata_tasks.buildx import buildx_builder_resource
 from sonata_tasks.process import managed_process_resource
 from sonata_tasks.transfer import FileTransferTask
 from sonata_tasks.validate import (
@@ -91,6 +92,7 @@ __all__ = [
     "HelmReleaseSpec",
     "HelmUninstallTask",
     "build_cli_workflow",
+    "buildx_builder_resource",
     "compensated_resource",
     "DeployDockerCompose",
     "DestroyDockerCompose",
