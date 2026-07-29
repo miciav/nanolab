@@ -65,6 +65,7 @@ from sonata_tasks.resources import ContainerResourceCheckTask, K8sResourceCheckT
 from sonata_tasks.syft import SYFT_IMAGE, SyftTask
 from sonata_tasks.registry import RegistryState, docker_registry_resource
 from sonata_tasks.registry_tunnel import registry_tunnel_resource
+from sonata_tasks.archive import source_archive_resource
 from sonata_tasks.buildx import buildx_builder_resource
 from sonata_tasks.process import managed_process_resource
 from sonata_tasks.skopeo import SkopeoCopyTask, SkopeoInspectTask
@@ -100,6 +101,7 @@ __all__ = [
     "HelmUninstallTask",
     "build_cli_workflow",
     "buildx_builder_resource",
+    "source_archive_resource",
     "compensated_resource",
     "DeployDockerCompose",
     "DestroyDockerCompose",
