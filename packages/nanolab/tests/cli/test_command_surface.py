@@ -492,7 +492,7 @@ def test_plan_renders_the_compiled_cli_workflow() -> None:
 
     assert result.exit_code == 0, result.output
     assert "001.build-nanofaas-cli" in result.stdout
-    assert "009.release-local-control-plane" in result.stdout
+    assert "010.release-local-control-plane" in result.stdout
 
 
 def test_plan_slices_the_cli_workflow_by_sonata_slug() -> None:
