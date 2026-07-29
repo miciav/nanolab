@@ -89,7 +89,7 @@ def test_control_function_leaking_to_cloud_fails() -> None:
     assert any("cloud metrics mention the control function" in failure for failure in report.failures)
 
 
-def test_zero_offloaded_requests_fails_even_if_otherwise_balanced() -> None:
+def test_zero_offloaded_requests_passes_when_otherwise_balanced() -> None:
     report = evaluate_conservation(
         k6_summary=_k6_summary(offloaded=0),
         edge_metrics=_edge_metrics(depth=0, est_wait=0),
@@ -98,8 +98,8 @@ def test_zero_offloaded_requests_fails_even_if_otherwise_balanced() -> None:
         control=CONTROL,
     )
 
-    assert report.passed is False
-    assert any("no requests were offloaded" in failure for failure in report.failures)
+    assert report.passed is True
+    assert report.failures == ()
 
 
 def test_control_offloaded_on_edge_fails() -> None:

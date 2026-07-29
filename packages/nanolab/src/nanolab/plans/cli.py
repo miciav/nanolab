@@ -349,6 +349,7 @@ def build_cli_plan(
             payload=json.dumps(json.loads(resolved.payload)["input"], separators=(",", ":")),
             resources=resolved.resources,
             build_argv=resolved.build_argv if local else None,
+            image_build_argv=resolved.image_build_argv if local else None,
         )
         for key in config.functions
         for resolved in (_resolve_function(config, key),)

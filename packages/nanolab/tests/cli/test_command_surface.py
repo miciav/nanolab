@@ -21,10 +21,8 @@ def _run_from_project_root(monkeypatch):
     monkeypatch.chdir(_PROJECT_ROOT)
 
 from nanolab.app.main import app
-from nanolab.cli.product import _git_provenance, _slice, _workflow
+from nanolab.cli.product import _git_provenance
 import nanolab.cli.product as product_module
-from nanolab.config import EnvironmentConfig, ScenarioConfig
-from workflow_tasks.core.workflow import Workflow
 
 
 @dataclass
@@ -107,21 +105,22 @@ def test_plan_builds_shared_validate_workflow() -> None:
     )
 
     assert result.exit_code == 0
-    assert "005.build-image-word-stats-java" in result.stdout
-    assert "010.inspect-resources-of-fn-word-stats-java" in result.stdout
+    assert "005.build-application-artifact-word-stats-java" in result.stdout
+    assert "011.inspect-resources-of-fn-word-stats-java" in result.stdout
 
 
 def test_run_renders_normalized_task_progress(monkeypatch) -> None:
     monkeypatch.setattr(
         "nanolab.cli.product._workflow",
-        lambda *args, **kwargs: Workflow(tasks=[_Task()]),
+        lambda *args, **kwargs: _sonata_workflow(),
     )
 
-    result = CliRunner().invoke(app, ["run", "scenarios-v2/offload-loadtest.yaml"])
+    result = CliRunner().invoke(app, ["run", "scenarios-v2/loadtest.yaml"])
 
     assert result.exit_code == 0
-    assert "[test.task] running" in result.stdout
-    assert "[test.task] passed" in result.stdout
+    # The compiler owns the id, so progress lines carry NNN.slug.
+    assert "[001.test-task] running" in result.stdout
+    assert "[001.test-task] passed" in result.stdout
 
 
 def test_run_requires_an_explicit_url_for_k8s_cli(
@@ -459,23 +458,6 @@ def test_plan_can_select_one_task() -> None:
     assert "build-image-word-stats-java" not in result.stdout
 
 
-def test_task_slice_keeps_only_cleanup_for_selected_acquisitions() -> None:
-    """Still the legacy slicer, now exercised through a workflow that still uses
-    it: `validate` moved to Sonata, whose Selection filters before compiling."""
-    workflow = _workflow(
-        ScenarioConfig(
-            workflow="offload-loadtest",
-            backend="k8s",
-            functions=["word-stats-java", "json-transform-java"],
-        ),
-        EnvironmentConfig(provider="local"),
-    )
-
-    _slice(workflow, only="stack.preflight", start=None, until=None)
-
-    assert workflow.cleanup_tasks == []
-
-
 def test_plan_accepts_external_ssh_environment(tmp_path: Path) -> None:
     environment = tmp_path / "external.yaml"
     environment.write_text(
@@ -501,8 +483,8 @@ def test_plan_builds_loadtest_with_operational_defaults(tmp_path: Path) -> None:
     assert result.exit_code == 0
     # The eight load steps are one composite now, so the plan names the load test
     # rather than its internals.
-    assert "009.run-the-load-test" in result.stdout
-    assert "007.acquire-helm-release-nanofaas" in result.stdout
+    assert "010.run-the-load-test" in result.stdout
+    assert "008.acquire-helm-release-nanofaas" in result.stdout
 
 
 def test_plan_renders_the_compiled_cli_workflow() -> None:
@@ -510,7 +492,7 @@ def test_plan_renders_the_compiled_cli_workflow() -> None:
 
     assert result.exit_code == 0, result.output
     assert "001.build-nanofaas-cli" in result.stdout
-    assert "009.release-local-control-plane" in result.stdout
+    assert "010.release-local-control-plane" in result.stdout
 
 
 def test_plan_slices_the_cli_workflow_by_sonata_slug() -> None:

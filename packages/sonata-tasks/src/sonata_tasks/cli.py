@@ -33,6 +33,7 @@ class CliFunction:
     payload: str
     resources: dict[str, object] | None = None
     build_argv: tuple[str, ...] | None = None
+    image_build_argv: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -165,8 +166,22 @@ def build_cli_workflow(
         if function.build_argv is not None:
             workflow.add(
                 CommandTask(
-                    title=f"Build image {function.name}",
+                    title=(
+                        f"Build application artifact: {function.name}"
+                        if function.image_build_argv is not None
+                        else f"Build image {function.name}"
+                    ),
                     argv=function.build_argv,
+                    executor=executor,
+                    role=request.build_role,
+                    cwd=cwd,
+                )
+            )
+        if function.image_build_argv is not None:
+            workflow.add(
+                CommandTask(
+                    title=f"Build image {function.name}",
+                    argv=function.image_build_argv,
                     executor=executor,
                     role=request.build_role,
                     cwd=cwd,

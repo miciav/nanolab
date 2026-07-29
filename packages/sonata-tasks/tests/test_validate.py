@@ -157,12 +157,12 @@ def test_additional_modules_join_the_backend_one() -> None:
     )
 
 
-def test_buildpack_changes_only_the_gradle_target() -> None:
+def test_buildpack_still_uses_the_dockerfile_pipeline() -> None:
     executor = ScriptedExecutor()
     build_validate_workflow(_request(build="buildpack"), _bindings(executor)).run()
 
     argv = executor.argv_for("control-plane:boot")
-    assert ":control-plane:bootBuildImage" in argv
+    assert ":control-plane:bootJar" in argv
     assert "-PcontrolPlaneModules=container-deployment-provider" in argv
 
 

@@ -415,20 +415,33 @@ def test_the_external_resource_is_released_when_a_task_fails() -> None:
     assert events == ["start", "stop"]
 
 
-def test_a_function_with_build_argv_gets_an_image_build_task() -> None:
+def test_a_function_with_dockerfile_build_gets_artifact_and_image_tasks() -> None:
     executor = ScriptedExecutor()
-    function = replace(FUNCTION, build_argv=("./gradlew", ":functions:java:word-stats:bootBuildImage"))
+    function = replace(
+        FUNCTION,
+        build_argv=("./gradlew", ":functions:java:word-stats:bootJar"),
+        image_build_argv=(
+            "docker",
+            "build",
+            "-t",
+            FUNCTION.image,
+            "-f",
+            "functions/java/word-stats/Dockerfile",
+            "functions/java/word-stats",
+        ),
+    )
     workflow = build_cli_workflow(
         CliWorkflowRequest(functions=(function,)), _bindings(executor)
     )
 
     assert [task.task_id for task in workflow.compile().tasks] == [
         "001.build-nanofaas-cli",
-        "002.build-image-word-stats-java",
-        "003.acquire-word-stats-java",
-        "004.list-functions",
-        "005.invoke-word-stats-java",
-        "006.release-word-stats-java",
+        "002.build-application-artifact-word-stats-java",
+        "003.build-image-word-stats-java",
+        "004.acquire-word-stats-java",
+        "005.list-functions",
+        "006.invoke-word-stats-java",
+        "007.release-word-stats-java",
     ]
 
 

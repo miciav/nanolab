@@ -197,13 +197,14 @@ def test_container_backend_wraps_the_workflow_in_a_local_control_plane() -> None
     assert [task.task_id for task in plan.compile().tasks] == [
         "001.build-nanofaas-cli",
         "002.build-local-control-plane",
-        "003.build-image-word-stats-java",
-        "004.acquire-local-control-plane",
-        "005.acquire-word-stats-java",
-        "006.list-functions",
-        "007.invoke-word-stats-java",
-        "008.release-word-stats-java",
-        "009.release-local-control-plane",
+        "003.build-application-artifact-word-stats-java",
+        "004.build-image-word-stats-java",
+        "005.acquire-local-control-plane",
+        "006.acquire-word-stats-java",
+        "007.list-functions",
+        "008.invoke-word-stats-java",
+        "009.release-word-stats-java",
+        "010.release-local-control-plane",
     ]
 
 

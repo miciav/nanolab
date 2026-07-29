@@ -19,6 +19,7 @@ class ValidateFunction:
     image: str
     build_argv: tuple[str, ...]
     payload: str
+    image_build_argv: tuple[str, ...] | None = None
     resources: dict[str, object] | None = None
     scaling_config: dict[str, object] | None = None
     timeout_ms: int = 5000
