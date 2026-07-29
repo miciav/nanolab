@@ -64,6 +64,7 @@ from sonata_tasks.registry import RegistryState, docker_registry_resource
 from sonata_tasks.registry_tunnel import registry_tunnel_resource
 from sonata_tasks.buildx import buildx_builder_resource
 from sonata_tasks.process import managed_process_resource
+from sonata_tasks.skopeo import SkopeoCopyTask, SkopeoInspectTask
 from sonata_tasks.transfer import FileTransferTask
 from sonata_tasks.validate import (
     ValidateFunction,
@@ -118,6 +119,8 @@ __all__ = [
     "FetchResultsTask",
     "LoadtestOutcome",
     "RunK6Task",
+    "SkopeoCopyTask",
+    "SkopeoInspectTask",
     "VerifyAutoscalingTask",
     "WriteReportTask",
     "WriteSummaryTask",
