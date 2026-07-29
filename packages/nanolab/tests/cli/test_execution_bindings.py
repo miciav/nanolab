@@ -64,6 +64,16 @@ def test_external_stack_uses_ssh_in_remote_repository() -> None:
     ) in runner.calls[0][0][-1]
 
 
+def test_container_loadtest_uses_compose_ports() -> None:
+    assert resolve_loadtest_urls(
+        EnvironmentConfig(provider="local"),
+        backend="container",
+    ) == (
+        "http://127.0.0.1:8080",
+        "http://127.0.0.1:9090",
+    )
+
+
 def test_multipass_stack_uses_named_instance() -> None:
     runner = RecordingRunner()
     environment = EnvironmentConfig.model_validate(

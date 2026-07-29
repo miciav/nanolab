@@ -6,7 +6,9 @@ import shlex
 import threading
 import time
 from typing import Any, Protocol
+from urllib.parse import quote
 
+import httpx
 from workflow_tasks.loadtest.ports import RemoteFileFetcher
 from workflow_tasks.tasks.executors import VmCommandRunner
 
@@ -23,6 +25,11 @@ class Watcher(Protocol):
 
     def start(self) -> None: ...
     def stop(self) -> None: ...
+
+
+class ReplicaStatusProbe(Protocol):
+    def ready_replicas(self) -> int: ...
+    def desired_replicas(self) -> int: ...
 
 
 @dataclass(frozen=True)
@@ -83,6 +90,51 @@ class ReplicaProbe:
             raise RuntimeError(f"invalid replica count: {result.stdout!r}") from exc
 
 
+@dataclass(frozen=True)
+class HttpReplicaProbe:
+    """Read provider-neutral replica status from the nanoFaaS API."""
+
+    endpoint: str
+    function_name: str
+    timeout_seconds: float = 4.0
+
+    def ready_replicas(self) -> int:
+        return self._status()[1]
+
+    def desired_replicas(self) -> int:
+        return self._status()[0]
+
+    def _status(self) -> tuple[int, int]:
+        name = quote(self.function_name, safe="")
+        url = f"{self.endpoint.rstrip('/')}/v1/functions/{name}/replicas"
+        try:
+            response = httpx.get(url, timeout=self.timeout_seconds)
+        except httpx.HTTPError as exc:
+            raise RuntimeError(
+                f"replica status request failed for {self.function_name!r}: {exc}"
+            ) from exc
+        if response.status_code != 200:
+            detail = response.text.strip()
+            raise RuntimeError(
+                detail
+                or f"replica status request failed for {self.function_name!r} "
+                f"(HTTP {response.status_code})"
+            )
+        try:
+            data = response.json()
+            desired = int(data["desiredReplicas"])
+            ready = int(data["readyReplicas"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RuntimeError(
+                f"invalid replica status response for {self.function_name!r}"
+            ) from exc
+        if desired < 0 or ready < 0:
+            raise RuntimeError(
+                f"invalid replica status response for {self.function_name!r}"
+            )
+        return desired, ready
+
+
 class ReplicaWatcher:
     """Samples deployment replicas on a background thread while load runs.
 
@@ -90,7 +142,11 @@ class ReplicaWatcher:
     residual state and races the autoscaler's downscale cooldown.
     """
 
-    def __init__(self, probe: ReplicaProbe, poll_interval_seconds: float = 2.0) -> None:
+    def __init__(
+        self,
+        probe: ReplicaStatusProbe,
+        poll_interval_seconds: float = 2.0,
+    ) -> None:
         self._probe = probe
         self._poll_interval = poll_interval_seconds
         self._stop = threading.Event()
@@ -159,6 +215,7 @@ class VerifyAutoscalingReplicas:
     scale_down_polls: int = 24
     poll_interval_seconds: int = 5
     watcher: Watcher | None = None
+    probe: ReplicaStatusProbe | None = None
     _result: AutoscalingSummary | None = field(default=None, init=False, repr=False)
 
     @property
@@ -175,8 +232,8 @@ class VerifyAutoscalingReplicas:
         )
         return self._result
 
-    def _probe(self) -> ReplicaProbe:
-        return ReplicaProbe(
+    def _resolved_probe(self) -> ReplicaStatusProbe:
+        return self.probe or ReplicaProbe(
             runner=self.runner,
             namespace=self.namespace,
             deployment_name=self.deployment_name,
@@ -184,10 +241,10 @@ class VerifyAutoscalingReplicas:
         )
 
     def _ready_replicas(self) -> int:
-        return self._probe().ready_replicas()
+        return self._resolved_probe().ready_replicas()
 
     def _desired_replicas(self) -> int:
-        return self._probe().desired_replicas()
+        return self._resolved_probe().desired_replicas()
 
     def run(self) -> AutoscalingSummary:
         max_replicas = self.watcher.max_observed if self.watcher is not None else 0

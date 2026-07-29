@@ -326,6 +326,7 @@ def install_product_commands(app: typer.Typer) -> None:
                     if scenario_config.workflow == "loadtest":
                         control_plane_url, prometheus_url = resolve_loadtest_urls(
                             environment_config,
+                            backend=scenario_config.backend or "k8s",
                             control_plane_url=control_plane_url,
                             prometheus_url=prometheus_url,
                         )
@@ -421,6 +422,7 @@ def install_product_commands(app: typer.Typer) -> None:
         if scenario_config.workflow == "loadtest":
             control_plane_url, prometheus_url = resolve_loadtest_urls(
                 environment_config,
+                backend=scenario_config.backend or "k8s",
                 control_plane_url=control_plane_url,
                 prometheus_url=prometheus_url,
                 dry_run=True,

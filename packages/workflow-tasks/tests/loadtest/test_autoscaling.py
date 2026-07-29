@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from workflow_tasks.loadtest.autoscaling import VerifyAutoscalingReplicas
+from workflow_tasks.loadtest.autoscaling import HttpReplicaProbe, VerifyAutoscalingReplicas
 
 
 @dataclass
@@ -29,6 +29,36 @@ class _Runner:
         if not self.values:
             return _Result(return_code=0, stdout="0")
         return _Result(return_code=0, stdout=self.values.pop(0))
+
+
+def test_http_replica_probe_reads_provider_neutral_status(monkeypatch) -> None:
+    calls: list[str] = []
+
+    class Response:
+        status_code = 200
+        text = ""
+
+        @staticmethod
+        def json():
+            return {"desiredReplicas": 3, "readyReplicas": 2}
+
+    def get(url: str, *, timeout: float):
+        calls.append(url)
+        assert timeout == 4.0
+        return Response()
+
+    monkeypatch.setattr("workflow_tasks.loadtest.autoscaling.httpx.get", get)
+    probe = HttpReplicaProbe(
+        endpoint="http://127.0.0.1:8080/",
+        function_name="word stats/java",
+    )
+
+    assert probe.desired_replicas() == 3
+    assert probe.ready_replicas() == 2
+    assert calls == [
+        "http://127.0.0.1:8080/v1/functions/word%20stats%2Fjava/replicas",
+        "http://127.0.0.1:8080/v1/functions/word%20stats%2Fjava/replicas",
+    ]
 
 
 def test_verify_autoscaling_replicas_observes_scale_up_and_down(monkeypatch) -> None:

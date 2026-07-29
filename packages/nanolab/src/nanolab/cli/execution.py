@@ -22,6 +22,7 @@ from nanolab.cli.vm_provider import (
     vm_request_for_role,
 )
 from nanolab.config.environment import EnvironmentConfig, RoleTarget
+from nanolab.config.scenario import BackendName
 from nanolab.core.task_shell_adapter import ShellCommandTaskRunner
 from nanolab.workspace.paths import default_tool_paths
 
@@ -32,6 +33,7 @@ StackHostResolver = Callable[[RoleTarget], str]
 def resolve_loadtest_urls(
     environment: EnvironmentConfig,
     *,
+    backend: BackendName = "k8s",
     control_plane_url: str | None = None,
     prometheus_url: str | None = None,
     dry_run: bool = False,
@@ -40,6 +42,14 @@ def resolve_loadtest_urls(
 ) -> tuple[str, str]:
     if control_plane_url is not None and prometheus_url is not None:
         return control_plane_url, prometheus_url
+
+    if backend == "container":
+        if environment.provider != "local":
+            raise ValueError("container load-test requires a local environment")
+        return (
+            control_plane_url or "http://127.0.0.1:8080",
+            prometheus_url or "http://127.0.0.1:9090",
+        )
 
     target = environment.target("stack")
     if environment.provider == "local":

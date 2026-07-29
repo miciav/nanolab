@@ -60,6 +60,7 @@ from sonata_tasks.helm import (
     helm_release_resource,
 )
 from sonata_tasks.resources import ContainerResourceCheckTask, K8sResourceCheckTask
+from sonata_tasks.registry import RegistryState, docker_registry_resource
 from sonata_tasks.process import managed_process_resource
 from sonata_tasks.validate import (
     ValidateFunction,
@@ -83,6 +84,7 @@ __all__ = [
     "HttpFunctionInvokeTask",
     "HttpFunctionRegisterTask",
     "K8sResourceCheckTask",
+    "RegistryState",
     "KubectlTask",
     "HelmInstallTask",
     "HelmReleaseSpec",
@@ -94,6 +96,7 @@ __all__ = [
     "DockerComposeProject",
     "WaitForDockerCompose",
     "docker_compose_resource",
+    "docker_registry_resource",
     "DockerBuildTask",
     "DockerInspectTask",
     "DockerPushTask",
