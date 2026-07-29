@@ -61,6 +61,7 @@ from sonata_tasks.helm import (
 )
 from sonata_tasks.imagetools import ImagetoolsCreateTask, ImagetoolsInspectTask
 from sonata_tasks.resources import ContainerResourceCheckTask, K8sResourceCheckTask
+from sonata_tasks.syft import SYFT_IMAGE, SyftTask
 from sonata_tasks.registry import RegistryState, docker_registry_resource
 from sonata_tasks.registry_tunnel import registry_tunnel_resource
 from sonata_tasks.buildx import buildx_builder_resource
@@ -122,6 +123,8 @@ __all__ = [
     "RunK6Task",
     "SkopeoCopyTask",
     "SkopeoInspectTask",
+    "SYFT_IMAGE",
+    "SyftTask",
     "VerifyAutoscalingTask",
     "WriteReportTask",
     "WriteSummaryTask",
