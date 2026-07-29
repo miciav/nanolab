@@ -1,5 +1,6 @@
 from collections.abc import Mapping
 from dataclasses import replace
+import json
 from pathlib import Path
 from typing import Any, cast
 
@@ -25,7 +26,7 @@ from workflow_tasks.loadtest.autoscaling import (
     ReplicaWatcher,
     VerifyAutoscalingReplicas,
 )
-from workflow_tasks.loadtest.models import K6Config, K6Stage
+from workflow_tasks.loadtest.models import K6Config, K6Stage, PrometheusQuery
 from workflow_tasks.loadtest.ports import PrometheusClient, RemoteFileFetcher
 from workflow_tasks.loadtest.tasks import (
     CapturePrometheusSnapshot,
@@ -35,7 +36,6 @@ from workflow_tasks.loadtest.tasks import (
     WriteLoadtestSummary,
 )
 from workflow_tasks.tasks.models import CommandTaskSpec
-from workflow_tasks.workflows.loadtest import default_prometheus_queries
 
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
@@ -43,6 +43,54 @@ from nanolab.plans.validate import _resolve_function, _set_args, _sonata_functio
 from nanolab.workspace.paths import discover_tool_root
 
 _REMOTE_DIR = "."
+
+
+def _default_prometheus_queries(function_name: str) -> tuple[PrometheusQuery, ...]:
+    function = f"{{function={json.dumps(function_name)}}}"
+    control_plane = '{app="nanofaas-control-plane"}'
+    return (
+        PrometheusQuery("function_dispatch_total", f"function_dispatch_total{function}", True),
+        PrometheusQuery("function_success_total", f"function_success_total{function}", True),
+        PrometheusQuery("function_error_total", f"function_error_total{function}"),
+        PrometheusQuery("function_retry_total", f"function_retry_total{function}"),
+        PrometheusQuery("function_timeout_total", f"function_timeout_total{function}"),
+        PrometheusQuery(
+            "function_queue_rejected_total", f"function_queue_rejected_total{function}"
+        ),
+        PrometheusQuery("function_cold_start_total", f"function_cold_start_total{function}"),
+        PrometheusQuery("function_warm_start_total", f"function_warm_start_total{function}"),
+        PrometheusQuery(
+            "function_latency_count", f"function_latency_ms_seconds_count{function}", True
+        ),
+        PrometheusQuery(
+            "function_latency_sum", f"function_latency_ms_seconds_sum{function}", True
+        ),
+        PrometheusQuery(
+            "function_init_duration_count",
+            f"function_init_duration_ms_seconds_count{function}",
+        ),
+        PrometheusQuery(
+            "function_init_duration_sum", f"function_init_duration_ms_seconds_sum{function}"
+        ),
+        PrometheusQuery(
+            "function_queue_wait_count", f"function_queue_wait_ms_seconds_count{function}"
+        ),
+        PrometheusQuery(
+            "function_queue_wait_sum", f"function_queue_wait_ms_seconds_sum{function}"
+        ),
+        PrometheusQuery(
+            "function_e2e_latency_count", f"function_e2e_latency_ms_seconds_count{function}"
+        ),
+        PrometheusQuery(
+            "function_e2e_latency_sum", f"function_e2e_latency_ms_seconds_sum{function}"
+        ),
+        PrometheusQuery("process_cpu_usage", f"process_cpu_usage{control_plane}", True),
+        PrometheusQuery(
+            "jvm_heap_used_bytes",
+            'jvm_memory_used_bytes{app="nanofaas-control-plane",area="heap"}',
+            True,
+        ),
+    )
 
 
 def _home(user: str, explicit: str | None) -> str:
@@ -250,7 +298,7 @@ def build_loadtest_plan(
                     task_id="",
                     title="Capture Prometheus snapshot",
                     client=prometheus_client,
-                    queries=default_prometheus_queries(target.name),
+                    queries=_default_prometheus_queries(target.name),
                     window=window,
                     output_dir=run_dir,
                 )

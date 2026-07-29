@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from workflow_tasks.core.task import Task
-from workflow_tasks.core.resource_task import ResourceTask
 from workflow_tasks.workflow.reporting import workflow_step
 
 
@@ -29,14 +28,11 @@ class Workflow:
 
     def run(self) -> None:
         main_error: BaseException | None = None
-        acquired_resources: list[ResourceTask] = []
 
         for task in self.tasks:
             try:
                 with workflow_step(task_id=task.task_id, title=task.title):
                     task.run()
-                if isinstance(task, ResourceTask):
-                    acquired_resources.append(task)
             except BaseException as exc:
                 main_error = exc
                 break
@@ -49,18 +45,6 @@ class Workflow:
                         task.run()
                 except Exception as exc:
                     cleanup_errors.append(str(exc))
-
-        for resource in reversed(acquired_resources):
-            if self.keep_infrastructure and resource.infrastructure:
-                continue
-            try:
-                with workflow_step(
-                    task_id=resource.cleanup_task_id,
-                    title=resource.cleanup_title,
-                ):
-                    resource.cleanup()
-            except Exception as exc:
-                cleanup_errors.append(str(exc))
 
         if main_error is not None:
             if cleanup_errors:

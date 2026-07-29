@@ -17,25 +17,6 @@ if TYPE_CHECKING:
     from workflow_tasks.tasks.executors import VmCommandRunner
 
 
-# Install k6 by downloading the binary from GitHub releases.
-# Avoids apt-repo setup entirely: curl|gpg pipelines fail silently when the key URL
-# changes or network is flaky, leaving apt unaware of the k6 package.
-_K6_INSTALL_CMD: tuple[str, ...] = (
-    "bash",
-    "-lc",
-    "which k6 2>/dev/null && exit 0; "
-    "set -euo pipefail; "
-    "K6_VER=$(curl -fsSL https://api.github.com/repos/grafana/k6/releases/latest"
-    " | python3 -c \"import json,sys; print(json.load(sys.stdin)['tag_name'])\"); "
-    "ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/'); "
-    "TMP=$(mktemp -d); "
-    "curl -fsSL \"https://github.com/grafana/k6/releases/download/${K6_VER}/k6-${K6_VER}-linux-${ARCH}.tar.gz\""
-    " | tar -xz -C \"$TMP\"; "
-    "sudo install -m 0755 \"$TMP/k6-${K6_VER}-linux-${ARCH}/k6\" /usr/local/bin/k6; "
-    "rm -rf \"$TMP\"",
-)
-
-
 def _build_k6_argv(config: "K6Config") -> tuple[str, ...]:
     args: list[str] = [
         "k6",
@@ -58,30 +39,6 @@ def _build_k6_argv(config: "K6Config") -> tuple[str, ...]:
         args.extend(["-e", f"NANOFAAS_PAYLOAD={config.payload_path}"])
     args.append(str(config.script_path))
     return tuple(args)
-
-
-@dataclass
-class InstallK6:
-    """DEPRECATED: bash binary-download k6 install (runs on the VM).
-
-    Superseded by the ansible path: ``install_k6_task`` / ``RunPlaybook`` with
-    ``install-k6.yml``. Retained for back-compat until all loadtest scenarios
-    (azure, proxmox) are migrated. Do not use in new code.
-    """
-    task_id: str
-    title: str
-    runner: "VmCommandRunner"
-    remote_dir: str
-
-    def run(self) -> None:
-        result = self.runner.run_vm_command(
-            _K6_INSTALL_CMD,
-            env={},
-            remote_dir=self.remote_dir,
-            dry_run=False,
-        )
-        if result.return_code != 0:
-            raise RuntimeError(result.stderr or result.stdout or f"k6 install failed (exit {result.return_code})")
 
 
 @dataclass

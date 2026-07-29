@@ -34,36 +34,6 @@ class ScriptedChooser:
         raise KeyboardInterrupt
 
 
-class FakeWorkflow:
-    def __init__(
-        self,
-        *,
-        error: Exception | None = None,
-        on_run: Callable[[], None] | None = None,
-        cleanup_tasks: list[Any] | None = None,
-    ) -> None:
-        self.tasks = [
-            SimpleNamespace(task_id="prepare", title="Prepare environment"),
-            SimpleNamespace(task_id="verify", title="Run checks"),
-        ]
-        self.cleanup_tasks = cleanup_tasks if cleanup_tasks is not None else []
-        self.keep_infrastructure = False
-        self.run_calls = 0
-        self._error = error
-        self._on_run = on_run
-
-    @property
-    def phase_titles(self) -> list[str]:
-        return [task.title for task in self.tasks + self.cleanup_tasks]
-
-    def run(self) -> None:
-        self.run_calls += 1
-        if self._on_run is not None:
-            self._on_run()
-        if self._error is not None:
-            raise self._error
-
-
 class FakeSonataWorkflow:
     """Sonata-shaped fake: no `.tasks`, only `.compile().tasks`."""
 
@@ -179,8 +149,6 @@ def _install_workflow_helpers(
     *,
     environment_path: Path,
     workflow: object,
-    # FakeWorkflow is legacy-shaped (`.tasks`, no `.compile()`); default to a
-    # legacy scenario so uses_sonata() routes through it correctly.
     scenario_kind: str = "offload-loadtest",
     backend: str = "container",
     provider: str = "local",
@@ -956,7 +924,7 @@ def test_nonlocal_loadtest_runs_provision_build_and_cleanup_inside_live_sink(
         events.append((label,))
         return "http://control-plane", "http://prometheus"
 
-    def build(*args: object, **kwargs: object) -> FakeWorkflow:
+    def build(*args: object, **kwargs: object) -> FakeSonataWorkflow:
         nonlocal build_count
         build_count += 1
         label = "workflow-preview" if build_count == 1 else "workflow-live"
@@ -1124,8 +1092,6 @@ def test_reselecting_local_environment_resets_remote_provisioning_choice(
     remote_path = local_path.parent / "remote.yaml"
     remote_path.write_text("provider: multipass\n", encoding="utf-8")
     workflow = FakeSonataWorkflow()
-    # FakeWorkflow is legacy-shaped; use a legacy scenario so uses_sonata() takes
-    # the `.tasks`-based path instead of trying to `.compile()` it.
     monkeypatch.setattr(tui_app, "_scenario", lambda _path: SimpleNamespace(workflow="offload-loadtest"))
     monkeypatch.setattr(
         tui_app,
@@ -1530,9 +1496,7 @@ def test_cli_plan_rows_come_from_the_compiled_sonata_workflow() -> None:
             task=SimpleNamespace(title="List functions"),
         ),
     ]
-    scenario = SimpleNamespace(workflow="cli")
-
-    rows = NanofaasTUI(controller=RecordingController())._plan_rows(scenario, workflow)
+    rows = NanofaasTUI(controller=RecordingController())._plan_rows(workflow)
 
     assert rows == [
         ("001.build-nanofaas-cli", "Build nanofaas-cli"),

@@ -72,9 +72,8 @@ def managed_process_resource(
     consumers never have to poll for it themselves. The release always stops it,
     and the compiler runs that release even when a consumer fails.
 
-    This is the Sonata twin of `workflow_tasks.components.container.
-    managed_process_resource`, not a reuse of it: that one returns the legacy
-    engine's `ResourceTask`, which `sonata_tasks` is forbidden to import.
+    The process is modeled directly as a Sonata resource, so acquisition,
+    compensation, and release share the engine's normal lifecycle.
     """
     actual_spawn = subprocess.Popen if spawn is None else spawn
 

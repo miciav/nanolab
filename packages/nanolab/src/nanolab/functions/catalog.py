@@ -318,10 +318,6 @@ PRESET_SPECS: tuple[FunctionPresetSpec, ...] = (
 )
 
 PRESET_SPEC_INDEX = {spec.name: spec for spec in PRESET_SPECS}
-SCENARIO_FUNCTION_RUNTIME_ALLOWLIST: dict[str, frozenset[FunctionRuntimeKind]] = {
-    "loadtest-helm-legacy": frozenset({"java", "java-lite", "python", "exec"}),
-    "loadtest-two-vm": frozenset({"java", "java-lite", "python", "exec"}),
-}
 
 
 def list_function_presets() -> list[FunctionPreset]:
@@ -333,9 +329,3 @@ def resolve_function_preset(name: str) -> FunctionPreset:
         return _resolve_preset(PRESET_SPEC_INDEX[name])
     except KeyError as exc:
         raise ValueError(f"Unknown function preset: {name}") from exc
-
-
-def function_runtime_allowlist_for_scenario(
-    scenario: str,
-) -> frozenset[FunctionRuntimeKind] | None:
-    return SCENARIO_FUNCTION_RUNTIME_ALLOWLIST.get(scenario)

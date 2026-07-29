@@ -3,12 +3,10 @@
 Both the `validate` and `cli` workflows can spawn this exact process when
 their scenario's `backend` is `container`: the control-plane jar, on this
 machine, on fixed ports, deployed with Docker. The two plan builders
-(`nanolab.plans.validate` and `nanolab.plans.cli`) differ only in which
-resource type wraps the process — `validate` uses the legacy `workflow_tasks`
-engine, `cli` uses `sonata_tasks` (which the import contract forbids from
-ever depending on the legacy engine) — but the process itself is one fact,
-not two. A wrong port or path here is exactly the shape of the original bug
-that made the `cli` workflow's readiness check impossible to satisfy.
+(`nanolab.plans.validate` and `nanolab.plans.cli`) share this definition so
+the process remains one fact, not two. A wrong port or path here is exactly
+the shape of the original bug that made the `cli` workflow's readiness check
+impossible to satisfy.
 
 Both workflows bind the SAME fixed ports (18080/18081), so a `validate`
 container run and a `cli` container run can never run concurrently on the

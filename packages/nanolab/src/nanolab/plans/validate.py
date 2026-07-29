@@ -1,5 +1,5 @@
 import json
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -10,12 +10,27 @@ from sonata_tasks.validate import ValidateFunction as SonataFunction
 from sonata_tasks.validate import ValidateWorkflowRequest, build_validate_workflow
 from workflow_tasks.components.helm import control_plane_helm_values
 from workflow_tasks.execution.bindings import RoleBindings
-from workflow_tasks.workflows.validate import ValidateFunction
 
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.functions.catalog import FunctionDefinition, resolve_function_definition
 from nanolab.plans import _local_control_plane
 from nanolab.workspace.paths import discover_tool_root
+
+
+@dataclass(frozen=True, slots=True)
+class _ResolvedFunction:
+    key: str
+    name: str
+    image: str
+    build_argv: tuple[str, ...]
+    payload: str
+    image_build_argv: tuple[str, ...] | None = None
+    resources: dict[str, object] | None = None
+    scaling_config: dict[str, object] | None = None
+    timeout_ms: int = 5000
+    concurrency: int = 2
+    queue_size: int = 20
+    max_retries: int = 3
 
 
 def _container_control_plane(repo_root: Path) -> Resource[Any]:
@@ -92,11 +107,11 @@ def _resolve_function(
     key: str,
     *,
     tool_root: Path | None = None,
-) -> ValidateFunction:
+) -> _ResolvedFunction:
     definition = resolve_function_definition(key)
     image = _function_image(definition)
     resource = config.resources.get(key)
-    return ValidateFunction(
+    return _ResolvedFunction(
         key=key,
         name=_function_name(definition),
         image=image,
@@ -109,14 +124,8 @@ def _resolve_function(
     )
 
 
-def _sonata_function(resolved: ValidateFunction) -> SonataFunction:
-    """The same resolved function in the Sonata catalogue's shape.
-
-    `loadtest`, `offload` and `offload-loadtest` still consume the legacy type,
-    so resolution keeps producing it and only the workflow that has moved
-    converts. This goes away with the last of them; the dropped `key` existed
-    only to spell task ids by hand.
-    """
+def _sonata_function(resolved: _ResolvedFunction) -> SonataFunction:
+    """Convert the product's resolved function to Sonata's public task shape."""
     return SonataFunction(
         name=resolved.name,
         image=resolved.image,

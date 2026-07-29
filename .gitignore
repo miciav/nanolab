@@ -19,4 +19,5 @@ packages/nanolab/profiles/proxmox.toml
 packages/nanolab/environments/azure*.yaml
 .nanofaas-source/
 .wheel-smoke/
+.worktrees/
 .coverage

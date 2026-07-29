@@ -11,7 +11,6 @@ from workflow_tasks.loadtest.models import K6Config, K6RunResult, K6Stage, Prome
 from workflow_tasks.loadtest.tasks import (
     CapturePrometheusSnapshot,
     FetchVmResults,
-    InstallK6,
     RunK6,
     WriteK6Report,
     WriteLoadtestSummary,
@@ -51,49 +50,6 @@ def _make_k6_config(tmp_path: Path) -> K6Config:
         stages=(K6Stage(duration="30s", target=5),),
         env={"NANOFAAS_FUNCTION": "my-fn"},
     )
-
-
-def test_install_k6_runs_bash_install_command() -> None:
-    runner = _RecordingVmRunner()
-    task = InstallK6(task_id="loadgen.install_k6", title="Install k6", runner=runner, remote_dir="/home/ubuntu")
-    task.run()
-    assert len(runner.commands) == 1
-    argv, _, remote_dir, _ = runner.commands[0]
-    assert argv[0] == "bash"
-    assert "k6" in argv[-1]
-    assert remote_dir == "/home/ubuntu"
-
-
-def test_install_k6_is_idempotent_and_downloads_binary() -> None:
-    runner = _RecordingVmRunner()
-    task = InstallK6(task_id="loadgen.install_k6", title="Install k6", runner=runner, remote_dir="/home/ubuntu")
-
-    task.run()
-
-    command = runner.commands[0][0][-1]
-    assert "which k6 2>/dev/null && exit 0" in command
-    assert "api.github.com/repos/grafana/k6/releases/latest" in command
-    assert "tar -xz" in command
-    assert "/usr/local/bin/k6" in command
-
-
-def test_install_k6_uses_binary_download_not_apt() -> None:
-    runner = _RecordingVmRunner()
-    task = InstallK6(task_id="loadgen.install_k6", title="Install k6", runner=runner, remote_dir="/home/ubuntu")
-
-    task.run()
-
-    command = runner.commands[0][0][-1]
-    assert "github.com/grafana/k6/releases/download" in command
-    assert "apt-get install" not in command
-    assert "gpg" not in command
-
-
-def test_install_k6_raises_on_nonzero_exit() -> None:
-    runner = _RecordingVmRunner(return_code=1)
-    task = InstallK6(task_id="loadgen.install_k6", title="Install k6", runner=runner, remote_dir="/home/ubuntu")
-    with pytest.raises(RuntimeError):
-        task.run()
 
 
 def test_run_k6_passes_summary_export_flag(tmp_path: Path) -> None:

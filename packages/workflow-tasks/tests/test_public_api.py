@@ -41,6 +41,7 @@ def test_version_is_set() -> None:
 def test_public_api_exports_task_and_workflow() -> None:
     assert hasattr(workflow_tasks, "Task")
     assert hasattr(workflow_tasks, "Workflow")
+    assert not hasattr(workflow_tasks, "ResourceTask")
 
 
 def test_public_api_exports_vm_tasks() -> None:
@@ -59,7 +60,7 @@ def test_public_api_exports_loadtest_tasks() -> None:
     assert hasattr(workflow_tasks, "PrometheusQuery")
     assert hasattr(workflow_tasks, "RemoteFileFetcher")
     assert hasattr(workflow_tasks, "PrometheusClient")
-    assert hasattr(workflow_tasks, "InstallK6")
+    assert not hasattr(workflow_tasks, "InstallK6")
     assert hasattr(workflow_tasks, "RunPlaybook")
     assert hasattr(workflow_tasks, "install_k6_task")
     assert hasattr(workflow_tasks, "RunK6")

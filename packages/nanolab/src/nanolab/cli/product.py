@@ -28,18 +28,6 @@ from nanolab.plans.loadtest import build_loadtest_plan
 from nanolab.plans.validate import build_validate_plan
 from nanolab.workspace.paths import default_tool_paths, discover_tool_root
 
-
-def uses_sonata(scenario: ScenarioConfig) -> bool:
-    """Whether this scenario is executed by Sonata. All of them are.
-
-    Kept rather than deleted along with its `else` branch: the legacy engine
-    still exists in `workflow_tasks`, and removing it is its own step. Once it
-    goes, so does this.
-    """
-    del scenario
-    return True
-
-
 def _read(path: Path) -> dict[str, object]:
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
@@ -168,47 +156,9 @@ def _validate_cli_container_options(
         )
 
 
-def _render(workflow) -> None:
-    for index, task in enumerate(workflow.tasks, start=1):
-        typer.echo(f"{index:02d}  {task.task_id}  {task.title}")
-
-
 def _render_compiled(compiled: CompiledWorkflow) -> None:
     for compiled_task in compiled.tasks:
         typer.echo(f"{compiled_task.task_id}  {compiled_task.task.title}")
-
-
-def _slice(workflow, *, only: str | None, start: str | None, until: str | None):
-    ids = [task.task_id for task in workflow.tasks]
-    selected = ids
-    sliced = any((only, start, until))
-    if only:
-        selected = [only]
-    else:
-        if start:
-            selected = selected[ids.index(start) :]
-        if until:
-            selected = selected[: selected.index(until) + 1]
-    unknown = set(selected) - set(ids)
-    if unknown:
-        raise ValueError(f"unknown task: {', '.join(sorted(unknown))}")
-    workflow.tasks = [task for task in workflow.tasks if task.task_id in selected]
-    if sliced:
-        selected_set = set(selected)
-
-        def acquired_by_selection(task) -> bool:
-            cleanup_id = task.task_id
-            candidates = {
-                cleanup_id.replace(".delete.", ".register."),
-                cleanup_id.replace(".uninstall.", ".deploy."),
-            }
-            return not candidates.isdisjoint(selected_set)
-
-        workflow.cleanup_tasks = [
-            task for task in workflow.cleanup_tasks if acquired_by_selection(task)
-        ]
-    return workflow
-
 
 def _git_commit(repo_root: Path) -> str | None:
     try:
@@ -379,29 +329,29 @@ def install_product_commands(app: typer.Typer) -> None:
                             control_plane_url=control_plane_url,
                             prometheus_url=prometheus_url,
                         )
-                    workflow = _workflow(
-                        scenario_config,
-                        environment_config,
-                        control_plane_url=control_plane_url,
-                        prometheus_url=prometheus_url or "http://127.0.0.1:9090",
-                        run_dir=effective_run_dir,
-                        provision=provision,
+                    sonata_workflow = cast(
+                        SonataWorkflow,
+                        _workflow(
+                            scenario_config,
+                            environment_config,
+                            control_plane_url=control_plane_url,
+                            prometheus_url=prometheus_url or "http://127.0.0.1:9090",
+                            run_dir=effective_run_dir,
+                            provision=provision,
+                        ),
                     )
-                    if uses_sonata(scenario_config):
-                        sonata_workflow = cast(SonataWorkflow, workflow)
-                        sonata_workflow.keep_infrastructure = keep
-                        try:
-                            sonata_workflow.run(
-                                select=Selection(only=only, start=start, until=until)
-                            )
-                            if scenario_config.workflow == "offload-loadtest" and effective_run_dir is not None:
-                                _print_offload_summary(effective_run_dir)
-                        except SelectionError as error:
-                            raise typer.BadParameter(str(error)) from None
-                    else:
-                        workflow = _slice(workflow, only=only, start=start, until=until)
-                        workflow.keep_infrastructure = keep
-                        workflow.run()
+                    sonata_workflow.keep_infrastructure = keep
+                    try:
+                        sonata_workflow.run(
+                            select=Selection(only=only, start=start, until=until)
+                        )
+                        if (
+                            scenario_config.workflow == "offload-loadtest"
+                            and effective_run_dir is not None
+                        ):
+                            _print_offload_summary(effective_run_dir)
+                    except SelectionError as error:
+                        raise typer.BadParameter(str(error)) from None
         except BaseException as exc:
             if effective_run_dir is not None:
                 try:
@@ -475,26 +425,25 @@ def install_product_commands(app: typer.Typer) -> None:
                 prometheus_url=prometheus_url,
                 dry_run=True,
             )
-        workflow = _workflow(
-            scenario_config,
-            environment_config,
-            control_plane_url=control_plane_url,
-            provision=provision,
-            prometheus_url=prometheus_url or "http://127.0.0.1:9090",
-            run_dir=run_dir,
-            dry_run=True,
+        sonata_workflow = cast(
+            SonataWorkflow,
+            _workflow(
+                scenario_config,
+                environment_config,
+                control_plane_url=control_plane_url,
+                provision=provision,
+                prometheus_url=prometheus_url or "http://127.0.0.1:9090",
+                run_dir=run_dir,
+                dry_run=True,
+            ),
         )
-        if uses_sonata(scenario_config):
-            sonata_workflow = cast(SonataWorkflow, workflow)
-            try:
-                compiled = sonata_workflow.compile(
-                    select=Selection(only=only, start=start, until=until)
-                )
-            except SelectionError as error:
-                raise typer.BadParameter(str(error)) from None
-            _render_compiled(compiled)
-        else:
-            _render(_slice(workflow, only=only, start=start, until=until))
+        try:
+            compiled = sonata_workflow.compile(
+                select=Selection(only=only, start=start, until=until)
+            )
+        except SelectionError as error:
+            raise typer.BadParameter(str(error)) from None
+        _render_compiled(compiled)
 
     @app.command("list")
     def list_command() -> None:

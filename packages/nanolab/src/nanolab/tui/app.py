@@ -19,10 +19,8 @@ from nanolab.cli.product import (
     _scenario,
     _validate_cli_container_options,
     _workflow,
-    uses_sonata,
 )
 from nanolab.cli.provisioning import provision_environment
-from nanolab.config import ScenarioConfig
 from nanolab.tui.workflow_controller import TuiWorkflowController
 from nanolab.workspace.paths import default_tool_paths, discover_tool_root
 from tui_toolkit import Choice, render_screen_frame, select
@@ -434,7 +432,7 @@ class NanofaasTUI:
                     body=str(exc),
                 )
                 return
-            self._render_plan(title=title, workflow=workflow, scenario=scenario)
+            self._render_plan(title=title, workflow=workflow)
             return
 
         try:
@@ -488,11 +486,9 @@ class NanofaasTUI:
                     f"Provision: {'yes' if provision else 'no'}",
                     f"Cleanup: {'keep' if keep else 'cleanup'}",
                 ],
-                planned_steps=(
-                    [title for _task_id, title in self._plan_rows(scenario, preview)]
-                    if uses_sonata(scenario)
-                    else preview.phase_titles
-                ),
+                planned_steps=[
+                    title for _task_id, title in self._plan_rows(preview)
+                ],
                 action=run_current_workflow,
             )
         except Exception:
@@ -523,28 +519,20 @@ class NanofaasTUI:
             return _workflow(scenario, environment, dry_run=dry_run)
         return _workflow(scenario, environment, provision=provision)
 
-    def _plan_rows(self, scenario: ScenarioConfig, workflow: Any) -> list[tuple[str, str]]:
-        """(task_id, title) pairs for display, from whichever engine built the workflow.
+    def _plan_rows(self, workflow: Any) -> list[tuple[str, str]]:
+        """Return `(task_id, title)` pairs from a compiled Sonata workflow."""
+        return [
+            (compiled_task.task_id, compiled_task.task.title)
+            for compiled_task in workflow.compile().tasks
+        ]
 
-        A Sonata `Workflow` has no task list until it is compiled, and its
-        compiled units carry the title on the task, not on themselves.
-        """
-        if uses_sonata(scenario):
-            return [
-                (compiled_task.task_id, compiled_task.task.title)
-                for compiled_task in workflow.compile().tasks
-            ]
-        return [(task.task_id, task.title) for task in workflow.tasks]
-
-    def _render_plan(
-        self, *, title: str, workflow: Any, scenario: ScenarioConfig
-    ) -> None:
+    def _render_plan(self, *, title: str, workflow: Any) -> None:
         table = Table(expand=True)
         table.add_column("#", justify="right", style="cyan", no_wrap=True)
         table.add_column("Task", style="bold")
         table.add_column("Description")
         for index, (task_id, task_title) in enumerate(
-            self._plan_rows(scenario, workflow), start=1
+            self._plan_rows(workflow), start=1
         ):
             table.add_row(f"{index:02d}", task_id, task_title)
 
