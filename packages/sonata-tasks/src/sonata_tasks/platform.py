@@ -54,6 +54,7 @@ class PlatformFunction:
     image: str
     payload: str
     build_argv: tuple[str, ...]
+    image_build_argv: tuple[str, ...] | None = None
     resources: dict[str, Any] | None = None
     scaling_config: dict[str, Any] | None = None
     offload: dict[str, Any] | None = None
@@ -124,11 +125,7 @@ def _control_plane_build(
     executor: CommandTaskExecutor,
     cwd: Path | None,
 ) -> GradleTask:
-    target = (
-        ":control-plane:bootBuildImage"
-        if request.build == "buildpack"
-        else ":control-plane:bootJar"
-    )
+    target = ":control-plane:bootJar"
     modules = (_MODULES[request.backend], *request.additional_modules)
     return GradleTask(
         target,
@@ -268,10 +265,20 @@ def add_platform(
                 )
             )
         for function in request.functions:
+            if function.image_build_argv is not None:
+                workflow.add(
+                    CommandTask(
+                        title=request.titled(f"Build application artifact: {function.name}"),
+                        argv=function.build_argv,
+                        executor=executor,
+                        role=request.role,
+                        cwd=cwd,
+                    )
+                )
             workflow.add(
                 CommandTask(
                     title=request.titled(f"Build image {function.name}"),
-                    argv=function.build_argv,
+                    argv=function.image_build_argv or function.build_argv,
                     executor=executor,
                     role=request.role,
                     cwd=cwd,

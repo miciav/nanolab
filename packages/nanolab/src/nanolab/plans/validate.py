@@ -40,8 +40,7 @@ def _build_argv(definition: FunctionDefinition, image: str) -> tuple[str, ...]:
     if runtime == "java":
         return (
             "./gradlew",
-            f":functions:java:{family}:bootBuildImage",
-            f"-PfunctionImage={image}",
+            f":functions:java:{family}:bootJar",
             "--quiet",
         )
     runtime_dir = {"java-lite": "java", "exec": "bash"}.get(runtime, runtime)
@@ -54,6 +53,15 @@ def _build_argv(definition: FunctionDefinition, image: str) -> tuple[str, ...]:
         "-f",
         f"functions/{runtime_dir}/{family}{suffix}/Dockerfile",
         ".",
+    )
+
+
+def _image_build_argv(definition: FunctionDefinition, image: str) -> tuple[str, ...] | None:
+    if definition.runtime != "java":
+        return None
+    family = definition.family
+    return (
+        "docker", "build", "-t", image, "-f", f"functions/java/{family}/Dockerfile", f"functions/java/{family}"
     )
 
 
@@ -93,6 +101,7 @@ def _resolve_function(
         name=_function_name(definition),
         image=image,
         build_argv=_build_argv(definition, image),
+        image_build_argv=_image_build_argv(definition, image),
         payload=_payload(definition, tool_root),
         resources=(
             resource.model_dump(by_alias=True, exclude_none=True) if resource is not None else None
@@ -113,6 +122,7 @@ def _sonata_function(resolved: ValidateFunction) -> SonataFunction:
         image=resolved.image,
         payload=resolved.payload,
         build_argv=resolved.build_argv,
+        image_build_argv=resolved.image_build_argv,
         resources=resolved.resources,
         scaling_config=resolved.scaling_config,
         timeout_ms=resolved.timeout_ms,

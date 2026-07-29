@@ -91,6 +91,31 @@ def _fetch_text(url: str, *, timeout: float = 10.0) -> str:
         return response.read().decode("utf-8")
 
 
+def format_offload_summary(numbers: dict[str, float]) -> str:
+    no_offloads = numbers["k6_offloaded_requests"] == 0
+    rows = (
+        ("k6_offloadable_requests", ""),
+        (
+            "edge_function_success_offloadable",
+            "Edge served all requests." if no_offloads else "",
+        ),
+        ("k6_offloaded_requests", ""),
+        ("edge_offload_total", "Edge did not offload any requests." if no_offloads else ""),
+        (
+            "cloud_function_success_offloadable",
+            "Cloud did not process any offloaded requests." if no_offloads else "",
+        ),
+    )
+    width = max(len(label) for label, _ in rows)
+    return "\n".join(
+        ["Offload load-test summary"]
+        + [
+            f"{label + ':':<{width + 2}} {numbers[label]:g}{'  ' + note if note else ''}"
+            for label, note in rows
+        ]
+    )
+
+
 @dataclass
 class EvaluateOffloadConservation:
     task_id: str

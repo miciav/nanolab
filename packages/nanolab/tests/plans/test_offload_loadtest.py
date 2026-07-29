@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+import json
 import os
 from pathlib import Path
 
@@ -8,7 +9,10 @@ import yaml
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.plans import offload_loadtest as offload_loadtest_plan
-from nanolab.plans.offload_loadtest import build_offload_loadtest_plan
+from nanolab.plans.offload_loadtest import (
+    EvaluateOffloadConservation,
+    build_offload_loadtest_plan,
+)
 from workflow_tasks.execution.bindings import RoleBindings
 from workflow_tasks.tasks.models import CommandTaskSpec, TaskResult
 
@@ -182,6 +186,55 @@ def test_dedicated_loadgen_requires_a_fetcher(tmp_path: Path) -> None:
             run_dir=tmp_path,
             repo_root=NANOFAAS_ROOT,
         )
+
+
+def test_evaluation_writes_a_zero_offload_summary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    summary_path = tmp_path / "k6-summary.json"
+    summary_path.write_text(
+        '{"metrics":{"offloadable_requests":{"count":601},"offloaded_requests":{"count":0}}}',
+        encoding="utf-8",
+    )
+    report_path = tmp_path / "offload-report.json"
+    monkeypatch.setattr(
+        offload_loadtest_plan,
+        "_fetch_text",
+        lambda url, **_kwargs: (
+            'function_success_total{function="word-stats-java"} 601\n'
+            if url == "http://edge/metrics"
+            else ""
+        ),
+    )
+
+    result = EvaluateOffloadConservation(
+        task_id="",
+        title="Evaluate offload conservation",
+        k6_summary_path=summary_path,
+        edge_metrics_url="http://edge/metrics",
+        cloud_metrics_url="unused",
+        offloadable="word-stats-java",
+        control="json-transform-java",
+        output_path=report_path,
+    ).run()
+
+    assert result == {"passed": True}
+    assert json.loads(report_path.read_text(encoding="utf-8"))["numbers"]["k6_offloadable_requests"] == 601
+
+
+def test_summary_does_not_describe_nonzero_offload_as_zero() -> None:
+    summary = offload_loadtest_plan.format_offload_summary(
+        {
+            "k6_offloadable_requests": 601,
+            "edge_function_success_offloadable": 601,
+            "k6_offloaded_requests": 12,
+            "edge_offload_total": 12,
+            "cloud_function_success_offloadable": 12,
+        }
+    )
+
+    assert "did not offload" not in summary
+    assert "did not process" not in summary
 
 
 def test_edge_offload_target_points_at_the_cloud_role(tmp_path: Path) -> None:

@@ -22,7 +22,7 @@ from nanolab.cli.execution import build_role_bindings, resolve_loadtest_urls
 from nanolab.cli.progress import ConsoleProgressSink
 from nanolab.cli.provisioning import provision_environment
 from nanolab.plans.offload import build_offload_plan
-from nanolab.plans.offload_loadtest import build_offload_loadtest_plan
+from nanolab.plans.offload_loadtest import build_offload_loadtest_plan, format_offload_summary
 from nanolab.plans.cli import build_cli_plan
 from nanolab.plans.loadtest import build_loadtest_plan
 from nanolab.plans.validate import build_validate_plan
@@ -57,6 +57,16 @@ def _environment(path: Path | None) -> EnvironmentConfig:
         if path
         else EnvironmentConfig(provider="local")
     )
+
+
+def _print_offload_summary(run_dir: Path) -> None:
+    path = run_dir / "offload-report.json"
+    if not path.is_file():
+        return
+    report = json.loads(path.read_text(encoding="utf-8"))
+    numbers = report.get("numbers")
+    if isinstance(numbers, dict):
+        typer.echo(format_offload_summary({key: float(value) for key, value in numbers.items()}))
 
 
 def _workflow(
@@ -384,6 +394,8 @@ def install_product_commands(app: typer.Typer) -> None:
                             sonata_workflow.run(
                                 select=Selection(only=only, start=start, until=until)
                             )
+                            if scenario_config.workflow == "offload-loadtest" and effective_run_dir is not None:
+                                _print_offload_summary(effective_run_dir)
                         except SelectionError as error:
                             raise typer.BadParameter(str(error)) from None
                     else:

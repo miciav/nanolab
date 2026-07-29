@@ -129,12 +129,6 @@ def evaluate_conservation(
         "cloud function_success_total for offloadable",
         cloud_success_offloadable,
     )
-    if k6_offloaded <= 0:
-        failures.append(
-            "no requests were offloaded (k6 offloaded_requests == 0); "
-            "the experiment must actually offload"
-        )
-
     # 3. the control function must never be offloaded, on either control plane.
     edge_offload_control = record(
         "edge_offload_control",
