@@ -297,10 +297,10 @@ def test_loadtest_plan_owns_stack_registration_and_cleanup(tmp_path: Path) -> No
     )
 
     ids = _ids(workflow)
-    assert ids.index("007.acquire-helm-release-nanofaas") < ids.index("008.acquire-word-stats-java")
-    assert ids.index("008.acquire-word-stats-java") < ids.index("009.run-the-load-test")
+    assert ids.index("008.acquire-helm-release-nanofaas") < ids.index("009.acquire-word-stats-java")
+    assert ids.index("009.acquire-word-stats-java") < ids.index("010.run-the-load-test")
     # The teardown is compiled in, in reverse, rather than a list the caller runs.
-    assert ids[-2:] == ["010.release-word-stats-java", "011.release-helm-release-nanofaas"]
+    assert ids[-2:] == ["011.release-word-stats-java", "012.release-helm-release-nanofaas"]
 
 
 def test_loadtest_plan_enables_advanced_metrics(tmp_path: Path) -> None:

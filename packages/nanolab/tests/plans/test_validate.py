@@ -76,7 +76,7 @@ def test_validate_plan_dispatches_k8s_tasks_to_stack_binding() -> None:
         RoleBindings(host=host, stack=stack),
     )
 
-    assert len(plan.compile().tasks) == 12
+    assert len(plan.compile().tasks) == 13
     assert host.seen == []
 
 
