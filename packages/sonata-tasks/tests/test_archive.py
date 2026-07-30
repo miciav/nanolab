@@ -120,10 +120,11 @@ def test_acquire_archives_transfers_verifies_and_extracts(
     assert len(provider.transfer_seen) == 1
     assert provider.transfer_seen[0][1] == remote_archive
 
-    assert len(provider.exec_seen) == 3
-    assert provider.exec_seen[0] == ("sha256sum", remote_archive)
-    assert provider.exec_seen[1] == ("mkdir", "-p", remote_source_dir)
-    assert provider.exec_seen[2] == ("tar", "-xf", remote_archive, "-C", remote_source_dir)
+    assert len(provider.exec_seen) == 4
+    assert provider.exec_seen[0] == ("mkdir", "-p", str(Path(remote_archive).parent))
+    assert provider.exec_seen[1] == ("sha256sum", remote_archive)
+    assert provider.exec_seen[2] == ("mkdir", "-p", remote_source_dir)
+    assert provider.exec_seen[3] == ("tar", "-xf", remote_archive, "-C", remote_source_dir)
 
     # Verify the extracted content
     extracted_readme = Path(remote_source_dir) / "README.md"
