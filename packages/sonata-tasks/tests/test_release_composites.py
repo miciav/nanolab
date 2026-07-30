@@ -143,8 +143,12 @@ class TestSourceTestsComposite:
     def test_wraps_each_spec_as_a_command_task(self) -> None:
         executor = RecordingExecutor()
         commands = [
-            CommandTaskSpec(task_id="lint", summary="Run linter", argv=("echo", "lint"), role="host"),
-            CommandTaskSpec(task_id="unit", summary="Run unit tests", argv=("echo", "test"), role="host"),
+            CommandTaskSpec(
+                task_id="lint", summary="Run linter", argv=("echo", "lint"), role="host"
+            ),
+            CommandTaskSpec(
+                task_id="unit", summary="Run unit tests", argv=("echo", "test"), role="host"
+            ),
         ]
 
         composite = source_tests_composite(commands, executor)
@@ -155,6 +159,34 @@ class TestSourceTestsComposite:
         assert len(executor.seen) == 2
         assert executor.seen[0].argv == ("echo", "lint")
         assert executor.seen[1].argv == ("echo", "test")
+
+    def test_preserves_command_execution_fields(self) -> None:
+        executor = RecordingExecutor()
+        commands = [
+            CommandTaskSpec(
+                task_id="tests",
+                summary="Run tests",
+                argv=("pytest",),
+                role="stack",
+                env={"CI": "true"},
+                cwd=Path("/local/fallback"),
+                remote_dir="/remote/source",
+                expected_exit_codes=frozenset({0, 5}),
+                timeout_seconds=600,
+            ),
+        ]
+
+        composite = source_tests_composite(commands, executor)
+        workflow = Workflow("source-tests-fields")
+        workflow.add(composite)
+        workflow.run()
+
+        seen = executor.seen[0]
+        assert dict(seen.env) == {"CI": "true"}
+        assert seen.cwd == Path("/local/fallback")
+        assert seen.remote_dir == "/remote/source"
+        assert seen.expected_exit_codes == frozenset({0, 5})
+        assert seen.timeout_seconds == 600
 
     def test_default_title(self) -> None:
         executor = RecordingExecutor()
@@ -200,9 +232,7 @@ class TestAmd64BuildComposite:
 
         # Only amd64 cells should produce build tasks
         build_images = [
-            spec.argv[spec.argv.index("-t") + 1]
-            for spec in executor.seen
-            if "build" in spec.argv
+            spec.argv[spec.argv.index("-t") + 1] for spec in executor.seen if "build" in spec.argv
         ]
         assert build_images == ["reg/ctrl:1-a-jvm", "reg/watch:1-amd64"]
 
@@ -336,8 +366,9 @@ class TestArm64BuildComposite:
             _bake_cell("ctrl", "reg/ctrl:v1-arm64", arch="arm64"),
         )
 
-        composite = arm64_build_composite(plan, executor, "arm-builder", "b",
-                                           registry_upstream="localhost:5000")
+        composite = arm64_build_composite(
+            plan, executor, "arm-builder", "b", registry_upstream="localhost:5000"
+        )
         workflow = Workflow("arm64-build")
         workflow.add(composite)
         workflow.run()
@@ -351,10 +382,12 @@ class TestArm64BuildComposite:
 class TestPublishArchitecturesComposite:
     def test_copies_each_cell_with_plain_references(self) -> None:
         executor = RecordingExecutor()
-        plan = _FakePublishPlan(copies=(
-            _FakeCopy(source="reg/ctrl:v1-amd64", destination="ghcr.io/ctrl:v1-amd64"),
-            _FakeCopy(source="reg/watch:v1-amd64", destination="ghcr.io/watch:v1-amd64"),
-        ))
+        plan = _FakePublishPlan(
+            copies=(
+                _FakeCopy(source="reg/ctrl:v1-amd64", destination="ghcr.io/ctrl:v1-amd64"),
+                _FakeCopy(source="reg/watch:v1-amd64", destination="ghcr.io/watch:v1-amd64"),
+            )
+        )
 
         composite = publish_architectures_composite(plan, executor, "host", "/auth.json")
         workflow = Workflow("publish-arch")
@@ -365,6 +398,7 @@ class TestPublishArchitecturesComposite:
         sources = [s for s in executor.seen[0].argv if "docker://" in s]
         # Source is plain tag reference, not digest-pinned
         assert "docker://reg/ctrl:v1-amd64" in sources
+
 
 class TestPublishManifestsComposite:
     def test_creates_manifests_via_publish_plan(self) -> None:
@@ -387,6 +421,7 @@ class TestPublishManifestsComposite:
         spec = executor.seen[0]
         assert "imagetools" in spec.argv
         assert "create" in spec.argv
+
 
 class TestPublishAliasesComposite:
     def test_creates_aliases_via_publish_plan(self) -> None:

@@ -33,7 +33,9 @@ class CommandTask(Task[TaskResult]):
     role: ExecutionRole = "host"
     env: Mapping[str, str] = field(default_factory=dict[str, str])
     cwd: Path | None = None
+    remote_dir: str | None = None
     expected_exit_codes: frozenset[int] = field(default_factory=lambda: frozenset({0}))
+    timeout_seconds: int | None = None
     verify: Callable[[TaskResult], None] | None = None
 
     @override
@@ -56,5 +58,7 @@ class CommandTask(Task[TaskResult]):
             role=self.role,
             env=self.env,
             cwd=self.cwd,
+            remote_dir=self.remote_dir,
             expected_exit_codes=self.expected_exit_codes,
+            timeout_seconds=self.timeout_seconds,
         )
