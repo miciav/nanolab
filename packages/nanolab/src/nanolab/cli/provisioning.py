@@ -166,7 +166,7 @@ def _stack_operations(
     planners: list[
         Callable[[ScenarioExecutionContext], tuple[ScenarioOperation, ...]]
     ] = [plan_vm_provision_base]
-    if scenario.backend == "k8s" or scenario.workflow == "loadtest":
+    if scenario.backend == "k8s" or scenario.workflow in ("loadtest", "release"):
         planners.extend(
             [
                 plan_k3s_install,
@@ -214,7 +214,7 @@ def provision_environment(
     main_error: BaseException | None = None
     cleanup_error: Exception | None = None
     try:
-        loadtest_workflow = scenario.workflow in ("loadtest", "offload-loadtest")
+        loadtest_workflow = scenario.workflow in ("loadtest", "offload-loadtest", "release")
         dedicated_loadgen = loadtest_workflow and "loadgen" in environment.roles
         stack_request = _request(environment, "stack", loadtest=loadtest_workflow)
         stack_cleanup = _destroy_task(orchestrator, stack_request, role="stack")

@@ -107,7 +107,7 @@ def build_release_workflow(
 
     # --- Phase 1: Source Tests ---
     archive = source_archive_resource(
-        repo_root=request.repo_root,
+        repo_root=nanofaas,
         commit=request.image_plan.version,
         remote_source_dir=source_dir,
         remote_archive=f"{remote_root}/source.tar",
@@ -200,7 +200,7 @@ def build_release_workflow(
         role="arm-builder",
     )
     arm_plan = build_arm64_image_plan(
-        request.repo_root,
+        nanofaas,
         request.version,
         registry=request.image_plan.registry,
     )
@@ -222,8 +222,10 @@ def build_release_workflow(
     )
 
     # --- Phase 11: Publish ---
+    # TODO: plumb digest evidence from registry push + arm64 build phases.
+    # Currently running with empty data — use --until arm64-smoke for testing.
     pub_plan = build_publish_plan(
-        request.repo_root,
+        nanofaas,
         request.version,
         local_registry=request.image_plan.registry,
     )
@@ -250,12 +252,17 @@ def build_release_workflow(
     )
 
     # --- Phase 12: Attest ---
+    cosign_key = "/secrets/cosign-key"
+    cosign_password = "/secrets/cosign-password"
+    if request.credentials is not None:
+        cosign_key = str(getattr(request.credentials, "cosign_key", cosign_key))
+        cosign_password = str(getattr(request.credentials, "cosign_password", cosign_password))
     attest = attest_composite(
         images=(),
         predicate_remote=Path(f"{remote_root}/predicate.json"),
         sbom_dir_remote=Path(f"{remote_root}/sboms"),
-        cosign_key="/secrets/cosign-key",
-        password_file="/secrets/cosign-password",
+        cosign_key=cosign_key,
+        password_file=cosign_password,
         docker_config="/tmp/ghcr-auth",
         executor=executor,
         role="stack",
