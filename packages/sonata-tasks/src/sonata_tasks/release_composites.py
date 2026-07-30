@@ -393,23 +393,23 @@ def arm64_smoke_composite(
         Working directory.
     """
     # ponytail: simple docker-run smoke per server cell, plus a watchdog
-    # check.  The full server_smoke_specs logic lives in nanolab.release.arm
-    # and the caller is responsible for mapping it into argv.
+    # check. Inlined from nanolab.release.arm to keep sonata-tasks decoupled.
 
-    from nanolab.release.arm import server_smoke_specs, watchdog_cell
-
-    specs = server_smoke_specs(plan)
+    server_cells = [c for c in plan.cells if c.target.name != "watchdog"]
     steps: list[Any] = []
 
-    for spec in specs:
+    for index, cell in enumerate(server_cells, 1):
+        port = 8081 if cell.target.name == "control-plane" else 8080
+        health = "/actuator/health" if cell.target.name == "control-plane" else "/health"
+        container = f"nanofaas-arm64-smoke-{index}"
         steps.append(
             CommandTask(
-                title=f"Smoke {spec.cell.target.name}",
+                title=f"Smoke {cell.target.name}",
                 argv=(
                     "docker", "run", "--rm", "-d",
-                    "--name", spec.container_name,
-                    "-p", f"{spec.container_port}:{spec.container_port}",
-                    spec.cell.image,
+                    "--name", container,
+                    "-p", f"{port}:{port}",
+                    cell.image,
                 ),
                 executor=executor,
                 role=role,
@@ -418,11 +418,11 @@ def arm64_smoke_composite(
         )
         steps.append(
             CommandTask(
-                title=f"Health-check {spec.cell.target.name}",
+                title=f"Health-check {cell.target.name}",
                 argv=(
                     "curl", "-fsS", "--retry", "10", "--retry-delay", "1",
                     "--retry-connrefused",
-                    f"http://127.0.0.1:{spec.container_port}{spec.health_path}",
+                    f"http://127.0.0.1:{port}{health}",
                 ),
                 executor=executor,
                 role=role,
@@ -431,20 +431,18 @@ def arm64_smoke_composite(
         )
 
     # Watchdog smoke — it should fail without a child runtime.
-    try:
-        wd = watchdog_cell(plan)
+    wd_cells = [c for c in plan.cells if c.target.name == "watchdog"]
+    if len(wd_cells) == 1:
         steps.append(
             CommandTask(
                 title="Run watchdog smoke",
-                argv=("docker", "run", "--rm", wd.image, "true"),
+                argv=("docker", "run", "--rm", wd_cells[0].image, "true"),
                 executor=executor,
                 role=role,
                 cwd=cwd,
                 expected_exit_codes=frozenset({1}),
             )
         )
-    except RuntimeError:
-        pass  # no watchdog in the plan — skip
 
     return Steps(title=title, steps=tuple(steps))
 

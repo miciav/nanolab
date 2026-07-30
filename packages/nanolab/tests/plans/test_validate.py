@@ -101,9 +101,9 @@ def test_container_validation_builds_and_deploys_the_control_plane_with_compose(
     ids = [task.task_id for task in _plan("container").compile().tasks]
 
     assert ids == [
-        "001.build-application-artifact-word-stats-java",
-        "002.build-image-word-stats-java",
-        "003.acquire-docker-compose-project-nanofaas-validate",
+        "001.acquire-docker-compose-project-nanofaas-validate",
+        "002.build-application-artifact-word-stats-java",
+        "003.build-image-word-stats-java",
         "004.acquire-word-stats-java",
         "005.invoke-word-stats-java",
         "006.inspect-resources-of-nanofaas-word-stats-java-r1",

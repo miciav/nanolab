@@ -12,7 +12,7 @@ from nanolab.release.metrics import (
     RegressionPolicy,
 )
 
-from sonata_tasks.release_metrics import AggregateBenchmarks, EvaluateRegressionGate
+from nanolab.plans.release_metrics import AggregateBenchmarks, EvaluateRegressionGate
 
 
 _PROFILE = PerformanceProfile(

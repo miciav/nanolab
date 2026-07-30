@@ -26,7 +26,7 @@ from sonata_tasks.release_composites import (
     registry_push_composite,
     source_tests_composite,
 )
-from sonata_tasks.release_metrics import AggregateBenchmarks
+from nanolab.plans.release_metrics import AggregateBenchmarks
 from sonata_tasks.registry_tunnel import registry_tunnel_resource
 from workflow_tasks.execution.bindings import RoleBoundCommandTaskExecutor
 from workflow_tasks.loadtest.adapters import HttpPrometheusClient
