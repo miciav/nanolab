@@ -1,6 +1,5 @@
 """Tests for FileTransferTask."""
 
-from dataclasses import dataclass
 from pathlib import Path
 
 from sonata_engine import TaskInputs

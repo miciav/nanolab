@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any, Mapping
 
 import pytest
@@ -10,7 +9,6 @@ from sonata_engine import TaskInputs
 from nanolab.release.metrics import (
     PerformanceAggregate,
     PerformanceProfile,
-    RegressionDecision,
     RegressionPolicy,
 )
 

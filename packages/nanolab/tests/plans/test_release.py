@@ -3,7 +3,6 @@
 from pathlib import Path
 
 import pytest
-from sonata_engine import Workflow
 
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig

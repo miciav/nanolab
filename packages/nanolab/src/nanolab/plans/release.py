@@ -12,10 +12,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from sonata_engine import Steps, Task, TaskInputs, TaskOutcome, Workflow
+from sonata_engine import Task, TaskInputs, TaskOutcome, Workflow
 from sonata_tasks.archive import source_archive_resource
 from sonata_tasks.buildx import buildx_builder_resource
-from sonata_tasks.command import CommandTask
 from sonata_tasks.release_composites import (
     amd64_build_composite,
     arm64_build_composite,
@@ -44,7 +43,7 @@ from nanolab.release.metrics import (
     RegressionPolicy,
     newest_comparable_record,
 )
-from nanolab.release.publish import PublishPlan, build_publish_plan
+from nanolab.release.publish import build_publish_plan
 from nanolab.release.run import ReleaseSettings, source_test_commands
 
 
@@ -76,7 +75,7 @@ def build_release_workflow(request: ReleaseRequest) -> Workflow:
 
     provider = vm_provider_for_environment(env, request.repo_root)
     stack_req = vm_request_for_role(env, "stack", loadtest=True)
-    loadgen_req = vm_request_for_role(env, "loadgen", loadtest=True)
+    _ = vm_request_for_role(env, "loadgen", loadtest=True)  # captured by build_role_bindings
     arm_req = vm_request_for_role(env, "arm-builder")
     bindings, fetcher = build_role_bindings(env, vm_provider=provider, repo_root=request.repo_root)
     executor = RoleBoundCommandTaskExecutor(bindings)
@@ -284,7 +283,7 @@ class _SubWorkflowTask(Task[None]):
 
     def __post_init__(self) -> None:
         if not self.title:
-            self.title = f"Run {self.workflow._workflow_id}"
+            self.title = f"Run {self.workflow.workflow_id}"
 
     def run(self, inputs: TaskInputs) -> TaskOutcome[None]:
         self.workflow.run()
@@ -306,7 +305,6 @@ class _RegressionGate(Task[RegressionDecision]):
 
         from nanolab.release.metrics import (
             PerformanceAggregate,
-            aggregate_runs,
             evaluate_regression,
         )
 

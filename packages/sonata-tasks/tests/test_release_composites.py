@@ -8,7 +8,6 @@ from pathlib import Path
 from sonata_engine import Workflow
 from workflow_tasks.tasks.models import CommandTaskSpec, TaskResult
 
-from sonata_tasks.command import CommandTask
 from sonata_tasks.release_composites import (
     amd64_build_composite,
     arm64_build_composite,

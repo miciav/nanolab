@@ -76,7 +76,7 @@ class SkopeoInspectTask(CommandTask):
         argv: list[str] = [
             "skopeo",
             "inspect",
-            f"--format={{{{.Digest}}}}",
+            "--format={{.Digest}}",
             "--authfile",
             authfile,
         ]
