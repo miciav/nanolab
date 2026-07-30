@@ -7,7 +7,7 @@ from workflow_tasks.execution.bindings import CommandTaskExecutor
 from workflow_tasks.execution.roles import ExecutionRole
 from workflow_tasks.tasks.models import TaskResult
 
-from sonata_tasks.command import CommandTask
+from sonata_tasks.docker import DockerTask
 
 
 SYFT_IMAGE = (
@@ -16,7 +16,7 @@ SYFT_IMAGE = (
 )
 
 
-class SyftTask(CommandTask):
+class SyftTask(DockerTask):
     """Generate an SPDX SBOM for a container image using ``anchore/syft``.
 
     Runs the pinned syft image via ``docker run``, mounting the Docker config
@@ -39,24 +39,15 @@ class SyftTask(CommandTask):
         output_dir = str(Path(output_path).parent)
         output_file = Path(output_path).name
         super().__init__(
-            title=title or f"Syft SBOM {image}",
-            argv=(
-                "docker",
-                "run",
-                "--rm",
-                "--env",
-                "DOCKER_CONFIG=/auth",
-                "--volume",
-                f"{docker_config}:/auth:ro",
-                "--volume",
-                f"{output_dir}:/out",
-                SYFT_IMAGE,
-                image,
-                "-o",
-                f"spdx-json=/out/{output_file}",
-            ),
+            "run", "--rm",
+            "--env", "DOCKER_CONFIG=/auth",
+            "--volume", f"{docker_config}:/auth:ro",
+            "--volume", f"{output_dir}:/out",
+            SYFT_IMAGE, image,
+            "-o", f"spdx-json=/out/{output_file}",
             executor=executor,
             role=role,
+            title=title or f"Syft SBOM {image}",
             cwd=cwd,
             verify=verify,
         )

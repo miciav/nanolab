@@ -55,6 +55,28 @@ def _pin_with_digest(src: str, digests: Mapping[str, str]) -> str:
     return f'{src.rsplit(":", 1)[0]}@{digests[src]}'
 
 
+class _PlanItems:
+    """Normalised view of a publish plan so composites don't sniff types."""
+
+    def __init__(self, plan: Any) -> None:
+        self.copies: tuple[Any, ...] = ()
+        self.manifests: tuple[Any, ...] = ()
+        self.aliases: tuple[Any, ...] = ()
+
+        if hasattr(plan, "copies"):
+            self.copies = tuple(plan.copies)
+            self.manifests = tuple(getattr(plan, "manifests", ()))
+            self.aliases = tuple(getattr(plan, "aliases", ()))
+        elif hasattr(plan, "cells"):
+            self.copies = tuple(plan.cells)
+            self.manifests = (
+                plan.manifests if hasattr(plan, "manifests") else ()
+            )
+            self.aliases = (
+                plan.aliases if hasattr(plan, "aliases") else ()
+            )
+
+
 # ---------------------------------------------------------------------------
 # 1. source_tests_composite
 # ---------------------------------------------------------------------------
@@ -472,15 +494,12 @@ def publish_architectures_composite(
         Whether to verify TLS when reading from the source registry.
         Set to ``False`` for local registries with self-signed certs.
     """
-    steps: list[Any] = []
-    if hasattr(plan, "copies"):
-        copies = plan.copies
-    elif hasattr(plan, "cells"):
-        copies = plan.cells
-    else:
-        raise TypeError("plan must have a 'copies' or 'cells' attribute")
+    items = _PlanItems(plan)
+    if not items.copies:
+        raise TypeError("plan must have publishable copies or cells")
 
-    for item in copies:
+    steps: list[Any] = []
+    for item in items.copies:
         source_ref = item.source if hasattr(item, "source") else item.image
         dest_ref = item.destination if hasattr(item, "destination") else item.image
         digest = source_digests.get(source_ref)
@@ -540,9 +559,8 @@ def publish_manifests_composite(
     title :
         Optional override.
     """
-    manifests = getattr(plan, "manifests", None)
-    if manifests is not None:
-        # PublishPlan path
+    items = _PlanItems(plan)
+    if items.manifests:
         steps = tuple(
             ImagetoolsCreateTask(
                 tag=manifest.reference,
@@ -552,13 +570,13 @@ def publish_manifests_composite(
                 role=role,
                 title=f"Create manifest {manifest.reference}",
             )
-            for manifest in manifests
+            for manifest in items.manifests
         )
         return Steps(title=title, steps=steps)
 
     # ImagePlan path: group cells by target name
     by_target: dict[str, list[Any]] = {}
-    for cell in plan.cells:
+    for cell in items.copies:
         by_target.setdefault(cell.target.name, []).append(cell)
 
     arch_steps: list[Any] = []
@@ -628,9 +646,8 @@ def publish_aliases_composite(
     title :
         Optional override.
     """
-    aliases = getattr(plan, "aliases", None)
-    if not aliases:
-        # No aliases defined for this plan
+    items = _PlanItems(plan)
+    if not items.aliases:
         return Steps(
             title=title,
             steps=(
@@ -652,7 +669,7 @@ def publish_aliases_composite(
             role=role,
             title=f"Create alias {alias.reference} -> {alias.source}",
         )
-        for alias in aliases
+        for alias in items.aliases
     )
     return Steps(title=title, steps=steps)
 
