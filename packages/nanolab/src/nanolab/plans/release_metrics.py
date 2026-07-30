@@ -6,7 +6,9 @@ Python wrappers that can run in any workflow role.
 
 from __future__ import annotations
 
-from typing import Any, Mapping, Sequence, override
+import json
+from pathlib import Path
+from typing import override
 
 from sonata_engine import Task, TaskInputs, TaskOutcome
 from nanolab.release.metrics import (
@@ -20,23 +22,31 @@ from nanolab.release.metrics import (
 
 
 class AggregateBenchmarks(Task[PerformanceAggregate]):
-    """Aggregate benchmark summaries by calling aggregate_runs()."""
+    """Read benchmark summaries from disk and call aggregate_runs()."""
 
     def __init__(
         self,
         *,
-        benchmark_runs: Sequence[Mapping[str, Any]],
+        run_dir: Path,
+        benchmark_count: int,
         profile: PerformanceProfile,
         title: str = "Aggregate benchmarks",
     ) -> None:
         self.title = title
-        self._benchmark_runs = benchmark_runs
+        self._run_dir = run_dir
+        self._benchmark_count = benchmark_count
         self._profile = profile
 
     @override
     def run(self, inputs: TaskInputs) -> TaskOutcome[PerformanceAggregate]:
         del inputs
-        return TaskOutcome(value=aggregate_runs(self._profile, self._benchmark_runs))
+        summaries = []
+        for i in range(1, self._benchmark_count + 1):
+            path = self._run_dir / f"run-{i}" / "summary.json"
+            if not path.is_file():
+                raise RuntimeError(f"benchmark summary not found: {path}")
+            summaries.append(json.loads(path.read_text(encoding="utf-8")))
+        return TaskOutcome(value=aggregate_runs(self._profile, tuple(summaries)))
 
 
 class EvaluateRegressionGate(Task[RegressionDecision]):

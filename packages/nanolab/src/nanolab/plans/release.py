@@ -144,7 +144,8 @@ def build_release_workflow(request: ReleaseRequest) -> Workflow:
 
     # --- Phase 7: Aggregate ---
     aggregate = AggregateBenchmarks(
-        benchmark_runs=request.settings.benchmark_runs,
+        run_dir=request.run_dir,
+        benchmark_count=request.settings.benchmark_runs,
         profile=PerformanceProfile(
             name=request.settings.profile,
             provider="azure",
@@ -235,23 +236,23 @@ def build_release_workflow(request: ReleaseRequest) -> Workflow:
         predicate_remote=f"{remote_root}/predicate.json",
         sbom_dir_remote=f"{remote_root}/sboms",
         cosign_key="/secrets/cosign-key",
-        cosign_pw="/secrets/cosign-password",
+        password_file="/secrets/cosign-password",
         docker_config="/tmp/ghcr-auth",
         executor=executor,
         role="stack",
     )
 
     # --- Wire the DAG ---
-    wf.add(version_bump)
-    wf.add(source_tests, requires=(archive, version_bump))
-    wf.add(amd64_build, requires=(source_tests, amd64_builder))
+    wf.add(version_bump)  # pyright: ignore[reportArgumentType]
+    wf.add(source_tests, requires=(archive, version_bump))  # pyright: ignore[reportArgumentType]
+    wf.add(amd64_build, requires=(source_tests, amd64_builder))  # pyright: ignore[reportArgumentType]
     wf.add(registry_push, requires=(amd64_build,))
     for i, bw in enumerate(benchmark_runs):
-        wf.add(_SubWorkflowTask(bw), requires=(registry_push,) if i == 0 else ())
-    wf.add(aggregate, requires=tuple(_SubWorkflowTask(bw) for bw in benchmark_runs))
-    wf.add(reg_gate, requires=(aggregate,))
-    wf.add(arm64_build, requires=(reg_gate, tunnel, arm64_builder, archive))
-    wf.add(arm64_smoke, requires=(arm64_build,))
+        wf.add(_SubWorkflowTask(bw), requires=(registry_push,) if i == 0 else ())  # pyright: ignore[reportArgumentType]
+    wf.add(aggregate, requires=tuple(_SubWorkflowTask(bw) for bw in benchmark_runs))  # pyright: ignore[reportArgumentType]
+    wf.add(reg_gate, requires=(aggregate,))  # pyright: ignore[reportArgumentType]
+    wf.add(arm64_build, requires=(reg_gate, tunnel, arm64_builder, archive))  # pyright: ignore[reportArgumentType]
+    wf.add(arm64_smoke, requires=(arm64_build,))  # pyright: ignore[reportArgumentType]
     wf.add(pub_arch, requires=(arm64_smoke,))
     wf.add(pub_manifests, requires=(pub_arch,))
     wf.add(pub_aliases, requires=(pub_manifests,))

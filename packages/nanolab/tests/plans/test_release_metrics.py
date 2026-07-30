@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any, Mapping
 
 import pytest
@@ -84,9 +86,12 @@ def _deep_merge(base: dict[str, Any], overrides: dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_aggregate_benchmarks_produces_performance_aggregate() -> None:
+def test_aggregate_benchmarks_produces_performance_aggregate(tmp_path: Path) -> None:
+    (tmp_path / "run-1").mkdir()
+    (tmp_path / "run-1" / "summary.json").write_text(json.dumps(_summary()))
     task = AggregateBenchmarks(
-        benchmark_runs=[_summary()],
+        run_dir=tmp_path,
+        benchmark_count=1,
         profile=_PROFILE,
     )
     outcome = task.run(TaskInputs.empty())
@@ -96,12 +101,16 @@ def test_aggregate_benchmarks_produces_performance_aggregate() -> None:
     assert outcome.value.metrics["throughputRps"] == 500.0
 
 
-def test_aggregate_benchmarks_median_over_multiple_runs() -> None:
+def test_aggregate_benchmarks_median_over_multiple_runs(tmp_path: Path) -> None:
     fast = _summary({"k6": {"http_reqs": {"values": {"rate": 100.0}}}})
     medium = _summary({"k6": {"http_reqs": {"values": {"rate": 200.0}}}})
     slow = _summary({"k6": {"http_reqs": {"values": {"rate": 300.0}}}})
+    for i, s in enumerate((fast, medium, slow), 1):
+        (tmp_path / f"run-{i}").mkdir()
+        (tmp_path / f"run-{i}" / "summary.json").write_text(json.dumps(s))
     task = AggregateBenchmarks(
-        benchmark_runs=[fast, medium, slow],
+        run_dir=tmp_path,
+        benchmark_count=3,
         profile=_PROFILE,
     )
     outcome = task.run(TaskInputs.empty())
@@ -110,12 +119,13 @@ def test_aggregate_benchmarks_median_over_multiple_runs() -> None:
     assert outcome.value.run_count == 3
 
 
-def test_aggregate_benchmarks_fails_on_empty_runs() -> None:
+def test_aggregate_benchmarks_fails_on_missing_summary(tmp_path: Path) -> None:
     task = AggregateBenchmarks(
-        benchmark_runs=[],
+        run_dir=tmp_path,
+        benchmark_count=1,
         profile=_PROFILE,
     )
-    with pytest.raises(ValueError, match="at least one benchmark summary"):
+    with pytest.raises(RuntimeError, match="benchmark summary not found"):
         task.run(TaskInputs.empty())
 
 
