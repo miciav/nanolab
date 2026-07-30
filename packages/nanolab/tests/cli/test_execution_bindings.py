@@ -226,7 +226,7 @@ def test_azure_role_uses_provider_native_execution_and_fetch(tmp_path: Path) -> 
     assert request.lifecycle == "azure"
     assert argv == ("kubectl", "get", "nodes")
     assert env == {"KUBECONFIG": "/home/azureuser/.kube/config"}
-    assert cwd == "/home/azureuser/nanofaas"
+    assert cwd == "/home/azureuser"
     assert provider.fetch_calls[0][0].lifecycle == "azure"
     assert runner.calls == []
 

@@ -31,6 +31,7 @@ from nanolab.release.run import ReleaseSettings
 from nanolab.plans.validate import build_validate_plan
 from nanolab.workspace.paths import default_tool_paths, discover_tool_root
 
+
 def _read(path: Path) -> dict[str, object]:
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
@@ -173,9 +174,7 @@ def _require_cli_endpoint(
         and not provision
         and control_plane_url is None
     ):
-        raise typer.BadParameter(
-            "--control-plane-url is required for a k8s cli scenario"
-        )
+        raise typer.BadParameter("--control-plane-url is required for a k8s cli scenario")
 
 
 def _cli_provisioned(scenario: ScenarioConfig, *, provision: bool) -> bool:
@@ -197,18 +196,15 @@ def _validate_cli_container_options(
     if scenario.workflow != "cli" or scenario.backend != "container":
         return
     if environment.provider != "local":
-        raise typer.BadParameter(
-            "cli container scenario requires a local environment"
-        )
+        raise typer.BadParameter("cli container scenario requires a local environment")
     if keep:
-        raise typer.BadParameter(
-            "--keep is not supported for a cli container scenario"
-        )
+        raise typer.BadParameter("--keep is not supported for a cli container scenario")
 
 
 def _render_compiled(compiled: CompiledWorkflow) -> None:
     for compiled_task in compiled.tasks:
         typer.echo(f"{compiled_task.task_id}  {compiled_task.task.title}")
+
 
 def _git_commit(repo_root: Path) -> str | None:
     try:
@@ -299,9 +295,7 @@ def _write_run_metadata(
         },
         "tasks": sink.records,
     }
-    (run_dir / "run-metadata.json").write_text(
-        json.dumps(metadata, indent=2), encoding="utf-8"
-    )
+    (run_dir / "run-metadata.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
 
 
 def install_product_commands(app: typer.Typer) -> None:
@@ -346,26 +340,6 @@ def install_product_commands(app: typer.Typer) -> None:
         _require_cli_endpoint(scenario_config, control_plane_url, provision=provision)
         cli_provisioned = _cli_provisioned(scenario_config, provision=provision)
         paths = default_tool_paths()
-        bumped_files: tuple[Path, ...] | None = None
-        _release_tag: str | None = None
-        _committed: bool = False
-
-        def _git(*args: str, check: bool = True) -> None:
-            subprocess.run(("git", *args), cwd=paths.nanofaas_root, capture_output=True, check=check)
-
-        def _rollback_bump() -> None:
-            if not bumped_files:
-                return
-            sink._write("[release.rollback] running  Rolling back version bump")
-            _rb_start = sink._clock()
-            if _committed:
-                _git("tag", "-d", _release_tag or "", check=False)
-                _git("reset", "--hard", "HEAD~1")
-            else:
-                _git("checkout", "HEAD", "--", *(str(p) for p in bumped_files))
-            _rb_elapsed = sink._clock() - _rb_start
-            sink._write(f"[release.rollback] passed   {_rb_elapsed:.1f}s")
-
         effective_run_dir = run_dir
         if (
             scenario_config.workflow in ("loadtest", "offload-loadtest", "release")
@@ -394,39 +368,30 @@ def install_product_commands(app: typer.Typer) -> None:
                     else nullcontext()
                 )
                 if scenario_config.workflow == "release" and scenario_config.release is not None:
+                    from nanolab.release.run import git_state
                     from nanolab.release.versioning import (
                         normalize_version,
-                        prepare_version,
-                        read_project_version,
+                        verify_version_consistency,
                     )
 
-                    _, _release_tag = normalize_version(scenario_config.release.version)
-                    _bump_start = sink._clock()
-                    sink._write(
-                        f"[release.bump] running  Bump version to {scenario_config.release.version}"
-                    )
-                    current = read_project_version(paths.nanofaas_root)
-                    if current == _release_tag.lstrip("v"):
-                        # Already bumped — ensure tag exists for git archive
-                        _git("tag", "-d", _release_tag, check=False)
-                        _git("tag", _release_tag)
-                        _bump_elapsed = sink._clock() - _bump_start
-                        sink._write(f"[release.bump] passed   {_bump_elapsed:.1f}s  (already at {_release_tag})")
-                    else:
-                        try:
-                            bumped_files = prepare_version(
-                                paths.nanofaas_root, scenario_config.release.version
-                            )
-                        except BaseException:
-                            _bump_elapsed = sink._clock() - _bump_start
-                            sink._write(f"[release.bump] failed   {_bump_elapsed:.1f}s")
-                            raise
-                        _git("add", *(str(p) for p in bumped_files))
-                        _git("commit", "-m", f"release {_release_tag}")
-                        _git("tag", _release_tag)
-                        _committed = True
-                        _bump_elapsed = sink._clock() - _bump_start
-                        sink._write(f"[release.bump] passed   {_bump_elapsed:.1f}s")
+                    try:
+                        source = git_state(paths.nanofaas_root)
+                        requested_plain, _ = normalize_version(scenario_config.release.version)
+                        prepared = verify_version_consistency(paths.nanofaas_root)
+                    except (subprocess.CalledProcessError, ValueError) as error:
+                        raise typer.BadParameter(str(error)) from error
+                    if not source.clean:
+                        raise typer.BadParameter(
+                            "release requires a clean nanoFaaS Git tree; "
+                            "commit the prepared version changes first"
+                        )
+                    if prepared != requested_plain:
+                        raise typer.BadParameter(
+                            f"requested release {requested_plain} does not match "
+                            f"the committed nanoFaaS project version {prepared}; "
+                            f"run 'nanolab release prepare {requested_plain}' and "
+                            "commit the changes first"
+                        )
                 with provisioning:
                     if scenario_config.workflow == "loadtest":
                         control_plane_url, prometheus_url = resolve_loadtest_urls(
@@ -435,10 +400,11 @@ def install_product_commands(app: typer.Typer) -> None:
                             control_plane_url=control_plane_url,
                             prometheus_url=prometheus_url,
                         )
-                    if scenario_config.workflow == "release" and environment_config.provider != "azure":
-                        raise typer.BadParameter(
-                            "release workflow requires an Azure environment"
-                        )
+                    if (
+                        scenario_config.workflow == "release"
+                        and environment_config.provider != "azure"
+                    ):
+                        raise typer.BadParameter("release workflow requires an Azure environment")
                     sonata_workflow = cast(
                         SonataWorkflow,
                         _workflow(
@@ -453,9 +419,7 @@ def install_product_commands(app: typer.Typer) -> None:
                     )
                     sonata_workflow.keep_infrastructure = keep
                     try:
-                        sonata_workflow.run(
-                            select=Selection(only=only, start=start, until=until)
-                        )
+                        sonata_workflow.run(select=Selection(only=only, start=start, until=until))
                         if (
                             scenario_config.workflow == "offload-loadtest"
                             and effective_run_dir is not None
@@ -464,8 +428,6 @@ def install_product_commands(app: typer.Typer) -> None:
                     except SelectionError as error:
                         raise typer.BadParameter(str(error)) from None
         except BaseException as exc:
-            if not keep:
-                _rollback_bump()
             if effective_run_dir is not None:
                 try:
                     _write_run_metadata(

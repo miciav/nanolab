@@ -62,6 +62,23 @@ def test_role_and_cwd_reach_the_spec() -> None:
     assert executor.seen[0].cwd == Path("/repo")
 
 
+def test_remote_dir_and_timeout_reach_the_spec() -> None:
+    executor = RecordingExecutor()
+    task = CommandTask(
+        title="Remote build",
+        argv=("./gradlew", "test"),
+        executor=executor,
+        role="stack",
+        remote_dir="/srv/nanofaas/source",
+        timeout_seconds=900,
+    )
+
+    task.run(TaskInputs.empty())
+
+    assert executor.seen[0].remote_dir == "/srv/nanofaas/source"
+    assert executor.seen[0].timeout_seconds == 900
+
+
 def test_a_failing_command_raises_with_stderr_in_the_message() -> None:
     executor = RecordingExecutor(
         result=TaskResult(task_id="", status="failed", return_code=2, stderr="no such function")
@@ -118,9 +135,7 @@ def test_the_verify_hook_is_skipped_when_the_command_itself_failed() -> None:
     )
     calls: list[TaskResult] = []
 
-    task = CommandTask(
-        title="Invoke", argv=("cli",), executor=executor, verify=calls.append
-    )
+    task = CommandTask(title="Invoke", argv=("cli",), executor=executor, verify=calls.append)
 
     with pytest.raises(RuntimeError, match="boom"):
         task.run(TaskInputs.empty())
@@ -128,7 +143,9 @@ def test_the_verify_hook_is_skipped_when_the_command_itself_failed() -> None:
 
 
 def test_a_runtime_argv_resolver_can_read_a_declared_vm_resource() -> None:
-    vm = Resource[VmInfo]("Acquire VM", acquire=lambda _inputs: pytest.fail(), release=lambda *_: None)
+    vm = Resource[VmInfo](
+        "Acquire VM", acquire=lambda _inputs: pytest.fail(), release=lambda *_: None
+    )
     info = VmInfo(name="worker", host="10.0.0.7", user="ubuntu", home="/home/ubuntu")
     inputs = TaskInputs._for_resources({vm: info}, {vm})
     executor = RecordingExecutor()

@@ -326,7 +326,7 @@ def test_release_settings_reject_nonfinite_or_out_of_range_thresholds(
 def test_source_tests_reuse_gradle_and_uv_and_pin_container_toolchains() -> None:
     commands = release_run.source_test_commands(Path("/srv/nanofaas-source"))
 
-    assert commands[0].argv == ("./gradlew", "test")
+    assert commands[0].argv == ("./gradlew", "test", "--no-parallel")
     python_commands = [command for command in commands if command.argv[:2] == ("uv", "run")]
     assert {command.task_id for command in python_commands} == {
         "release.source.python-sdk",
@@ -1064,7 +1064,7 @@ def test_run_composes_amd64_gate_and_defers_all_credentials_and_publication(
         f"/home/azureuser/nanofaas-release/{CURRENT_VERSION}/"
         f"{plan.buildkit_config.name} --use"
     )
-    source_test = events.index("exec:./gradlew test")
+    source_test = events.index("exec:./gradlew test --no-parallel")
     source_restages = [
         index for index, event in enumerate(events) if event == "transfer:source.tar"
     ]

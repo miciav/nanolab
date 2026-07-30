@@ -64,12 +64,8 @@ class _PlanItems:
             self.aliases = tuple(getattr(plan, "aliases", ()))
         elif hasattr(plan, "cells"):
             self.copies = tuple(plan.cells)
-            self.manifests = (
-                plan.manifests if hasattr(plan, "manifests") else ()
-            )
-            self.aliases = (
-                plan.aliases if hasattr(plan, "aliases") else ()
-            )
+            self.manifests = plan.manifests if hasattr(plan, "manifests") else ()
+            self.aliases = plan.aliases if hasattr(plan, "aliases") else ()
 
 
 # ---------------------------------------------------------------------------
@@ -107,7 +103,11 @@ def source_tests_composite(
             argv=spec.argv,
             executor=executor,
             role=spec.role or "stack",
-            cwd=Path(spec.remote_dir) if spec.remote_dir else None,
+            env=spec.env,
+            cwd=spec.cwd,
+            remote_dir=spec.remote_dir,
+            expected_exit_codes=spec.expected_exit_codes,
+            timeout_seconds=spec.timeout_seconds,
         )
         for i, spec in enumerate(commands)
     )
@@ -226,7 +226,9 @@ def registry_push_composite(
             title=f"Push and inspect {cell.image}",
             steps=(
                 DockerPushTask(
-                    image=cell.image, executor=executor, role=role,
+                    image=cell.image,
+                    executor=executor,
+                    role=role,
                 ),
                 SkopeoInspectTask(
                     reference=cell.image,
@@ -292,8 +294,16 @@ def arm64_build_composite(
     steps.append(
         CommandTask(
             title="Create ARM64 buildx builder",
-            argv=("docker", "buildx", "create", "--name", builder_name,
-                   "--driver", "docker-container", "--use"),
+            argv=(
+                "docker",
+                "buildx",
+                "create",
+                "--name",
+                builder_name,
+                "--driver",
+                "docker-container",
+                "--use",
+            ),
             executor=executor,
             role=role,
             cwd=Path(remote_source_dir) if remote_source_dir else None,
@@ -318,8 +328,17 @@ def arm64_build_composite(
             steps.append(
                 CommandTask(
                     title="Bake ARM64 Dockerfile images",
-                    argv=("docker", "buildx", "bake", "--builder", builder_name,
-                           "--file", remote_bake_file, "--load", "docker-arm64"),
+                    argv=(
+                        "docker",
+                        "buildx",
+                        "bake",
+                        "--builder",
+                        builder_name,
+                        "--file",
+                        remote_bake_file,
+                        "--load",
+                        "docker-arm64",
+                    ),
                     executor=executor,
                     role=role,
                     cwd=Path(remote_source_dir) if remote_source_dir else None,
@@ -402,9 +421,14 @@ def arm64_smoke_composite(
             CommandTask(
                 title=f"Smoke {cell.target.name} {cell.flavor}",
                 argv=(
-                    "docker", "run", "--rm", "-d",
-                    "--name", container,
-                    "-p", f"{port}:{port}",
+                    "docker",
+                    "run",
+                    "--rm",
+                    "-d",
+                    "--name",
+                    container,
+                    "-p",
+                    f"{port}:{port}",
                     cell.image,
                 ),
                 executor=executor,
@@ -416,7 +440,12 @@ def arm64_smoke_composite(
             CommandTask(
                 title=f"Health-check {cell.target.name} {cell.flavor}",
                 argv=(
-                    "curl", "-fsS", "--retry", "10", "--retry-delay", "1",
+                    "curl",
+                    "-fsS",
+                    "--retry",
+                    "10",
+                    "--retry-delay",
+                    "1",
                     "--retry-connrefused",
                     f"http://127.0.0.1:{port}{health}",
                 ),
@@ -638,7 +667,9 @@ def attest_composite(
         return Steps(
             title=title,
             steps=(
-                CommandTask(title="No images to attest", argv=("true",), executor=executor, role=role),
+                CommandTask(
+                    title="No images to attest", argv=("true",), executor=executor, role=role
+                ),
             ),
         )
 

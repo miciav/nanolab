@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from sonata_engine import Resource, Task, TaskInputs, TaskOutcome, Workflow
+from sonata_engine import Task, TaskInputs, TaskOutcome, Workflow
 from sonata_tasks.archive import source_archive_resource
 from sonata_tasks.buildx import buildx_builder_resource
 from sonata_tasks.release_composites import (
@@ -45,7 +45,8 @@ from nanolab.release.metrics import (
     newest_comparable_record,
 )
 from nanolab.release.publish import build_publish_plan
-from nanolab.release.run import ReleaseSettings, source_test_commands
+from nanolab.release.run import ReleaseSettings, git_state, source_test_commands
+from nanolab.release.versioning import normalize_version, verify_version_consistency
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:
@@ -85,12 +86,17 @@ def build_release_workflow(
     if env.provider != "azure":
         raise ValueError("release workflow requires an Azure environment")
 
+    nanofaas = request.nanofaas_root or request.repo_root
+    source_commit = _release_source_commit(nanofaas, request.version)
+    _, expected_image_tag = normalize_version(request.version)
+    if request.image_plan.version != expected_image_tag:
+        raise ValueError("release image plan version does not match the requested project version")
+
     if provider is None:
         provider = vm_provider_for_environment(env, request.repo_root)
     stack_req = vm_request_for_role(env, "stack", loadtest=True)
     _ = vm_request_for_role(env, "loadgen", loadtest=True)  # captured by build_role_bindings
     arm_req = vm_request_for_role(env, "arm-builder")
-    nanofaas = request.nanofaas_root or request.repo_root
     bindings, fetcher = build_role_bindings(env, vm_provider=provider, repo_root=nanofaas)
     executor = RoleBoundCommandTaskExecutor(bindings)
     stack_host = getattr(provider, "connection_host")(stack_req)
@@ -105,7 +111,7 @@ def build_release_workflow(
     # --- Phase 1: Source Tests ---
     archive = source_archive_resource(
         repo_root=nanofaas,
-        commit=request.image_plan.version,
+        commit=source_commit,
         remote_source_dir=source_dir,
         remote_archive=f"{remote_root}/source.tar",
         provider=provider,
@@ -282,42 +288,19 @@ def build_release_workflow(
     return wf
 
 
-def _version_bump_resource(
-    *,
-    nanofaas_root: Path,
-    version: str,
-) -> Resource[tuple[Path, ...]]:
-    """Bump version strings; restore curated files on failure."""
-
-    import subprocess
-    from nanolab.release.versioning import _CURATED_COUNTS, prepare_version
-
-    def _curated_paths() -> list[str]:
-        return [str(nanofaas_root / p) for p in _CURATED_COUNTS]
-
-    def _git_restore_curated() -> None:
-        subprocess.run(
-            ("git", "checkout", "--", *_curated_paths()),
-            cwd=nanofaas_root,
-            capture_output=True,
+def _release_source_commit(repo_root: Path, requested_version: str) -> str:
+    """Return the immutable source commit for an already prepared release."""
+    source = git_state(repo_root)
+    if not source.clean:
+        raise ValueError("release requires a clean nanoFaaS Git tree")
+    requested_plain, _ = normalize_version(requested_version)
+    prepared = verify_version_consistency(repo_root)
+    if prepared != requested_plain:
+        raise ValueError(
+            f"requested release {requested_plain} does not match "
+            f"the committed nanoFaaS project version {prepared}"
         )
-
-    def acquire(inputs: TaskInputs) -> tuple[Path, ...]:
-        try:
-            return prepare_version(nanofaas_root, version)
-        except BaseException:
-            _git_restore_curated()
-            raise
-
-    def release(inputs: TaskInputs, state: tuple[Path, ...]) -> None:
-        pass  # bump persists on success
-
-    return Resource(
-        title=f"Bump version to {version}",
-        acquire=acquire,
-        release=release,
-        infrastructure=False,
-    )
+    return source.commit
 
 
 @dataclass
@@ -383,7 +366,10 @@ class _RegressionGate(Task[RegressionDecision]):
             )
 
         decision = evaluate_regression(
-            aggregate, baseline_agg, self.policy,
-            k6_passed=True, autoscaling_passed=True,
+            aggregate,
+            baseline_agg,
+            self.policy,
+            k6_passed=True,
+            autoscaling_passed=True,
         )
         return TaskOutcome(value=decision)
