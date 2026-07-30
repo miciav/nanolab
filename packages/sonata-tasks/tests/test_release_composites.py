@@ -349,38 +349,22 @@ class TestArm64BuildComposite:
 
 
 class TestPublishArchitecturesComposite:
-    def test_copies_each_cell_with_digest_pinning(self) -> None:
+    def test_copies_each_cell_with_plain_references(self) -> None:
         executor = RecordingExecutor()
         plan = _FakePublishPlan(copies=(
             _FakeCopy(source="reg/ctrl:v1-amd64", destination="ghcr.io/ctrl:v1-amd64"),
             _FakeCopy(source="reg/watch:v1-amd64", destination="ghcr.io/watch:v1-amd64"),
         ))
-        digests = {
-            "reg/ctrl:v1-amd64": "sha256:aaa111",
-            "reg/watch:v1-amd64": "sha256:bbb222",
-        }
 
-        composite = publish_architectures_composite(plan, executor, "host",
-                                                     digests, "/auth.json")
+        composite = publish_architectures_composite(plan, executor, "host", "/auth.json")
         workflow = Workflow("publish-arch")
         workflow.add(composite)
         workflow.run()
 
         assert len(executor.seen) == 2
-        for spec in executor.seen:
-            assert spec.argv[0] == "skopeo"
-            assert spec.argv[1] == "copy"
-
-    def test_raises_on_missing_digest(self) -> None:
-        executor = RecordingExecutor()
-        plan = _FakePublishPlan(copies=(
-            _FakeCopy(source="reg/ctrl:v1-amd64", destination="ghcr.io/ctrl:v1-amd64"),
-        ))
-
-        import pytest
-        with pytest.raises(KeyError):
-            publish_architectures_composite(plan, executor, "host", {}, "/auth.json")
-
+        sources = [s for s in executor.seen[0].argv if "docker://" in s]
+        # Source is plain tag reference, not digest-pinned
+        assert "docker://reg/ctrl:v1-amd64" in sources
 
 class TestPublishManifestsComposite:
     def test_creates_manifests_via_publish_plan(self) -> None:
@@ -394,13 +378,7 @@ class TestPublishManifestsComposite:
                 ),
             ),
         )
-        digests = {
-            "ghcr.io/ctrl:v1-amd64": "sha256:aaa",
-            "ghcr.io/ctrl:v1-arm64": "sha256:bbb",
-        }
-
-        composite = publish_manifests_composite(plan, executor, "host",
-                                                 digests, "/docker")
+        composite = publish_manifests_composite(plan, executor, "host", "/docker")
         workflow = Workflow("publish-manifest")
         workflow.add(composite)
         workflow.run()
@@ -409,23 +387,6 @@ class TestPublishManifestsComposite:
         spec = executor.seen[0]
         assert "imagetools" in spec.argv
         assert "create" in spec.argv
-
-    def test_raises_on_missing_arch_digest(self) -> None:
-        executor = RecordingExecutor()
-        plan = _FakePublishPlan(
-            copies=(),
-            manifests=(
-                _FakeManifest(
-                    reference="ghcr.io/ctrl:v1",
-                    sources=("ghcr.io/ctrl:v1-amd64", "ghcr.io/ctrl:v1-arm64"),
-                ),
-            ),
-        )
-
-        import pytest
-        with pytest.raises(KeyError):
-            publish_manifests_composite(plan, executor, "host", {}, "/docker")
-
 
 class TestPublishAliasesComposite:
     def test_creates_aliases_via_publish_plan(self) -> None:
@@ -440,10 +401,7 @@ class TestPublishAliasesComposite:
                 ),
             ),
         )
-        digests = {"ghcr.io/ctrl:v1-native": "sha256:ccc"}
-
-        composite = publish_aliases_composite(plan, executor, "host",
-                                               digests, "/docker")
+        composite = publish_aliases_composite(plan, executor, "host", "/docker")
         workflow = Workflow("publish-alias")
         workflow.add(composite)
         workflow.run()
@@ -457,7 +415,7 @@ class TestPublishAliasesComposite:
         executor = RecordingExecutor()
         plan = _FakePublishPlan(copies=(), manifests=(), aliases=())
 
-        composite = publish_aliases_composite(plan, executor, "host", {}, "/docker")
+        composite = publish_aliases_composite(plan, executor, "host", "/docker")
         workflow = Workflow("publish-alias")
         workflow.add(composite)
         workflow.run()

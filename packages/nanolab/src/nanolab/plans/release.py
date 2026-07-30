@@ -222,8 +222,6 @@ def build_release_workflow(
     )
 
     # --- Phase 11: Publish ---
-    # TODO: plumb digest evidence from registry push + arm64 build phases.
-    # Currently running with empty data — use --until arm64-smoke for testing.
     pub_plan = build_publish_plan(
         nanofaas,
         request.version,
@@ -233,21 +231,18 @@ def build_release_workflow(
         pub_plan,
         executor=executor,
         role="stack",
-        source_digests={},  # supplied by caller from prior phase evidence
         authfile="/tmp/ghcr-auth/config.json",
     )
     pub_manifests = publish_manifests_composite(
         pub_plan,
         executor=executor,
         role="stack",
-        architecture_digests={},
         docker_config="/tmp/ghcr-auth",
     )
     pub_aliases = publish_aliases_composite(
         pub_plan,
         executor=executor,
         role="stack",
-        manifest_digests={},
         docker_config="/tmp/ghcr-auth",
     )
 
@@ -257,8 +252,9 @@ def build_release_workflow(
     if request.credentials is not None:
         cosign_key = str(getattr(request.credentials, "cosign_key", cosign_key))
         cosign_password = str(getattr(request.credentials, "cosign_password", cosign_password))
+    published_images = tuple(copy.destination for copy in pub_plan.copies)
     attest = attest_composite(
-        images=(),
+        images=published_images,
         predicate_remote=Path(f"{remote_root}/predicate.json"),
         sbom_dir_remote=Path(f"{remote_root}/sboms"),
         cosign_key=cosign_key,

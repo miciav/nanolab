@@ -20,7 +20,7 @@ Imports from companion tasks
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -48,11 +48,6 @@ __all__ = [
     "publish_aliases_composite",
     "attest_composite",
 ]
-
-
-def _pin_with_digest(src: str, digests: Mapping[str, str]) -> str:
-    """Replace a tag with its digest-pinned form."""
-    return f'{src.rsplit(":", 1)[0]}@{digests[src]}'
 
 
 class _PlanItems:
@@ -456,7 +451,6 @@ def publish_architectures_composite(
     plan: Any,
     executor: CommandTaskExecutor,
     role: ExecutionRole,
-    source_digests: Mapping[str, str],
     authfile: str,
     *,
     title: str = "Publish architecture images",
@@ -464,33 +458,9 @@ def publish_architectures_composite(
 ) -> Steps:
     """Copy immutable architecture tags to a production registry.
 
-    Each cell image (which was pushed to a build registry) is copied
-    to its publication destination using ``SkopeoCopyTask``, pinned
-    by the digest recorded during the ``registry_push`` phase.
-
-    Parameters
-    ----------
-    plan :
-        An object with a ``cells`` attribute.  Each cell is expected
-        to have an ``image`` attribute whose value is used as the
-        source reference.  For ``PublishPlan``-like objects, the
-        ``copies`` attribute is used instead.
-    executor :
-        Role-bound executor.
-    role :
-        Execution role.
-    source_digests :
-        Mapping from cell image reference (e.g.
-        ``"localhost:5000/nanofaas/control-plane:1.0.0-amd64"``) to
-        the ``sha256:...`` digest recorded during push.
-    authfile :
-        Path to the destination registry's auth file (typically
-        ``/root/.docker/config.json`` for GHCR).
-    title :
-        Optional override.
-    src_tls_verify :
-        Whether to verify TLS when reading from the source registry.
-        Set to ``False`` for local registries with self-signed certs.
+    Each cell image is copied to its publication destination using
+    ``SkopeoCopyTask``.  Digest pinning is left to the registry;
+    this composite copies by tag.
     """
     items = _PlanItems(plan)
     if not items.copies:
@@ -500,12 +470,9 @@ def publish_architectures_composite(
     for item in items.copies:
         source_ref = item.source if hasattr(item, "source") else item.image
         dest_ref = item.destination if hasattr(item, "destination") else item.image
-        digest = source_digests.get(source_ref)
-        if digest is None:
-            raise KeyError(f"no source digest for {source_ref}")
         steps.append(
             SkopeoCopyTask(
-                source=f"{source_ref}@{digest}",
+                source=source_ref,
                 destination=dest_ref,
                 authfile=authfile,
                 executor=executor,
@@ -526,43 +493,22 @@ def publish_manifests_composite(
     plan: Any,
     executor: CommandTaskExecutor,
     role: ExecutionRole,
-    architecture_digests: Mapping[str, str],
     docker_config: str,
     *,
     title: str = "Publish multi-architecture manifests",
 ) -> Steps:
     """Create multi-architecture manifests for every image target.
 
-    Groups cells by target name, then for each group creates a
-    manifest that references the digest-pinned architecture images.
-    Uses ``ImagetoolsCreateTask`` for the create step.
-
-    Parameters
-    ----------
-    plan :
-        An object with a ``cells`` or ``manifests`` attribute.
-        If ``manifests`` (``PublishPlan``-like), each item has
-        ``reference`` and ``sources``.  Otherwise ``cells`` are
-        grouped by ``cell.target.name``.
-    executor :
-        Role-bound executor.
-    role :
-        Execution role.
-    architecture_digests :
-        Mapping from architecture-specific image references to
-        their ``sha256:...`` digests.
-    docker_config :
-        Path to the Docker config directory used for registry
-        authentication.
-    title :
-        Optional override.
+    Groups cells by target name, then creates a manifest referencing
+    the architecture images by tag.  Digest pinning is left to the
+    registry.
     """
     items = _PlanItems(plan)
     if items.manifests:
         steps = tuple(
             ImagetoolsCreateTask(
                 tag=manifest.reference,
-                sources=tuple(_pin_with_digest(src, architecture_digests) for src in manifest.sources),
+                sources=manifest.sources,
                 docker_config=docker_config,
                 executor=executor,
                 role=role,
@@ -579,23 +525,15 @@ def publish_manifests_composite(
 
     arch_steps: list[Any] = []
     for target_name, cells in by_target.items():
-        # pick the first cell's target for naming
         tag_parts = cells[0].image.rsplit(":", 1)
         version_tag = tag_parts[1].rsplit("-", 1)[0]  # remove arch suffix
         registry = tag_parts[0].rsplit("/", 1)[0]
         reference = f"{registry}/{target_name}:{version_tag}"
 
-        pinned_sources: list[str] = []
-        for cell in cells:
-            digest = architecture_digests.get(cell.image)
-            if digest is None:
-                raise KeyError(f"no architecture digest for {cell.image}")
-            pinned_sources.append(f'{cell.image.rsplit(":", 1)[0]}@{digest}')
-
         arch_steps.append(
             ImagetoolsCreateTask(
                 tag=reference,
-                sources=tuple(pinned_sources),
+                sources=tuple(cell.image for cell in cells),
                 docker_config=docker_config,
                 executor=executor,
                 role=role,
@@ -614,35 +552,15 @@ def publish_aliases_composite(
     plan: Any,
     executor: CommandTaskExecutor,
     role: ExecutionRole,
-    manifest_digests: Mapping[str, str],
     docker_config: str,
     *,
     title: str = "Publish version aliases",
 ) -> Steps:
-    """Point mutable version aliases at their verified manifests.
+    """Point mutable version aliases at their manifests.
 
     Uses ``ImagetoolsCreateTask`` to tag a manifest with an alias
-    (e.g. ``1.0.0`` pointing to ``1.0.0-native`` for native-only
-    aliases, or ``latest``).
-
-    Parameters
-    ----------
-    plan :
-        An object with an ``aliases`` attribute (``PublishPlan``-like),
-        where each alias item has a ``reference`` (the alias tag) and
-        ``source`` (the manifest reference).  Alternatively an
-        ``ImagePlan``-like object (no aliasing applied).
-    executor :
-        Role-bound executor.
-    role :
-        Execution role.
-    manifest_digests :
-        Mapping from manifest references to their ``sha256:...``
-        digests.
-    docker_config :
-        Path to the Docker config directory.
-    title :
-        Optional override.
+    (e.g. ``1.0.0`` pointing to ``1.0.0-native``).  Digest pinning
+    is left to the registry.
     """
     items = _PlanItems(plan)
     if not items.aliases:
@@ -661,7 +579,7 @@ def publish_aliases_composite(
     steps = tuple(
         ImagetoolsCreateTask(
             tag=alias.reference,
-            sources=(_pin_with_digest(alias.source, manifest_digests),),
+            sources=(alias.source,),
             docker_config=docker_config,
             executor=executor,
             role=role,
@@ -715,6 +633,14 @@ def attest_composite(
     password_file :
         Path to the file containing the cosign key password.
     """
+    if not images:
+        return Steps(
+            title=title,
+            steps=(
+                CommandTask(title="No images to attest", argv=("true",), executor=executor, role=role),
+            ),
+        )
+
     cell_steps: list[Any] = []
     for image in images:
         sbom_path = sbom_dir_remote / f"{image.replace('/', '_').replace(':', '_')}.spdx.json"
