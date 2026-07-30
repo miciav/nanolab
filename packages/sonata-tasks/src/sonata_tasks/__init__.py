@@ -7,6 +7,7 @@ from sonata_tasks.cli_function import (
     CliFunctionInvokeTask,
 )
 from sonata_tasks.command import CommandTask
+from sonata_tasks.cosign import COSIGN_IMAGE, CosignTask
 from sonata_tasks.function import function_resource
 from sonata_tasks.gradle import GradleTask
 from sonata_tasks.http_function import (
@@ -59,15 +60,33 @@ from sonata_tasks.helm import (
     HelmUninstallTask,
     helm_release_resource,
 )
+from sonata_tasks.imagetools import ImagetoolsCreateTask, ImagetoolsInspectTask
 from sonata_tasks.resources import ContainerResourceCheckTask, K8sResourceCheckTask
+from sonata_tasks.syft import SYFT_IMAGE, SyftTask
 from sonata_tasks.registry import RegistryState, docker_registry_resource
+from sonata_tasks.registry_tunnel import registry_tunnel_resource
+from sonata_tasks.archive import source_archive_resource
+from sonata_tasks.buildx import buildx_builder_resource
 from sonata_tasks.process import managed_process_resource
+from sonata_tasks.skopeo import SkopeoCopyTask, SkopeoInspectTask
+from sonata_tasks.transfer import FileTransferTask
 from sonata_tasks.validate import (
     ValidateFunction,
     ValidateWorkflowRequest,
     build_validate_workflow,
 )
 from sonata_tasks.vm import vm_resource
+from sonata_tasks.release_composites import (
+    amd64_build_composite,
+    arm64_build_composite,
+    arm64_smoke_composite,
+    attest_composite,
+    publish_aliases_composite,
+    publish_architectures_composite,
+    publish_manifests_composite,
+    registry_push_composite,
+    source_tests_composite,
+)
 
 __all__ = [
     "CliFunction",
@@ -76,6 +95,8 @@ __all__ = [
     "CliFunctionDeleteTask",
     "CliFunctionInvokeTask",
     "ClusterIpEndpointTask",
+    "COSIGN_IMAGE",
+    "CosignTask",
     "CommandTask",
     "ContainerResourceCheckTask",
     "FunctionManifest",
@@ -90,6 +111,8 @@ __all__ = [
     "HelmReleaseSpec",
     "HelmUninstallTask",
     "build_cli_workflow",
+    "buildx_builder_resource",
+    "source_archive_resource",
     "compensated_resource",
     "DeployDockerCompose",
     "DestroyDockerCompose",
@@ -97,6 +120,7 @@ __all__ = [
     "WaitForDockerCompose",
     "docker_compose_resource",
     "docker_registry_resource",
+    "registry_tunnel_resource",
     "DockerBuildTask",
     "DockerInspectTask",
     "DockerPushTask",
@@ -113,6 +137,10 @@ __all__ = [
     "FetchResultsTask",
     "LoadtestOutcome",
     "RunK6Task",
+    "SkopeoCopyTask",
+    "SkopeoInspectTask",
+    "SYFT_IMAGE",
+    "SyftTask",
     "VerifyAutoscalingTask",
     "WriteReportTask",
     "WriteSummaryTask",
@@ -124,11 +152,24 @@ __all__ = [
     "PlatformRequest",
     "add_platform",
     "HttpStatusCheckTask",
+    "ImagetoolsCreateTask",
+    "ImagetoolsInspectTask",
     "PrometheusScrapeCheckTask",
     "OffloadFunction",
     "OffloadWorkflowRequest",
     "build_offload_workflow",
     "load_outcome",
     "EvaluateConservationTask",
+    "FileTransferTask",
     "vm_resource",
+    # Release composites
+    "source_tests_composite",
+    "amd64_build_composite",
+    "registry_push_composite",
+    "arm64_build_composite",
+    "arm64_smoke_composite",
+    "publish_architectures_composite",
+    "publish_manifests_composite",
+    "publish_aliases_composite",
+    "attest_composite",
 ]

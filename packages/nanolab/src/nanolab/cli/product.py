@@ -25,6 +25,8 @@ from nanolab.plans.offload import build_offload_plan
 from nanolab.plans.offload_loadtest import build_offload_loadtest_plan, format_offload_summary
 from nanolab.plans.cli import build_cli_plan
 from nanolab.plans.loadtest import build_loadtest_plan
+from nanolab.plans.release import ReleaseRequest, build_release_workflow
+from nanolab.release.run import ReleaseSettings
 from nanolab.plans.validate import build_validate_plan
 from nanolab.workspace.paths import default_tool_paths, discover_tool_root
 
@@ -98,6 +100,38 @@ def _workflow(
             provision=provision,
             environment=environment,
         )
+    if scenario.workflow == "release":
+        assert scenario.release is not None
+        from nanolab.images.plan import build_image_plan, DEFAULT_REGISTRY
+
+        image_plan = build_image_plan(
+            paths.nanofaas_root,
+            scenario.release.version,
+            registry=DEFAULT_REGISTRY,
+            architectures=("amd64",),
+        )
+        settings = ReleaseSettings(
+            max_parallelism=scenario.release.max_parallelism,
+            scenario=Path("scenarios-v2") / scenario.release.benchmark_scenario,
+            scenario_name=scenario.release.benchmark_scenario,
+            benchmark_runs=scenario.release.benchmark_runs,
+            profile=scenario.release.profile,
+            throughput_max_loss_percent=scenario.release.throughput_max_loss_percent,
+            p95_max_increase_percent=scenario.release.p95_max_increase_percent,
+            error_rate_max=scenario.release.error_rate_max,
+        )
+        request = ReleaseRequest(
+            repo_root=paths.tool_root,
+            version=scenario.release.version,
+            environment=environment,
+            scenario=scenario,
+            image_plan=image_plan,
+            settings=settings,
+            run_dir=run_dir or paths.runs_dir / "release" / "latest",
+            performance_root=paths.nanofaas_root / "docs" / "performance",
+            nanofaas_root=paths.nanofaas_root,
+        )
+        return build_release_workflow(request)
     return build_loadtest_plan(
         scenario,
         environment,
@@ -297,7 +331,7 @@ def install_product_commands(app: typer.Typer) -> None:
         paths = default_tool_paths()
         effective_run_dir = run_dir
         if (
-            scenario_config.workflow in ("loadtest", "offload-loadtest")
+            scenario_config.workflow in ("loadtest", "offload-loadtest", "release")
             and effective_run_dir is None
         ):
             effective_run_dir = paths.runs_dir / "latest"
@@ -329,6 +363,10 @@ def install_product_commands(app: typer.Typer) -> None:
                             backend=scenario_config.backend or "k8s",
                             control_plane_url=control_plane_url,
                             prometheus_url=prometheus_url,
+                        )
+                    if scenario_config.workflow == "release" and environment_config.provider != "azure":
+                        raise typer.BadParameter(
+                            "release workflow requires an Azure environment"
                         )
                     sonata_workflow = cast(
                         SonataWorkflow,

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 from workflow_tasks.execution.bindings import CommandTaskExecutor
@@ -32,6 +32,7 @@ class DockerTask(CommandTask):
         cwd: Path | None = None,
         verify: Callable[[TaskResult], None] | None = None,
         expected_exit_codes: frozenset[int] = frozenset({0}),
+        env: Mapping[str, str] | None = None,
     ) -> None:
         super().__init__(
             title=title or f"docker {' '.join(args)}",
@@ -41,6 +42,7 @@ class DockerTask(CommandTask):
             cwd=cwd,
             verify=verify,
             expected_exit_codes=expected_exit_codes,
+            env=env or {},
         )
 
 

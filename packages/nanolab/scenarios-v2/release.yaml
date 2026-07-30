@@ -1,0 +1,11 @@
+workflow: release
+functions:
+  - word-stats-java
+release:
+  version: v0.18.1
+  profile: azure-standard
+  max_parallelism: 4
+  benchmark_runs: 3
+  throughput_max_loss_percent: 10.0
+  p95_max_increase_percent: 20.0
+  error_rate_max: 0.05
