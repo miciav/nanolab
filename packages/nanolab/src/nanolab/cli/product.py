@@ -112,8 +112,8 @@ def _workflow(
         )
         settings = ReleaseSettings(
             max_parallelism=scenario.release.max_parallelism,
-            scenario=Path("scenarios-v2/loadtest.yaml"),
-            scenario_name="loadtest.yaml",
+            scenario=Path("scenarios-v2") / scenario.release.benchmark_scenario,
+            scenario_name=scenario.release.benchmark_scenario,
             benchmark_runs=scenario.release.benchmark_runs,
             profile=scenario.release.profile,
             throughput_max_loss_percent=scenario.release.throughput_max_loss_percent,

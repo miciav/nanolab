@@ -43,6 +43,7 @@ class ReleaseConfig(BaseModel):
     profile: str = "default"
     max_parallelism: int = Field(default=4, gt=0)
     benchmark_runs: int = Field(default=3, ge=1)
+    benchmark_scenario: str = "loadtest.yaml"
     throughput_max_loss_percent: float = Field(default=10.0, ge=0)
     p95_max_increase_percent: float = Field(default=20.0, ge=0)
     error_rate_max: float = Field(default=0.05, ge=0, le=1)
