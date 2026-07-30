@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import yaml
 from sonata_engine import Task, TaskInputs, TaskOutcome, Workflow
 from sonata_tasks.archive import source_archive_resource
 from sonata_tasks.buildx import buildx_builder_resource
@@ -45,6 +46,13 @@ from nanolab.release.metrics import (
 )
 from nanolab.release.publish import build_publish_plan
 from nanolab.release.run import ReleaseSettings, source_test_commands
+
+
+def _read_yaml(path: Path) -> dict[str, Any]:
+    value = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise ValueError(f"configuration must be an object: {path}")
+    return value
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,12 +134,18 @@ def build_release_workflow(request: ReleaseRequest) -> Workflow:
     )
 
     # --- Phases 4-6: Benchmarks ---
+    from nanolab.config.scenario import ScenarioConfig
     from nanolab.plans.loadtest import build_loadtest_plan
+
+    benchmark_scenario = _read_yaml(
+        request.repo_root / "packages" / "nanolab" / "scenarios-v2" / request.settings.scenario_name
+    )
+    benchmark_config = ScenarioConfig.model_validate(benchmark_scenario)
 
     benchmark_runs = []
     for i in range(1, request.settings.benchmark_runs + 1):
         bench_wf = build_loadtest_plan(
-            request.scenario,
+            benchmark_config,
             env,
             bindings,
             control_plane_url=control_plane_url,
