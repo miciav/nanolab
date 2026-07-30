@@ -21,6 +21,7 @@ from nanolab.config import EnvironmentConfig, ScenarioConfig
 from nanolab.cli.execution import build_role_bindings, resolve_loadtest_urls
 from nanolab.cli.progress import ConsoleProgressSink
 from nanolab.cli.provisioning import provision_environment
+from nanolab.cli.vm_provider import vm_provider_for_environment
 from nanolab.plans.offload import build_offload_plan
 from nanolab.plans.offload_loadtest import build_offload_loadtest_plan, format_offload_summary
 from nanolab.plans.cli import build_cli_plan
@@ -145,7 +146,8 @@ def _workflow(
             nanofaas_root=paths.nanofaas_root,
             credentials=credentials,
         )
-        return build_release_workflow(request)
+        provider = vm_provider_for_environment(environment, paths.tool_root)
+        return build_release_workflow(request, provider=provider)
     return build_loadtest_plan(
         scenario,
         environment,

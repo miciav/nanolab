@@ -71,7 +71,11 @@ class ReleaseRequest:
     nanofaas_root: Path | None = None  # defaults to repo_root
 
 
-def build_release_workflow(request: ReleaseRequest) -> Workflow:
+def build_release_workflow(
+    request: ReleaseRequest,
+    *,
+    provider: Any = None,
+) -> Workflow:
     """Compile a ReleaseRequest into a 12-phase linear Sonata workflow.
 
     All 12 top-level nodes are returned so the caller can add them to any
@@ -81,7 +85,8 @@ def build_release_workflow(request: ReleaseRequest) -> Workflow:
     if env.provider != "azure":
         raise ValueError("release workflow requires an Azure environment")
 
-    provider = vm_provider_for_environment(env, request.repo_root)
+    if provider is None:
+        provider = vm_provider_for_environment(env, request.repo_root)
     stack_req = vm_request_for_role(env, "stack", loadtest=True)
     _ = vm_request_for_role(env, "loadgen", loadtest=True)  # captured by build_role_bindings
     arm_req = vm_request_for_role(env, "arm-builder")
