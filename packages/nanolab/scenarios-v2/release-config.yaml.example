@@ -1,0 +1,7 @@
+# Release credential config — copy to release-config.yaml and fill in real paths.
+# The file is gitignored so credentials never land in the repository.
+
+# Paths to private credential files (must be outside the repository).
+ghcr_token_file: /home/you/.nanofaas/ghcr-token
+cosign_key_file: /home/you/.nanofaas/cosign-key
+cosign_password_file: /home/you/.nanofaas/cosign-password

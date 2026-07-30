@@ -68,6 +68,7 @@ def _workflow(
     run_dir: Path | None = None,
     dry_run: bool = False,
     provision: bool = False,
+    release_config: Path | None = None,
 ):
     bindings, fetcher = build_role_bindings(environment)
     paths = default_tool_paths()
@@ -120,6 +121,18 @@ def _workflow(
             p95_max_increase_percent=scenario.release.p95_max_increase_percent,
             error_rate_max=scenario.release.error_rate_max,
         )
+        credentials = None
+        if release_config is not None:
+            from nanolab.release.run import CredentialFiles
+
+            config = yaml.safe_load(release_config.read_text(encoding="utf-8"))
+            if not isinstance(config, dict):
+                raise typer.BadParameter(f"invalid release config: {release_config}")
+            credentials = CredentialFiles(
+                ghcr_token=Path(str(config["ghcr_token_file"])),
+                cosign_key=Path(str(config["cosign_key_file"])),
+                cosign_password=Path(str(config.get("cosign_password_file", ""))),
+            )
         request = ReleaseRequest(
             repo_root=paths.tool_root,
             version=scenario.release.version,
@@ -130,6 +143,7 @@ def _workflow(
             run_dir=run_dir or paths.runs_dir / "release" / "latest",
             performance_root=paths.nanofaas_root / "docs" / "performance",
             nanofaas_root=paths.nanofaas_root,
+            credentials=credentials,
         )
         return build_release_workflow(request)
     return build_loadtest_plan(
@@ -316,6 +330,7 @@ def install_product_commands(app: typer.Typer) -> None:
         control_plane_url: str | None = typer.Option(None, "--control-plane-url"),
         prometheus_url: str | None = typer.Option(None, "--prometheus-url"),
         run_dir: Path | None = typer.Option(None, "--run-dir"),
+        release_config: Path | None = typer.Option(None, "--release-config", exists=True),
     ) -> None:
         scenario_config = _scenario(scenario)
         environment_config = _environment(environment)
@@ -377,6 +392,7 @@ def install_product_commands(app: typer.Typer) -> None:
                             prometheus_url=prometheus_url or "http://127.0.0.1:9090",
                             run_dir=effective_run_dir,
                             provision=provision,
+                            release_config=release_config,
                         ),
                     )
                     sonata_workflow.keep_infrastructure = keep
@@ -450,6 +466,7 @@ def install_product_commands(app: typer.Typer) -> None:
         control_plane_url: str | None = typer.Option(None, "--control-plane-url"),
         prometheus_url: str | None = typer.Option(None, "--prometheus-url"),
         run_dir: Path | None = typer.Option(None, "--run-dir"),
+        release_config: Path | None = typer.Option(None, "--release-config", exists=True),
     ) -> None:
         scenario_config = _scenario(scenario)
         environment_config = _environment(environment)
@@ -475,6 +492,7 @@ def install_product_commands(app: typer.Typer) -> None:
                 prometheus_url=prometheus_url or "http://127.0.0.1:9090",
                 run_dir=run_dir,
                 dry_run=True,
+                release_config=release_config,
             ),
         )
         try:

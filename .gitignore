@@ -17,6 +17,7 @@ packages/nanolab/runs/
 packages/nanolab/profiles/azure.toml
 packages/nanolab/profiles/proxmox.toml
 packages/nanolab/environments/azure*.yaml
+packages/nanolab/scenarios-v2/release-config.yaml
 .nanofaas-source/
 .wheel-smoke/
 .worktrees/
