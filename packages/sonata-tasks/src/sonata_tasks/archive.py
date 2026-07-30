@@ -69,6 +69,8 @@ def source_archive_resource(
                 archive_path.read_bytes()
             ).hexdigest()
 
+            _exec(("mkdir", "-p", str(Path(remote_archive).parent)))
+
             transfer_result = provider.transfer_to(
                 request, source=archive_path, destination=remote_archive
             )

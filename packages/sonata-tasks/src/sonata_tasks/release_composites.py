@@ -107,6 +107,7 @@ def source_tests_composite(
             argv=spec.argv,
             executor=executor,
             role=spec.role or "stack",
+            cwd=Path(spec.remote_dir) if spec.remote_dir else None,
         )
         for i, spec in enumerate(commands)
     )

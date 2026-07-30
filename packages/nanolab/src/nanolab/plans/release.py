@@ -102,9 +102,6 @@ def build_release_workflow(
 
     wf = Workflow(workflow_id=f"release-{request.version}")
 
-    # --- Phase 0: Version Bump ---
-    version_bump = _version_bump_resource(nanofaas_root=nanofaas, version=request.version)
-
     # --- Phase 1: Source Tests ---
     archive = source_archive_resource(
         repo_root=nanofaas,
@@ -129,6 +126,7 @@ def build_release_workflow(
         request.image_plan,
         executor=executor,
         role="stack",
+        cwd=Path(source_dir),
     )
 
     # --- Phase 3: Registry Push ---
@@ -265,19 +263,21 @@ def build_release_workflow(
     )
 
     # --- Wire the DAG ---
-    wf.add(source_tests, requires=(archive, version_bump))  # pyright: ignore[reportArgumentType]
-    wf.add(amd64_build, requires=(source_tests, amd64_builder))  # pyright: ignore[reportArgumentType]
-    wf.add(registry_push, requires=(amd64_build,))  # pyright: ignore[reportArgumentType]
-    for i, bw in enumerate(benchmark_runs):
-        wf.add(_SubWorkflowTask(bw), requires=(registry_push,) if i == 0 else ())  # pyright: ignore[reportArgumentType]
-    wf.add(aggregate, requires=tuple(_SubWorkflowTask(bw) for bw in benchmark_runs))  # pyright: ignore[reportArgumentType]
-    wf.add(reg_gate, requires=(aggregate,))  # pyright: ignore[reportArgumentType]
-    wf.add(arm64_build, requires=(reg_gate, tunnel, arm64_builder, archive))  # pyright: ignore[reportArgumentType]
-    wf.add(arm64_smoke, requires=(arm64_build,))  # pyright: ignore[reportArgumentType]
-    wf.add(pub_arch, requires=(arm64_smoke,))  # pyright: ignore[reportArgumentType]
-    wf.add(pub_manifests, requires=(pub_arch,))  # pyright: ignore[reportArgumentType]
-    wf.add(pub_aliases, requires=(pub_manifests,))  # pyright: ignore[reportArgumentType]
-    wf.add(attest, requires=(pub_aliases,))  # pyright: ignore[reportArgumentType]
+    # Order of wf.add() defines execution order. requires only lists Resource
+    # objects that need acquire/release spliced around their consumers.
+    wf.add(source_tests, requires=(archive,))  # pyright: ignore[reportArgumentType]
+    wf.add(amd64_build, requires=(amd64_builder,))  # pyright: ignore[reportArgumentType]
+    wf.add(registry_push)  # pyright: ignore[reportArgumentType]
+    for _i, bw in enumerate(benchmark_runs):
+        wf.add(_SubWorkflowTask(bw))  # pyright: ignore[reportArgumentType]
+    wf.add(aggregate)  # pyright: ignore[reportArgumentType]
+    wf.add(reg_gate)  # pyright: ignore[reportArgumentType]
+    wf.add(arm64_build, requires=(tunnel, arm64_builder, archive))  # pyright: ignore[reportArgumentType]
+    wf.add(arm64_smoke)  # pyright: ignore[reportArgumentType]
+    wf.add(pub_arch)  # pyright: ignore[reportArgumentType]
+    wf.add(pub_manifests)  # pyright: ignore[reportArgumentType]
+    wf.add(pub_aliases)  # pyright: ignore[reportArgumentType]
+    wf.add(attest)  # pyright: ignore[reportArgumentType]
 
     return wf
 

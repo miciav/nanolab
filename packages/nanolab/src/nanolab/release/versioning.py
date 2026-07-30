@@ -156,7 +156,7 @@ def _prepared_updates(
 
 
 def _run_command(command: tuple[str, ...], cwd: Path) -> None:
-    subprocess.run(command, cwd=cwd, check=True)
+    subprocess.run(command, cwd=cwd, check=True, capture_output=True, text=True)
 
 
 def _snapshot_regular_files(repo_root: Path) -> dict[Path, str]:

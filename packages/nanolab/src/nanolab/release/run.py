@@ -290,7 +290,7 @@ def source_test_commands(remote_source_dir: Path) -> tuple[CommandTaskSpec, ...]
         CommandTaskSpec(
             task_id="release.source.gradle",
             summary="Run Java source tests",
-            argv=("./gradlew", "test"),
+            argv=("./gradlew", "test", "--no-parallel"),
             role="stack",
             remote_dir=source,
         ),

@@ -162,6 +162,7 @@ def _stack_operations(
     context: ScenarioExecutionContext,
     *,
     dedicated_loadgen: bool,
+    include_repo_sync: bool = True,
 ) -> tuple[RemoteCommandOperation, ...]:
     planners: list[
         Callable[[ScenarioExecutionContext], tuple[ScenarioOperation, ...]]
@@ -176,7 +177,8 @@ def _stack_operations(
         )
     if scenario.workflow == "loadtest" and not dedicated_loadgen:
         planners.extend([plan_loadtest_install_k6, plan_assets_sync_to_vm])
-    planners.append(plan_repo_sync_to_vm)
+    if include_repo_sync:
+        planners.append(plan_repo_sync_to_vm)
     return _remote_operations(operation for planner in planners for operation in planner(context))
 
 
@@ -288,6 +290,7 @@ def provision_environment(
                     scenario,
                     stack_context,
                     dedicated_loadgen=dedicated_loadgen,
+                    include_repo_sync=scenario.workflow != "release",
                 ),
             ),
             role="stack",
@@ -313,7 +316,7 @@ def provision_environment(
                         (
                             *plan_loadtest_install_k6(context),
                             *plan_assets_sync_to_vm(context),
-                            *plan_repo_sync_to_vm(context),
+                            *(plan_repo_sync_to_vm(context) if scenario.workflow != "release" else ()),
                         )
                     ),
                 ),
@@ -332,6 +335,7 @@ def provision_environment(
                         scenario,
                         cloud_context,
                         dedicated_loadgen=True,
+                        include_repo_sync=False,
                     ),
                 ),
                 role="cloud",

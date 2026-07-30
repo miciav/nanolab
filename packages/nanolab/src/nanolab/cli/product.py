@@ -346,6 +346,26 @@ def install_product_commands(app: typer.Typer) -> None:
         _require_cli_endpoint(scenario_config, control_plane_url, provision=provision)
         cli_provisioned = _cli_provisioned(scenario_config, provision=provision)
         paths = default_tool_paths()
+        bumped_files: tuple[Path, ...] | None = None
+        _release_tag: str | None = None
+        _committed: bool = False
+
+        def _git(*args: str, check: bool = True) -> None:
+            subprocess.run(("git", *args), cwd=paths.nanofaas_root, capture_output=True, check=check)
+
+        def _rollback_bump() -> None:
+            if not bumped_files:
+                return
+            sink._write("[release.rollback] running  Rolling back version bump")
+            _rb_start = sink._clock()
+            if _committed:
+                _git("tag", "-d", _release_tag or "", check=False)
+                _git("reset", "--hard", "HEAD~1")
+            else:
+                _git("checkout", "HEAD", "--", *(str(p) for p in bumped_files))
+            _rb_elapsed = sink._clock() - _rb_start
+            sink._write(f"[release.rollback] passed   {_rb_elapsed:.1f}s")
+
         effective_run_dir = run_dir
         if (
             scenario_config.workflow in ("loadtest", "offload-loadtest", "release")
@@ -373,6 +393,40 @@ def install_product_commands(app: typer.Typer) -> None:
                     if provision and not cli_provisioned
                     else nullcontext()
                 )
+                if scenario_config.workflow == "release" and scenario_config.release is not None:
+                    from nanolab.release.versioning import (
+                        normalize_version,
+                        prepare_version,
+                        read_project_version,
+                    )
+
+                    _, _release_tag = normalize_version(scenario_config.release.version)
+                    _bump_start = sink._clock()
+                    sink._write(
+                        f"[release.bump] running  Bump version to {scenario_config.release.version}"
+                    )
+                    current = read_project_version(paths.nanofaas_root)
+                    if current == _release_tag.lstrip("v"):
+                        # Already bumped — ensure tag exists for git archive
+                        _git("tag", "-d", _release_tag, check=False)
+                        _git("tag", _release_tag)
+                        _bump_elapsed = sink._clock() - _bump_start
+                        sink._write(f"[release.bump] passed   {_bump_elapsed:.1f}s  (already at {_release_tag})")
+                    else:
+                        try:
+                            bumped_files = prepare_version(
+                                paths.nanofaas_root, scenario_config.release.version
+                            )
+                        except BaseException:
+                            _bump_elapsed = sink._clock() - _bump_start
+                            sink._write(f"[release.bump] failed   {_bump_elapsed:.1f}s")
+                            raise
+                        _git("add", *(str(p) for p in bumped_files))
+                        _git("commit", "-m", f"release {_release_tag}")
+                        _git("tag", _release_tag)
+                        _committed = True
+                        _bump_elapsed = sink._clock() - _bump_start
+                        sink._write(f"[release.bump] passed   {_bump_elapsed:.1f}s")
                 with provisioning:
                     if scenario_config.workflow == "loadtest":
                         control_plane_url, prometheus_url = resolve_loadtest_urls(
@@ -410,6 +464,8 @@ def install_product_commands(app: typer.Typer) -> None:
                     except SelectionError as error:
                         raise typer.BadParameter(str(error)) from None
         except BaseException as exc:
+            if not keep:
+                _rollback_bump()
             if effective_run_dir is not None:
                 try:
                     _write_run_metadata(

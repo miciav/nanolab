@@ -73,7 +73,10 @@ class VmCommandTaskExecutor:
         if task.target != "vm":
             raise ValueError(f"VmCommandTaskExecutor cannot run {task.target!r} task")
         result = self._runner.run_vm_command(
-            task.argv, env=dict(task.env), remote_dir=task.remote_dir, dry_run=dry_run,
+            task.argv,
+            env=dict(task.env),
+            remote_dir=task.remote_dir or task.cwd and str(task.cwd),
+            dry_run=dry_run,
         )
         status = "passed" if result.return_code in task.expected_exit_codes else "failed"
         return TaskResult(
