@@ -399,7 +399,7 @@ def arm64_smoke_composite(
         container = f"nanofaas-arm64-smoke-{index}"
         steps.append(
             CommandTask(
-                title=f"Smoke {cell.target.name}",
+                title=f"Smoke {cell.target.name} {cell.flavor}",
                 argv=(
                     "docker", "run", "--rm", "-d",
                     "--name", container,
@@ -413,7 +413,7 @@ def arm64_smoke_composite(
         )
         steps.append(
             CommandTask(
-                title=f"Health-check {cell.target.name}",
+                title=f"Health-check {cell.target.name} {cell.flavor}",
                 argv=(
                     "curl", "-fsS", "--retry", "10", "--retry-delay", "1",
                     "--retry-connrefused",
