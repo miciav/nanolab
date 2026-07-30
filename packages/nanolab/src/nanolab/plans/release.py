@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from sonata_engine import Task, TaskInputs, TaskOutcome, Workflow
+from sonata_engine import Resource, Task, TaskInputs, TaskOutcome, Workflow
 from sonata_tasks.archive import source_archive_resource
 from sonata_tasks.buildx import buildx_builder_resource
 from sonata_tasks.release_composites import (
@@ -98,7 +98,7 @@ def build_release_workflow(request: ReleaseRequest) -> Workflow:
 
     # --- Phase 0: Version Bump ---
     nanofaas = request.nanofaas_root or request.repo_root
-    version_bump = _PrepareVersion(nanofaas_root=nanofaas, version=request.version)
+    version_bump = _version_bump_resource(nanofaas_root=nanofaas, version=request.version)
 
     # --- Phase 1: Source Tests ---
     archive = source_archive_resource(
@@ -275,18 +275,42 @@ def build_release_workflow(request: ReleaseRequest) -> Workflow:
     return wf
 
 
-@dataclass
-class _PrepareVersion(Task[tuple[Path, ...]]):
-    """Bump version strings in all curated nanoFaaS files."""
+def _version_bump_resource(
+    *,
+    nanofaas_root: Path,
+    version: str,
+) -> Resource[tuple[Path, ...]]:
+    """Bump version strings; restore curated files on failure."""
 
-    nanofaas_root: Path
-    version: str
-    title: str = "Prepare release version"
+    import subprocess
+    from nanolab.release.versioning import _CURATED_COUNTS, prepare_version
 
-    def run(self, inputs: TaskInputs) -> TaskOutcome[tuple[Path, ...]]:
-        from nanolab.release.versioning import prepare_version
-        updated = prepare_version(self.nanofaas_root, self.version)
-        return TaskOutcome(value=updated)
+    def _curated_paths() -> list[str]:
+        return [str(nanofaas_root / p) for p in _CURATED_COUNTS]
+
+    def _git_restore_curated() -> None:
+        subprocess.run(
+            ("git", "checkout", "--", *_curated_paths()),
+            cwd=nanofaas_root,
+            capture_output=True,
+        )
+
+    def acquire(inputs: TaskInputs) -> tuple[Path, ...]:
+        try:
+            return prepare_version(nanofaas_root, version)
+        except BaseException:
+            _git_restore_curated()
+            raise
+
+    def release(inputs: TaskInputs, state: tuple[Path, ...]) -> None:
+        pass  # bump persists on success
+
+    return Resource(
+        title=f"Bump version to {version}",
+        acquire=acquire,
+        release=release,
+        infrastructure=False,
+    )
 
 
 @dataclass
