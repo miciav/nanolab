@@ -138,7 +138,7 @@ def build_release_workflow(request: ReleaseRequest) -> Workflow:
     from nanolab.plans.loadtest import build_loadtest_plan
 
     benchmark_scenario = _read_yaml(
-        request.repo_root / "packages" / "nanolab" / "scenarios-v2" / request.settings.scenario_name
+        request.repo_root / "scenarios-v2" / request.settings.scenario_name
     )
     benchmark_config = ScenarioConfig.model_validate(benchmark_scenario)
 
