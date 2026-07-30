@@ -79,7 +79,7 @@ def build_release_workflow(request: ReleaseRequest) -> Workflow:
     arm_req = vm_request_for_role(env, "arm-builder")
     bindings, fetcher = build_role_bindings(env, vm_provider=provider, repo_root=request.repo_root)
     executor = RoleBoundCommandTaskExecutor(bindings)
-    stack_host = provider.connection_host(stack_req)
+    stack_host = getattr(provider, "connection_host")(stack_req)
 
     remote_root = f"/home/azureuser/nanofaas-release/{request.version}"
     source_dir = f"{remote_root}/source"
