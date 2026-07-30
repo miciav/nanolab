@@ -61,6 +61,7 @@ class ReleaseRequest:
     run_dir: Path
     performance_root: Path
     credentials: Any | None = None  # CredentialFiles | None
+    nanofaas_root: Path | None = None  # defaults to repo_root
 
 
 def build_release_workflow(request: ReleaseRequest) -> Workflow:
@@ -87,6 +88,10 @@ def build_release_workflow(request: ReleaseRequest) -> Workflow:
     prometheus_url = f"http://{stack_host}:30090"
 
     wf = Workflow(workflow_id=f"release-{request.version}")
+
+    # --- Phase 0: Version Bump ---
+    nanofaas = request.nanofaas_root or request.repo_root
+    version_bump = _PrepareVersion(nanofaas_root=nanofaas, version=request.version)
 
     # --- Phase 1: Source Tests ---
     archive = source_archive_resource(
@@ -238,7 +243,8 @@ def build_release_workflow(request: ReleaseRequest) -> Workflow:
     )
 
     # --- Wire the DAG ---
-    wf.add(source_tests, requires=(archive,))
+    wf.add(version_bump)
+    wf.add(source_tests, requires=(archive, version_bump))
     wf.add(amd64_build, requires=(source_tests, amd64_builder))
     wf.add(registry_push, requires=(amd64_build,))
     for i, bw in enumerate(benchmark_runs):
@@ -253,6 +259,20 @@ def build_release_workflow(request: ReleaseRequest) -> Workflow:
     wf.add(attest, requires=(pub_aliases,))
 
     return wf
+
+
+@dataclass
+class _PrepareVersion(Task[tuple[Path, ...]]):
+    """Bump version strings in all curated nanoFaaS files."""
+
+    nanofaas_root: Path
+    version: str
+    title: str = "Prepare release version"
+
+    def run(self, inputs: TaskInputs) -> TaskOutcome[tuple[Path, ...]]:
+        from nanolab.release.versioning import prepare_version
+        updated = prepare_version(self.nanofaas_root, self.version)
+        return TaskOutcome(value=updated)
 
 
 @dataclass

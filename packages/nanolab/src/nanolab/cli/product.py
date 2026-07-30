@@ -121,7 +121,7 @@ def _workflow(
             error_rate_max=scenario.release.error_rate_max,
         )
         request = ReleaseRequest(
-            repo_root=paths.nanofaas_root,
+            repo_root=paths.tool_root,
             version=scenario.release.version,
             environment=environment,
             scenario=scenario,
@@ -129,6 +129,7 @@ def _workflow(
             settings=settings,
             run_dir=run_dir or paths.runs_dir / "release" / "latest",
             performance_root=paths.nanofaas_root / "docs" / "performance",
+            nanofaas_root=paths.nanofaas_root,
         )
         return build_release_workflow(request)
     return build_loadtest_plan(
