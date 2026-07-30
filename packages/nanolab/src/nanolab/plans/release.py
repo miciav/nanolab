@@ -233,8 +233,8 @@ def build_release_workflow(request: ReleaseRequest) -> Workflow:
     # --- Phase 12: Attest ---
     attest = attest_composite(
         images=(),
-        predicate_remote=f"{remote_root}/predicate.json",
-        sbom_dir_remote=f"{remote_root}/sboms",
+        predicate_remote=Path(f"{remote_root}/predicate.json"),
+        sbom_dir_remote=Path(f"{remote_root}/sboms"),
         cosign_key="/secrets/cosign-key",
         password_file="/secrets/cosign-password",
         docker_config="/tmp/ghcr-auth",
@@ -246,17 +246,17 @@ def build_release_workflow(request: ReleaseRequest) -> Workflow:
     wf.add(version_bump)  # pyright: ignore[reportArgumentType]
     wf.add(source_tests, requires=(archive, version_bump))  # pyright: ignore[reportArgumentType]
     wf.add(amd64_build, requires=(source_tests, amd64_builder))  # pyright: ignore[reportArgumentType]
-    wf.add(registry_push, requires=(amd64_build,))
+    wf.add(registry_push, requires=(amd64_build,))  # pyright: ignore[reportArgumentType]
     for i, bw in enumerate(benchmark_runs):
         wf.add(_SubWorkflowTask(bw), requires=(registry_push,) if i == 0 else ())  # pyright: ignore[reportArgumentType]
     wf.add(aggregate, requires=tuple(_SubWorkflowTask(bw) for bw in benchmark_runs))  # pyright: ignore[reportArgumentType]
     wf.add(reg_gate, requires=(aggregate,))  # pyright: ignore[reportArgumentType]
     wf.add(arm64_build, requires=(reg_gate, tunnel, arm64_builder, archive))  # pyright: ignore[reportArgumentType]
     wf.add(arm64_smoke, requires=(arm64_build,))  # pyright: ignore[reportArgumentType]
-    wf.add(pub_arch, requires=(arm64_smoke,))
-    wf.add(pub_manifests, requires=(pub_arch,))
-    wf.add(pub_aliases, requires=(pub_manifests,))
-    wf.add(attest, requires=(pub_aliases,))
+    wf.add(pub_arch, requires=(arm64_smoke,))  # pyright: ignore[reportArgumentType]
+    wf.add(pub_manifests, requires=(pub_arch,))  # pyright: ignore[reportArgumentType]
+    wf.add(pub_aliases, requires=(pub_manifests,))  # pyright: ignore[reportArgumentType]
+    wf.add(attest, requires=(pub_aliases,))  # pyright: ignore[reportArgumentType]
 
     return wf
 

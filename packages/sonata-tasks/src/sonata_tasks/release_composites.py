@@ -111,7 +111,7 @@ def source_tests_composite(
             title=spec.summary or f"source-test-{i}",
             argv=spec.argv,
             executor=executor,
-            role=spec.role,
+            role=spec.role or "stack",
         )
         for i, spec in enumerate(commands)
     )
