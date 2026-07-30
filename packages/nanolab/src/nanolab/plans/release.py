@@ -90,7 +90,8 @@ def build_release_workflow(
     stack_req = vm_request_for_role(env, "stack", loadtest=True)
     _ = vm_request_for_role(env, "loadgen", loadtest=True)  # captured by build_role_bindings
     arm_req = vm_request_for_role(env, "arm-builder")
-    bindings, fetcher = build_role_bindings(env, vm_provider=provider, repo_root=request.repo_root)
+    nanofaas = request.nanofaas_root or request.repo_root
+    bindings, fetcher = build_role_bindings(env, vm_provider=provider, repo_root=nanofaas)
     executor = RoleBoundCommandTaskExecutor(bindings)
     stack_host = getattr(provider, "connection_host")(stack_req)
 
@@ -102,7 +103,6 @@ def build_release_workflow(
     wf = Workflow(workflow_id=f"release-{request.version}")
 
     # --- Phase 0: Version Bump ---
-    nanofaas = request.nanofaas_root or request.repo_root
     version_bump = _version_bump_resource(nanofaas_root=nanofaas, version=request.version)
 
     # --- Phase 1: Source Tests ---
