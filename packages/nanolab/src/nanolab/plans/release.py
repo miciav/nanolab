@@ -257,7 +257,6 @@ def build_release_workflow(request: ReleaseRequest) -> Workflow:
     )
 
     # --- Wire the DAG ---
-    wf.add(version_bump)  # pyright: ignore[reportArgumentType]
     wf.add(source_tests, requires=(archive, version_bump))  # pyright: ignore[reportArgumentType]
     wf.add(amd64_build, requires=(source_tests, amd64_builder))  # pyright: ignore[reportArgumentType]
     wf.add(registry_push, requires=(amd64_build,))  # pyright: ignore[reportArgumentType]
