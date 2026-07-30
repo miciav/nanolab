@@ -27,7 +27,7 @@ from sonata_tasks.release_composites import (
     registry_push_composite,
     source_tests_composite,
 )
-from sonata_tasks.release_metrics import AggregateBenchmarks, EvaluateRegressionGate
+from sonata_tasks.release_metrics import AggregateBenchmarks
 from sonata_tasks.registry_tunnel import registry_tunnel_resource
 from workflow_tasks.execution.bindings import RoleBoundCommandTaskExecutor
 from workflow_tasks.loadtest.adapters import HttpPrometheusClient
@@ -140,7 +140,6 @@ def build_release_workflow(request: ReleaseRequest) -> Workflow:
 
     # --- Phase 7: Aggregate ---
     aggregate = AggregateBenchmarks(
-        run_dir=request.run_dir,
         benchmark_runs=request.settings.benchmark_runs,
         profile=PerformanceProfile(
             name=request.settings.profile,
@@ -187,7 +186,6 @@ def build_release_workflow(request: ReleaseRequest) -> Workflow:
         role="arm-builder",
         builder_name=f"release-arm64-{request.version}",
         remote_bake_file=f"{remote_root}/docker-bake-arm64.json",
-        remote_buildkit_config=f"{remote_root}/buildkitd.toml",
         remote_source_dir=source_dir,
         registry_upstream=stack_host,
     )
@@ -229,7 +227,7 @@ def build_release_workflow(request: ReleaseRequest) -> Workflow:
 
     # --- Phase 12: Attest ---
     attest = attest_composite(
-        images={},
+        images=(),
         predicate_remote=f"{remote_root}/predicate.json",
         sbom_dir_remote=f"{remote_root}/sboms",
         cosign_key="/secrets/cosign-key",

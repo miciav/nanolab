@@ -331,7 +331,7 @@ class TestArm64BuildComposite:
 
         assert len(executor.seen) >= 2  # builder setup + bake/build
 
-    def test_with_registry_tunnel(self) -> None:
+    def test_registry_tunnel_delegated_to_resource(self) -> None:
         executor = RecordingExecutor()
         plan = _plan_with_cells(
             _bake_cell("ctrl", "reg/ctrl:v1-arm64", arch="arm64"),
@@ -343,8 +343,10 @@ class TestArm64BuildComposite:
         workflow.add(composite)
         workflow.run()
 
-        tunnel = [s for s in executor.seen if "tunnel" in " ".join(s.argv).lower()]
-        assert len(tunnel) == 1
+        # The composite does NOT create the tunnel — the registry_tunnel_resource
+        # in the parent workflow DAG handles acquire/release.
+        tunnel_cmds = [s for s in executor.seen if "socat" in str(s.argv)]
+        assert len(tunnel_cmds) == 0
 
 
 class TestPublishArchitecturesComposite:

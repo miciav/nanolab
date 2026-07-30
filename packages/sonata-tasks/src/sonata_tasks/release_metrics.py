@@ -6,7 +6,6 @@ Python wrappers that can run in any workflow role.
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any, Mapping, Sequence, override
 
 from sonata_engine import Task, TaskInputs, TaskOutcome
@@ -26,13 +25,11 @@ class AggregateBenchmarks(Task[PerformanceAggregate]):
     def __init__(
         self,
         *,
-        run_dir: Path,
         benchmark_runs: Sequence[Mapping[str, Any]],
         profile: PerformanceProfile,
         title: str = "Aggregate benchmarks",
     ) -> None:
         self.title = title
-        self._run_dir = run_dir
         self._benchmark_runs = benchmark_runs
         self._profile = profile
 

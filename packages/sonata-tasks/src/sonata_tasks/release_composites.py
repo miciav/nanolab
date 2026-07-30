@@ -50,6 +50,11 @@ __all__ = [
 ]
 
 
+def _pin_with_digest(src: str, digests: Mapping[str, str]) -> str:
+    """Replace a tag with its digest-pinned form."""
+    return f'{src.rsplit(":", 1)[0]}@{digests[src]}'
+
+
 # ---------------------------------------------------------------------------
 # 1. source_tests_composite
 # ---------------------------------------------------------------------------
@@ -264,24 +269,8 @@ def arm64_build_composite(
     # all gradle builds as a single batch step.
     steps: list[Any] = []
 
-    if registry_upstream:
-        steps.append(
-            CommandTask(
-                title="Tunnel localhost:5000 to stack registry",
-                argv=(
-                    "sh",
-                    "-c",
-                    "sudo systemctl stop nanofaas-registry-tunnel 2>/dev/null || true; "
-                    "sudo systemctl reset-failed nanofaas-registry-tunnel 2>/dev/null || true; "
-                    "sudo systemd-run --unit nanofaas-registry-tunnel "
-                    f"socat TCP-LISTEN:5000,fork,reuseaddr TCP:{registry_upstream}:5000",
-                ),
-                executor=executor,
-                role=role,
-                cwd=Path(remote_source_dir) if remote_source_dir else None,
-            )
-        )
-
+    # ponytail: registry tunnel is handled by registry_tunnel_resource in the
+    # parent workflow DAG — the composite assumes it is already running.
     steps.append(
         CommandTask(
             title="Create ARM64 buildx builder",
@@ -554,13 +543,10 @@ def publish_manifests_composite(
     manifests = getattr(plan, "manifests", None)
     if manifests is not None:
         # PublishPlan path
-        def _pin_ref(src: str) -> str:
-            return f'{src.rsplit(":", 1)[0]}@{architecture_digests[src]}'
-
         steps = tuple(
             ImagetoolsCreateTask(
                 tag=manifest.reference,
-                sources=tuple(_pin_ref(src) for src in manifest.sources),
+                sources=tuple(_pin_with_digest(src, architecture_digests) for src in manifest.sources),
                 docker_config=docker_config,
                 executor=executor,
                 role=role,
@@ -657,13 +643,10 @@ def publish_aliases_composite(
             ),
         )
 
-    def _pin_alias(src: str) -> str:
-        return f'{src.rsplit(":", 1)[0]}@{manifest_digests[src]}'
-
     steps = tuple(
         ImagetoolsCreateTask(
             tag=alias.reference,
-            sources=(_pin_alias(alias.source),),
+            sources=(_pin_with_digest(alias.source, manifest_digests),),
             docker_config=docker_config,
             executor=executor,
             role=role,

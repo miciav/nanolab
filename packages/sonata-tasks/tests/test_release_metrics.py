@@ -88,7 +88,6 @@ def _deep_merge(base: dict[str, Any], overrides: dict[str, Any]) -> None:
 
 def test_aggregate_benchmarks_produces_performance_aggregate() -> None:
     task = AggregateBenchmarks(
-        run_dir=Path("/runs"),
         benchmark_runs=[_summary()],
         profile=_PROFILE,
     )
@@ -104,7 +103,6 @@ def test_aggregate_benchmarks_median_over_multiple_runs() -> None:
     medium = _summary({"k6": {"http_reqs": {"values": {"rate": 200.0}}}})
     slow = _summary({"k6": {"http_reqs": {"values": {"rate": 300.0}}}})
     task = AggregateBenchmarks(
-        run_dir=Path("/runs"),
         benchmark_runs=[fast, medium, slow],
         profile=_PROFILE,
     )
@@ -116,7 +114,6 @@ def test_aggregate_benchmarks_median_over_multiple_runs() -> None:
 
 def test_aggregate_benchmarks_fails_on_empty_runs() -> None:
     task = AggregateBenchmarks(
-        run_dir=Path("/runs"),
         benchmark_runs=[],
         profile=_PROFILE,
     )
