@@ -16,6 +16,7 @@ import subprocess
 import sys
 from pathlib import Path
 import tempfile
+import textwrap
 import time
 from typing import Any
 
@@ -62,7 +63,6 @@ from workflow_tasks.infra.ansible import AnsibleAdapter
 from workflow_tasks.loadtest.adapters import HttpPrometheusClient
 from workflow_tasks.tasks.models import CommandTaskSpec
 from workflow_tasks.vm.models import VmRequest, vm_remote_home
-
 
 AMD64_PHASES = (
     "source-tests",
@@ -204,14 +204,14 @@ def git_state(repo_root: Path) -> GitState:
 
 
 def build_amd64_release_plan(
-    *,
-    repo_root: Path,
-    version: str,
-    environment_path: Path,
-    release_config_path: Path,
-    run_dir: Path,
-    credentials: CredentialFiles | None,
-    performance_root: Path | None = None,
+        *,
+        repo_root: Path,
+        version: str,
+        environment_path: Path,
+        release_config_path: Path,
+        run_dir: Path,
+        credentials: CredentialFiles | None,
+        performance_root: Path | None = None,
 ) -> Amd64ReleasePlan:
     root = Path(repo_root).resolve()
     environment_file = Path(environment_path).resolve()
@@ -286,11 +286,118 @@ def source_test_commands(remote_source_dir: Path) -> tuple[CommandTaskSpec, ...]
         "/workspace",
     )
     copy_source = "set -eu; cp -a /source/. /workspace && "
+    diagnostics = str(Path(remote_source_dir).parent / "diagnostics")
+    diagnostic_script = textwrap.dedent(
+        f"""\
+        set -uo pipefail
+
+        DIAG={shlex.quote(diagnostics)}
+        rm -rf "$DIAG"
+        mkdir -p "$DIAG"
+
+        {{
+            echo "===== DATE ====="
+            date --iso-8601=seconds
+
+            echo
+            echo "===== IDENTITY ====="
+            id
+            hostname
+            pwd
+
+            echo
+            echo "===== ENVIRONMENT ====="
+            env | sort
+
+            echo
+            echo "===== LIMITS ====="
+            ulimit -a
+
+            echo
+            echo "===== SYSTEM ====="
+            uname -a
+            free -h
+            df -h .
+
+            echo
+            echo "===== JAVA ====="
+            command -v java
+            readlink -f "$(command -v java)"
+            java -version
+
+            echo
+            echo "===== GRADLE ====="
+            ./gradlew --version
+            ./gradlew -q javaToolchains
+        }} >"$DIAG/environment.txt" 2>&1
+
+        set +e
+
+        ./gradlew test \
+            --no-parallel \
+            --console=plain \
+            --info \
+            --stacktrace \
+            2>&1 | tee "$DIAG/gradle.log"
+
+        status=${{PIPESTATUS[0]}}
+
+        if [ "$status" -ne 0 ]; then
+            echo "Gradle failed with status $status"
+
+            while IFS= read -r -d '' report; do
+                cp --parents "$report" "$DIAG"
+            done < <(
+                find . \
+                    -type f \
+                    -path '*/build/test-results/test/TEST-*.xml' \
+                    -print0
+            )
+
+            python3 - <<'PY' | tee "$DIAG/failures.txt"
+        from pathlib import Path
+        import xml.etree.ElementTree as ET
+
+        found = False
+
+        for report in sorted(Path(".").glob(
+            "**/build/test-results/test/TEST-*.xml"
+        )):
+            suite = ET.parse(report).getroot()
+
+            for case in suite.findall(".//testcase"):
+                problem = case.find("failure")
+                kind = "FAILURE"
+
+                if problem is None:
+                    problem = case.find("error")
+                    kind = "ERROR"
+
+                if problem is None:
+                    continue
+
+                found = True
+                print("=" * 100)
+                print(f"{{kind}}: {{case.get('classname')}}.{{case.get('name')}}")
+                print(f"REPORT: {{report}}")
+                print(f"MESSAGE: {{problem.get('message', '')}}")
+                print()
+                print((problem.text or "").strip())
+
+        if not found:
+            print("No failure/error elements found in JUnit XML files.")
+        PY
+        fi
+
+        exit "$status"
+        """
+    )
+
     return (
         CommandTaskSpec(
             task_id="release.source.gradle",
             summary="Run Java source tests",
-            argv=("./gradlew", "test", "--no-parallel"),
+            argv=("bash", "-c", diagnostic_script),
             role="stack",
             remote_dir=source,
         ),
@@ -370,21 +477,20 @@ def source_test_commands(remote_source_dir: Path) -> tuple[CommandTaskSpec, ...]
                 _NODE_TOOLCHAIN,
                 "sh",
                 "-c",
-                copy_source + "apk add --no-cache bash jq >/dev/null && "
+                copy_source
+                + "apk add --no-cache bash jq >/dev/null && "
                 "bash functions/bash/roman-numeral/tests/test_handler.sh",
             ),
             role="stack",
             remote_dir=source,
         ),
     )
-
-
 def amd64_build_commands(
-    plan: Amd64ReleasePlan,
-    *,
-    remote_bake_file: str,
-    remote_buildkit_config: str,
-    remote_source_dir: str,
+        plan: Amd64ReleasePlan,
+        *,
+        remote_bake_file: str,
+        remote_buildkit_config: str,
+        remote_source_dir: str,
 ) -> tuple[CommandTaskSpec, ...]:
     commands = [
         CommandTaskSpec(
@@ -461,9 +567,9 @@ def amd64_build_commands(
 
 
 def create_source_archive(
-    repo_root: Path,
-    guarded_commit: str,
-    destination: Path,
+        repo_root: Path,
+        guarded_commit: str,
+        destination: Path,
 ) -> ArtifactEvidence:
     root = Path(repo_root)
     before = git_state(root)
@@ -496,13 +602,13 @@ def create_source_archive(
 
 
 def stage_source_archive(
-    provider: object,
-    request: object,
-    *,
-    archive: Path,
-    remote_archive: str,
-    remote_source_dir: str,
-    expected_digest: str | None = None,
+        provider: object,
+        request: object,
+        *,
+        archive: Path,
+        remote_archive: str,
+        remote_source_dir: str,
+        expected_digest: str | None = None,
 ) -> None:
     local_digest = digest_path(archive)
     if expected_digest is not None and local_digest != expected_digest:
@@ -549,9 +655,9 @@ def _release_lock_path(plan: Amd64ReleasePlan) -> Path:
     )
     digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()
     return (
-        Path(tempfile.gettempdir())
-        / f"nanofaas-release-locks-{os.getuid()}"
-        / f"{digest}.lock"
+            Path(tempfile.gettempdir())
+            / f"nanofaas-release-locks-{os.getuid()}"
+            / f"{digest}.lock"
     )
 
 
@@ -586,16 +692,16 @@ def _assert_guarded_source(plan: Amd64ReleasePlan) -> None:
 
 
 def run_amd64_release(
-    plan: Amd64ReleasePlan,
-    *,
-    resume: bool = False,
-    keep: bool = False,
-    provider_factory: ProviderFactory | None = None,
-    provisioner: Provisioner | None = None,
-    builder_provisioner: BuilderProvisioner | None = None,
-    loadtest_builder: LoadtestBuilder | None = None,
-    archive_builder: ArchiveBuilder | None = None,
-    failure_injector: FailureInjector | None = None,
+        plan: Amd64ReleasePlan,
+        *,
+        resume: bool = False,
+        keep: bool = False,
+        provider_factory: ProviderFactory | None = None,
+        provisioner: Provisioner | None = None,
+        builder_provisioner: BuilderProvisioner | None = None,
+        loadtest_builder: LoadtestBuilder | None = None,
+        archive_builder: ArchiveBuilder | None = None,
+        failure_injector: FailureInjector | None = None,
 ) -> RegressionDecision:
     """Run a release through the ARM64 functional gate, before publication."""
     with _release_run_lock(_release_lock_path(plan)):
@@ -613,16 +719,16 @@ def run_amd64_release(
 
 
 def _run_amd64_release_locked(
-    plan: Amd64ReleasePlan,
-    *,
-    resume: bool,
-    keep: bool,
-    provider_factory: ProviderFactory | None,
-    provisioner: Provisioner | None,
-    builder_provisioner: BuilderProvisioner | None,
-    loadtest_builder: LoadtestBuilder | None,
-    archive_builder: ArchiveBuilder | None,
-    failure_injector: FailureInjector | None,
+        plan: Amd64ReleasePlan,
+        *,
+        resume: bool,
+        keep: bool,
+        provider_factory: ProviderFactory | None,
+        provisioner: Provisioner | None,
+        builder_provisioner: BuilderProvisioner | None,
+        loadtest_builder: LoadtestBuilder | None,
+        archive_builder: ArchiveBuilder | None,
+        failure_injector: FailureInjector | None,
 ) -> RegressionDecision:
     if plan.credentials is None:
         raise ValueError("release run requires explicit credential files")
@@ -648,9 +754,9 @@ def _run_amd64_release_locked(
     if not resume:
         _progress("→ tearing down any previous release VMs")
         for role, request in (
-            ("stack", stack_request),
-            ("loadgen", loadgen_request),
-            ("arm-builder", arm_request),
+                ("stack", stack_request),
+                ("loadgen", loadgen_request),
+                ("arm-builder", arm_request),
         ):
             _require_result(
                 provider.teardown(request),  # type: ignore[attr-defined]
@@ -695,12 +801,12 @@ def _run_amd64_release_locked(
 
     _progress("→ provisioning stack + loadgen VMs (this can take several minutes)")
     with provision(
-        plan.scenario,
-        plan.environment,
-        repo_root=plan.repo_root,
-        orchestrator_factory=lambda _root: provider,
-        post_ensure_verifier=verify_and_secure,
-        keep=keep,
+            plan.scenario,
+            plan.environment,
+            repo_root=plan.repo_root,
+            orchestrator_factory=lambda _root: provider,
+            post_ensure_verifier=verify_and_secure,
+            keep=keep,
     ):
         if endpoints is None:
             raise RuntimeError("release loadgen ingress was not verified before bootstrap")
@@ -715,10 +821,10 @@ def _run_amd64_release_locked(
             # published evidence lives on GHCR: verify it authenticated, then
             # drop the staged token again before any build phase runs
             with stage_ghcr_credentials(
-                provider,
-                stack_request,
-                username=publish.ghcr_username(),
-                token_file=credentials.ghcr_token,
+                    provider,
+                    stack_request,
+                    username=publish.ghcr_username(),
+                    token_file=credentials.ghcr_token,
             ) as resume_auth:
                 ghcr_auth["authfile"] = f"{resume_auth.docker_config}/config.json"
                 try:
@@ -940,12 +1046,12 @@ def _run_amd64_release_locked(
 
 
 def _publish_release(
-    plan: Amd64ReleasePlan,
-    journal: ReleaseJournal,
-    provider: object,
-    stack_request: VmRequest,
-    reusable: frozenset[str],
-    failure_injector: FailureInjector | None,
+        plan: Amd64ReleasePlan,
+        journal: ReleaseJournal,
+        provider: object,
+        stack_request: VmRequest,
+        reusable: frozenset[str],
+        failure_injector: FailureInjector | None,
 ) -> None:
     """Promote the verified 52-cell matrix to GHCR: immutable architecture
     tags first, verified version manifests next, mutable aliases last. The
@@ -969,10 +1075,10 @@ def _publish_release(
         + _journal_phase_artifacts(journal, "arm64-build"),
     )
     with stage_ghcr_credentials(
-        provider,
-        stack_request,
-        username=publish.ghcr_username(),
-        token_file=plan.credentials.ghcr_token,
+            provider,
+            stack_request,
+            username=publish.ghcr_username(),
+            token_file=plan.credentials.ghcr_token,
     ) as docker:
         authfile = f"{docker.docker_config}/config.json"
         if "publish-architectures" not in reusable:
@@ -1027,13 +1133,13 @@ def _publish_release(
 
 
 def _attest_release(
-    plan: Amd64ReleasePlan,
-    journal: ReleaseJournal,
-    provider: object,
-    stack_request: VmRequest,
-    remote_root: str,
-    reusable: frozenset[str],
-    failure_injector: FailureInjector | None,
+        plan: Amd64ReleasePlan,
+        journal: ReleaseJournal,
+        provider: object,
+        stack_request: VmRequest,
+        remote_root: str,
+        reusable: frozenset[str],
+        failure_injector: FailureInjector | None,
 ) -> None:
     """SBOM, sign, and verify the published digests, then finalize records.
 
@@ -1048,9 +1154,9 @@ def _attest_release(
     assert credentials is not None
     _assert_guarded_source(plan)
     published = (
-        _journal_phase_artifacts(journal, "publish-architectures")
-        + _journal_phase_artifacts(journal, "publish-manifests")
-        + _journal_phase_artifacts(journal, "publish-aliases")
+            _journal_phase_artifacts(journal, "publish-architectures")
+            + _journal_phase_artifacts(journal, "publish-manifests")
+            + _journal_phase_artifacts(journal, "publish-aliases")
     )
     images = {
         artifact.reference.removeprefix("docker://"): artifact.digest
@@ -1088,10 +1194,10 @@ def _attest_release(
                 action="transfer release predicate",
             )
             with stage_ghcr_credentials(
-                provider,
-                stack_request,
-                username=publish.ghcr_username(),
-                token_file=credentials.ghcr_token,
+                    provider,
+                    stack_request,
+                    username=publish.ghcr_username(),
+                    token_file=credentials.ghcr_token,
             ) as docker, stage_cosign_credentials(
                 provider,
                 stack_request,
@@ -1125,10 +1231,10 @@ def _attest_release(
 
 
 def _verify_release_vm_facts(
-    plan: Amd64ReleasePlan,
-    provider: object,
-    role: ExecutionRole,
-    request: VmRequest,
+        plan: Amd64ReleasePlan,
+        provider: object,
+        role: ExecutionRole,
+        request: VmRequest,
 ) -> None:
     azure = plan.environment.azure
     assert azure is not None
@@ -1156,10 +1262,10 @@ def _verify_release_vm_facts(
 
 
 def _secure_release_endpoints(
-    plan: Amd64ReleasePlan,
-    provider: object,
-    stack_request: VmRequest,
-    loadgen_request: VmRequest | None,
+        plan: Amd64ReleasePlan,
+        provider: object,
+        stack_request: VmRequest,
+        loadgen_request: VmRequest | None,
 ) -> tuple[str, str]:
     azure = plan.environment.azure
     assert azure is not None and azure.operator_source_cidr is not None
@@ -1202,10 +1308,10 @@ def _phase_banner(phase: str) -> str:
 
 
 def _record_phase(
-    journal: ReleaseJournal,
-    phase: str,
-    action: Callable[[], Iterable[ArtifactEvidence]],
-    failure_injector: FailureInjector | None,
+        journal: ReleaseJournal,
+        phase: str,
+        action: Callable[[], Iterable[ArtifactEvidence]],
+        failure_injector: FailureInjector | None,
 ) -> tuple[ArtifactEvidence, ...]:
     _progress(f"→ {_phase_banner(phase)} ...")
     started = time.monotonic()
@@ -1225,8 +1331,8 @@ def _record_phase(
 
 
 def _journal_phase_artifacts(
-    journal: ReleaseJournal,
-    phase: str,
+        journal: ReleaseJournal,
+        phase: str,
 ) -> tuple[ArtifactEvidence, ...]:
     for entry in reversed(journal.entries()):
         if entry.get("kind") != "phase" or entry.get("phase") != phase:
@@ -1245,11 +1351,11 @@ def _journal_phase_artifacts(
 
 
 def _journal_artifact(
-    journal: ReleaseJournal,
-    phase: str,
-    *,
-    location: str,
-    reference: str,
+        journal: ReleaseJournal,
+        phase: str,
+        *,
+        location: str,
+        reference: str,
 ) -> ArtifactEvidence:
     matches = tuple(
         artifact
@@ -1262,9 +1368,9 @@ def _journal_artifact(
 
 
 def _read_verified_local_json(
-    journal: ReleaseJournal,
-    phase: str,
-    path: Path,
+        journal: ReleaseJournal,
+        phase: str,
+        path: Path,
 ) -> dict[str, Any]:
     artifact = _journal_artifact(
         journal,
@@ -1286,12 +1392,12 @@ def _read_verified_local_json(
 
 
 def _run_source_tests(
-    plan: Amd64ReleasePlan,
-    provider: object,
-    request: object,
-    archive_builder: ArchiveBuilder,
-    remote_archive: str,
-    remote_source_dir: str,
+        plan: Amd64ReleasePlan,
+        provider: object,
+        request: object,
+        archive_builder: ArchiveBuilder,
+        remote_archive: str,
+        remote_source_dir: str,
 ) -> tuple[ArtifactEvidence, ...]:
     archive = plan.run_dir / "source.tar"
     archive.unlink(missing_ok=True)
@@ -1319,18 +1425,18 @@ def _run_source_tests(
 
 
 def _build_amd64_images(
-    plan: Amd64ReleasePlan,
-    provider: object,
-    request: object,
-    remote_bake: str,
-    remote_buildkit: str,
-    remote_source_dir: str,
+        plan: Amd64ReleasePlan,
+        provider: object,
+        request: object,
+        remote_bake: str,
+        remote_buildkit: str,
+        remote_source_dir: str,
 ) -> tuple[ArtifactEvidence, ...]:
     _verify_generated_build_inputs(plan)
     _provider_exec(provider, request, ("mkdir", "-p", str(Path(remote_bake).parent)))
     for source, destination in (
-        (plan.bake_file, remote_bake),
-        (plan.buildkit_config, remote_buildkit),
+            (plan.bake_file, remote_bake),
+            (plan.buildkit_config, remote_buildkit),
     ):
         _provider_transfer_to(
             provider,
@@ -1341,32 +1447,32 @@ def _build_amd64_images(
         )
     _reset_named_builder(plan, provider, request)
     for command in amd64_build_commands(
-        plan,
-        remote_bake_file=remote_bake,
-        remote_buildkit_config=remote_buildkit,
-        remote_source_dir=remote_source_dir,
+            plan,
+            remote_bake_file=remote_bake,
+            remote_buildkit_config=remote_buildkit,
+            remote_source_dir=remote_source_dir,
     ):
         _provider_exec(provider, request, command.argv, cwd=command.remote_dir, bounded=True)
     return _local_image_evidence(plan, provider, request)
 
 
 def _build_arm64_images(
-    plan: Amd64ReleasePlan,
-    image_plan: ImagePlan,
-    bake_file: Path,
-    provider: object,
-    request: object,
-    remote_bake: str,
-    remote_buildkit: str,
-    remote_source_dir: str,
-    *,
-    registry_upstream: str,
+        plan: Amd64ReleasePlan,
+        image_plan: ImagePlan,
+        bake_file: Path,
+        provider: object,
+        request: object,
+        remote_bake: str,
+        remote_buildkit: str,
+        remote_source_dir: str,
+        *,
+        registry_upstream: str,
 ) -> tuple[ArtifactEvidence, ...]:
     bake_file.write_text(render_bake_json(image_plan), encoding="utf-8")
     _provider_exec(provider, request, ("mkdir", "-p", str(Path(remote_bake).parent)))
     for source, destination in (
-        (bake_file, remote_bake),
-        (plan.buildkit_config, remote_buildkit),
+            (bake_file, remote_bake),
+            (plan.buildkit_config, remote_buildkit),
     ):
         _provider_transfer_to(
             provider,
@@ -1377,12 +1483,12 @@ def _build_arm64_images(
         )
     _reset_named_builder(plan, provider, request)
     for command in arm.arm64_build_commands(
-        image_plan,
-        builder_name=plan.builder.name,
-        remote_bake_file=remote_bake,
-        remote_buildkit_config=remote_buildkit,
-        remote_source_dir=remote_source_dir,
-        registry_upstream=registry_upstream,
+            image_plan,
+            builder_name=plan.builder.name,
+            remote_bake_file=remote_bake,
+            remote_buildkit_config=remote_buildkit,
+            remote_source_dir=remote_source_dir,
+            registry_upstream=registry_upstream,
     ):
         result = _provider_exec(
             provider,
@@ -1413,13 +1519,13 @@ def _build_arm64_images(
 
 
 def _smoke_arm64_images(
-    plan: Amd64ReleasePlan,
-    image_plan: ImagePlan,
-    provider: object,
-    request: object,
-    expected_build_evidence: Iterable[ArtifactEvidence],
-    *,
-    registry_upstream: str,
+        plan: Amd64ReleasePlan,
+        image_plan: ImagePlan,
+        provider: object,
+        request: object,
+        expected_build_evidence: Iterable[ArtifactEvidence],
+        *,
+        registry_upstream: str,
 ) -> tuple[ArtifactEvidence, ...]:
     _assert_guarded_source(plan)
     _provider_exec(provider, request, arm.registry_tunnel_command(registry_upstream))
@@ -1486,10 +1592,10 @@ def _smoke_arm64_images(
 
 
 def _require_image_architecture(
-    provider: object,
-    request: object,
-    reference: str,
-    expected: str,
+        provider: object,
+        request: object,
+        reference: str,
+        expected: str,
 ) -> None:
     result = _provider_exec(
         provider,
@@ -1504,10 +1610,10 @@ def _require_image_architecture(
 
 
 def _smoke_arm64_server(
-    provider: object,
-    request: object,
-    smoke: arm.ServerSmokeSpec,
-    image: str,
+        provider: object,
+        request: object,
+        smoke: arm.ServerSmokeSpec,
+        image: str,
 ) -> None:
     try:
         _provider_exec(
@@ -1600,9 +1706,9 @@ def _verify_generated_build_inputs(plan: Amd64ReleasePlan) -> None:
 
 
 def _reset_named_builder(
-    plan: Amd64ReleasePlan,
-    provider: object,
-    request: object,
+        plan: Amd64ReleasePlan,
+        provider: object,
+        request: object,
 ) -> None:
     result = provider.exec_argv(  # type: ignore[attr-defined]
         request,
@@ -1620,13 +1726,13 @@ def _reset_named_builder(
 
 
 def _push_local_images(
-    plan: Amd64ReleasePlan,
-    provider: object,
-    request: object,
-    expected_build_evidence: Iterable[ArtifactEvidence],
+        plan: Amd64ReleasePlan,
+        provider: object,
+        request: object,
+        expected_build_evidence: Iterable[ArtifactEvidence],
 ) -> tuple[ArtifactEvidence, ...]:
     if _evidence_map(_local_image_evidence(plan, provider, request)) != _evidence_map(
-        expected_build_evidence
+            expected_build_evidence
     ):
         raise RuntimeError("amd64-build evidence changed before consumption")
     for cell in plan.image_plan.cells:
@@ -1640,15 +1746,15 @@ def _push_local_images(
 
 
 def _evidence_map(
-    artifacts: Iterable[ArtifactEvidence],
+        artifacts: Iterable[ArtifactEvidence],
 ) -> dict[tuple[str, str], str]:
     return {(artifact.location, artifact.reference): artifact.digest for artifact in artifacts}
 
 
 def _local_image_evidence(
-    plan: Amd64ReleasePlan,
-    provider: object,
-    request: object,
+        plan: Amd64ReleasePlan,
+        provider: object,
+        request: object,
 ) -> tuple[ArtifactEvidence, ...]:
     return tuple(
         ArtifactEvidence(
@@ -1661,9 +1767,9 @@ def _local_image_evidence(
 
 
 def _registry_image_evidence(
-    plan: Amd64ReleasePlan,
-    provider: object,
-    request: object,
+        plan: Amd64ReleasePlan,
+        provider: object,
+        request: object,
 ) -> tuple[ArtifactEvidence, ...]:
     return tuple(
         ArtifactEvidence(
@@ -1688,12 +1794,12 @@ def _inspect_image_digest(provider: object, request: object, reference: str) -> 
 
 
 def _remote_image_digest(
-    provider: object,
-    request: object,
-    location: str,
-    reference: str,
-    *,
-    ghcr_authfile: str | None = None,
+        provider: object,
+        request: object,
+        location: str,
+        reference: str,
+        *,
+        ghcr_authfile: str | None = None,
 ) -> str | None:
     if location != "remote":
         return None
@@ -1718,11 +1824,11 @@ def _remote_image_digest(
 
 
 def _inspect_ghcr_digest(
-    provider: object,
-    request: object,
-    reference: str,
-    *,
-    authfile: str,
+        provider: object,
+        request: object,
+        reference: str,
+        *,
+        authfile: str,
 ) -> str:
     result = _provider_exec(
         provider,
@@ -1760,8 +1866,8 @@ def _inspect_registry_digest(provider: object, request: object, reference: str) 
 
 
 def _registry_digest_map(
-    plan: Amd64ReleasePlan,
-    artifacts: Iterable[ArtifactEvidence],
+        plan: Amd64ReleasePlan,
+        artifacts: Iterable[ArtifactEvidence],
 ) -> dict[str, str]:
     by_reference = {artifact.reference: artifact.digest for artifact in artifacts}
     expected = {f"docker://{cell.image}" for cell in plan.image_plan.cells}
@@ -1771,16 +1877,16 @@ def _registry_digest_map(
 
 
 def _run_benchmark(
-    plan: Amd64ReleasePlan,
-    index: int,
-    loadtest_builder: LoadtestBuilder,
-    bindings: object,
-    fetcher: object | None,
-    control_plane_url: str,
-    prometheus_url: str,
-    provider: object,
-    request: object,
-    expected_registry_digests: Mapping[str, str],
+        plan: Amd64ReleasePlan,
+        index: int,
+        loadtest_builder: LoadtestBuilder,
+        bindings: object,
+        fetcher: object | None,
+        control_plane_url: str,
+        prometheus_url: str,
+        provider: object,
+        request: object,
+        expected_registry_digests: Mapping[str, str],
 ) -> tuple[ArtifactEvidence, ...]:
     run_dir = plan.run_dir / f"run-{index}"
     workflow = loadtest_builder(
@@ -1825,11 +1931,11 @@ def _native_image(plan: Amd64ReleasePlan, target_name: str) -> str:
 
 
 def _pinned_native_image(
-    plan: Amd64ReleasePlan,
-    target_name: str,
-    provider: object,
-    request: object,
-    expected_registry_digests: Mapping[str, str],
+        plan: Amd64ReleasePlan,
+        target_name: str,
+        provider: object,
+        request: object,
+        expected_registry_digests: Mapping[str, str],
 ) -> str:
     tagged = _native_image(plan, target_name)
     expected = expected_registry_digests[tagged]
@@ -1847,8 +1953,8 @@ def _function_target_name(function_key: str) -> str:
 
 
 def _write_aggregate(
-    plan: Amd64ReleasePlan,
-    journal: ReleaseJournal,
+        plan: Amd64ReleasePlan,
+        journal: ReleaseJournal,
 ) -> ArtifactEvidence:
     summaries = tuple(
         _read_verified_local_json(
@@ -1863,8 +1969,8 @@ def _write_aggregate(
 
 
 def _evaluate_gate(
-    plan: Amd64ReleasePlan,
-    journal: ReleaseJournal,
+        plan: Amd64ReleasePlan,
+        journal: ReleaseJournal,
 ) -> tuple[RegressionDecision, ArtifactEvidence]:
     aggregate = _aggregate_from_payload(
         _read_verified_local_json(
@@ -2004,13 +2110,13 @@ def _provision_release_builder(provider: object, request: object, repo_root: Pat
 
 
 def _provider_exec(
-    provider: object,
-    request: object,
-    argv: tuple[str, ...],
-    *,
-    cwd: str | None = None,
-    env: dict[str, str] | None = None,
-    bounded: bool = False,
+        provider: object,
+        request: object,
+        argv: tuple[str, ...],
+        *,
+        cwd: str | None = None,
+        env: dict[str, str] | None = None,
+        bounded: bool = False,
 ) -> object:
     if bounded:
         # The SSH executor waits for the exit status before draining output,
@@ -2025,7 +2131,7 @@ def _provider_exec(
             "sh",
             "-c",
             "{ " + script + " ; } >/tmp/release-cmd.log 2>&1; "
-            "ec=$?; tail -c 65536 /tmp/release-cmd.log; exit $ec",
+                            "ec=$?; tail -c 65536 /tmp/release-cmd.log; exit $ec",
         )
     result = _retry_on_connection_death(
         lambda: provider.exec_argv(  # type: ignore[attr-defined]
@@ -2037,12 +2143,12 @@ def _provider_exec(
 
 
 def _provider_transfer_to(
-    provider: object,
-    request: object,
-    *,
-    source: Path,
-    destination: str,
-    action: str,
+        provider: object,
+        request: object,
+        *,
+        source: Path,
+        destination: str,
+        action: str,
 ) -> object:
     result = _retry_on_connection_death(
         lambda: provider.transfer_to(  # type: ignore[attr-defined]
@@ -2108,9 +2214,9 @@ def _release_settings(_repo_root: Path, path: Path) -> ReleaseSettings:
         max_parallelism = build["maxParallelism"]
         runs = benchmark["runs"]
         if (
-            not isinstance(max_parallelism, int)
-            or isinstance(max_parallelism, bool)
-            or max_parallelism < 1
+                not isinstance(max_parallelism, int)
+                or isinstance(max_parallelism, bool)
+                or max_parallelism < 1
         ):
             raise ValueError("build.maxParallelism must be a positive integer")
         if not isinstance(runs, int) or isinstance(runs, bool) or runs != 3:
