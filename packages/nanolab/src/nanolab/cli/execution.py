@@ -205,7 +205,7 @@ def build_role_bindings(
     command_runner = runner or ShellCommandTaskRunner()
     host = HostCommandTaskExecutor(command_runner)
     if environment.provider == "local":
-        return RoleBindings(host=host, stack=host, loadgen=host, cloud=host), None
+        return RoleBindings(host=host, stack=host, loadgen=host, cloud=host, arm_builder=host), None
 
     if environment.provider in {"azure", "proxmox"}:
         provider = vm_provider or vm_provider_for_environment(
@@ -236,9 +236,11 @@ def build_role_bindings(
         loadgen = loadgen_result[0] if loadgen_result else None
         cloud_result = provider_remote("cloud") if "cloud" in environment.roles else None
         cloud = cloud_result[0] if cloud_result else None
+        arm_builder_result = provider_remote("arm-builder") if "arm-builder" in environment.roles else None
+        arm_builder = arm_builder_result[0] if arm_builder_result else None
         fetch_request = loadgen_result[1] if loadgen_result else stack_request
         return (
-            RoleBindings(host=host, stack=stack, loadgen=loadgen, cloud=cloud),
+            RoleBindings(host=host, stack=stack, loadgen=loadgen, cloud=cloud, arm_builder=arm_builder),
             VmFileFetcher(provider, fetch_request),
         )
 
@@ -257,8 +259,9 @@ def build_role_bindings(
     stack = remote("stack")
     loadgen = remote("loadgen") if "loadgen" in environment.roles else None
     cloud = remote("cloud") if "cloud" in environment.roles else None
+    arm_builder = remote("arm-builder") if "arm-builder" in environment.roles else None
     fetch_target = environment.target("loadgen" if loadgen is not None else "stack")
     return (
-        RoleBindings(host=host, stack=stack, loadgen=loadgen, cloud=cloud),
+        RoleBindings(host=host, stack=stack, loadgen=loadgen, cloud=cloud, arm_builder=arm_builder),
         _RemoteFetcher(command_runner, fetch_target, environment.provider),
     )

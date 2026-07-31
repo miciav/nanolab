@@ -17,9 +17,10 @@ class RoleBindings:
     stack: CommandTaskExecutor
     loadgen: CommandTaskExecutor | None = None
     cloud: CommandTaskExecutor | None = None
+    arm_builder: CommandTaskExecutor | None = None
 
     def executor_for(self, role: ExecutionRole) -> CommandTaskExecutor:
-        executor = getattr(self, role)
+        executor = getattr(self, role.replace("-", "_"))
         if executor is None:
             raise ValueError(f"no executor bound for role {role!r}")
         return executor
