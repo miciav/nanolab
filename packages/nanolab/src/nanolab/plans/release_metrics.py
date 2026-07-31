@@ -22,7 +22,11 @@ from nanolab.release.metrics import (
 
 
 class AggregateBenchmarks(Task[PerformanceAggregate]):
-    """Read benchmark summaries from disk and call aggregate_runs()."""
+    """Read benchmark summaries from disk, aggregate them, and write the result.
+
+    The aggregate is written to ``run_dir / "aggregate.json"`` so downstream
+    tasks (e.g. _RegressionGate) can read it from disk.
+    """
 
     def __init__(
         self,
@@ -46,7 +50,29 @@ class AggregateBenchmarks(Task[PerformanceAggregate]):
             if not path.is_file():
                 raise RuntimeError(f"benchmark summary not found: {path}")
             summaries.append(json.loads(path.read_text(encoding="utf-8")))
-        return TaskOutcome(value=aggregate_runs(self._profile, tuple(summaries)))
+        result = aggregate_runs(self._profile, tuple(summaries))
+        self._run_dir.mkdir(parents=True, exist_ok=True)
+        self._run_dir.joinpath("aggregate.json").write_text(
+            json.dumps(_serialize_aggregate(result), indent=2),
+            encoding="utf-8",
+        )
+        return TaskOutcome(value=result)
+
+
+def _serialize_aggregate(agg: PerformanceAggregate) -> dict:
+    return {
+        "profile": {
+            "name": agg.profile.name,
+            "provider": agg.profile.provider,
+            "stack_vm": agg.profile.stack_vm,
+            "loadgen_vm": agg.profile.loadgen_vm,
+            "architecture": agg.profile.architecture,
+            "flavor": agg.profile.flavor,
+            "scenario": agg.profile.scenario,
+        },
+        "run_count": agg.run_count,
+        "metrics": agg.metrics,
+    }
 
 
 class EvaluateRegressionGate(Task[RegressionDecision]):
