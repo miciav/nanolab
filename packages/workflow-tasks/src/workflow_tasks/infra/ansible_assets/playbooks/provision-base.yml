@@ -66,6 +66,7 @@
           - openjdk-21-jdk-headless
           - docker.io
           - docker-buildx
+          - skopeo
           - socat
         state: present
         update_cache: true
