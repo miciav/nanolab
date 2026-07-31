@@ -341,11 +341,11 @@ def install_product_commands(app: typer.Typer) -> None:
         cli_provisioned = _cli_provisioned(scenario_config, provision=provision)
         paths = default_tool_paths()
         effective_run_dir = run_dir
-        if (
-            scenario_config.workflow in ("loadtest", "offload-loadtest", "release")
-            and effective_run_dir is None
-        ):
-            effective_run_dir = paths.runs_dir / "latest"
+        if effective_run_dir is None:
+            if scenario_config.workflow == "release":
+                effective_run_dir = paths.runs_dir / "release" / "latest"
+            elif scenario_config.workflow in ("loadtest", "offload-loadtest"):
+                effective_run_dir = paths.runs_dir / "latest"
         sink = ConsoleProgressSink()
         started_at = datetime.now(UTC)
         provenance = _git_provenance(paths.nanofaas_root)
