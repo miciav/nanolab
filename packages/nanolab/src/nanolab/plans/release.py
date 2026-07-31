@@ -162,7 +162,7 @@ def build_release_workflow(
             prometheus_client=HttpPrometheusClient(prometheus_url),
             run_dir=request.run_dir / f"run-{i}",
             fetcher=fetcher,
-            repo_root=request.repo_root,
+            repo_root=Path(source_dir),
         )
         benchmark_runs.append(bench_wf)
 
