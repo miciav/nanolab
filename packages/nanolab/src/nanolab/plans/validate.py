@@ -165,6 +165,7 @@ def build_validate_plan(
         ),
         additional_modules=("async-queue", "sync-queue") if kubernetes else (),
         build_control_plane=kubernetes,
+        run_java_e2e=kubernetes,
     )
     if kubernetes:
         # Both settings are what this workflow exists to exercise: the JUnit queue

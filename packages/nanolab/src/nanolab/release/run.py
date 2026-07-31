@@ -333,7 +333,11 @@ def source_test_commands(remote_source_dir: Path) -> tuple[CommandTaskSpec, ...]
 
         set +e
 
-        ./gradlew test \
+        env \
+            -u KUBECONFIG \
+            -u NANOFAAS_RUN_K8S_E2E \
+            -u NANOFAAS_E2E_NAMESPACE \
+            ./gradlew test \
             --no-parallel \
             --console=plain \
             --info \

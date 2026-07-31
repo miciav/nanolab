@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from pathlib import Path
+from types import MappingProxyType
 
 from workflow_tasks.execution.bindings import CommandTaskExecutor
 from workflow_tasks.execution.roles import ExecutionRole
@@ -22,6 +23,9 @@ class GradleTask(CommandTask):
 
     `role` is required: building on the host and building inside a VM use
     different toolchains and leave the artifacts somewhere else.
+
+    `env` forwards environment variables through the executor to the remote
+    process (e.g. NANOFAAS_RUN_K8S_E2E, KUBECONFIG).
     """
 
     def __init__(
@@ -32,6 +36,7 @@ class GradleTask(CommandTask):
         properties: Mapping[str, str] | None = None,
         title: str | None = None,
         cwd: Path | None = None,
+        env: Mapping[str, str] | None = None,
     ) -> None:
         if not targets:
             raise ValueError("a Gradle task needs at least one target")
@@ -42,4 +47,5 @@ class GradleTask(CommandTask):
             executor=executor,
             role=role,
             cwd=cwd,
+            env=MappingProxyType(dict(env or {})),
         )

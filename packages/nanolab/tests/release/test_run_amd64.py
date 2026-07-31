@@ -326,7 +326,17 @@ def test_release_settings_reject_nonfinite_or_out_of_range_thresholds(
 def test_source_tests_reuse_gradle_and_uv_and_pin_container_toolchains() -> None:
     commands = release_run.source_test_commands(Path("/srv/nanofaas-source"))
 
-    assert commands[0].argv == ("./gradlew", "test", "--no-parallel")
+    gradle_cmd = commands[0]
+    assert gradle_cmd.task_id == "release.source.gradle"
+    assert gradle_cmd.role == "stack"
+    assert gradle_cmd.remote_dir == "/srv/nanofaas-source"
+    assert gradle_cmd.argv[:2] == ("bash", "-c")
+    script = gradle_cmd.argv[2]
+    assert "./gradlew test" in script
+    assert "--no-parallel" in script
+    assert "-u KUBECONFIG" in script
+    assert "-u NANOFAAS_RUN_K8S_E2E" in script
+    assert "-u NANOFAAS_E2E_NAMESPACE" in script
     python_commands = [command for command in commands if command.argv[:2] == ("uv", "run")]
     assert {command.task_id for command in python_commands} == {
         "release.source.python-sdk",
