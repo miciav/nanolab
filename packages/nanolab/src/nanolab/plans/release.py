@@ -140,6 +140,7 @@ def build_release_workflow(
         request.image_plan,
         executor=executor,
         role="stack",
+        tls_verify=False,
     )
 
     # --- Phases 4-6: Benchmarks ---

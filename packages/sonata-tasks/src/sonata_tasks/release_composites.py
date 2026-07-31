@@ -197,6 +197,7 @@ def registry_push_composite(
     role: ExecutionRole,
     authfile: str = "",
     *,
+    tls_verify: bool = True,
     title: str = "Push images to registry",
 ) -> Steps:
     """Push each image to the registry, then inspect its digest.
@@ -218,6 +219,8 @@ def registry_push_composite(
         Path to the registry auth file for the skopeo inspect step.
         Pass empty string only when no authentication is needed
         (e.g. local test registries without auth).
+    tls_verify :
+        Set False for plain-HTTP registries (e.g. localhost:5000).
     title :
         Optional override.
     """
@@ -235,6 +238,7 @@ def registry_push_composite(
                     authfile=authfile,
                     executor=executor,
                     role=role,
+                    tls_verify=tls_verify,
                 ),
             ),
         )
