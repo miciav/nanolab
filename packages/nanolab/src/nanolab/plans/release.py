@@ -8,6 +8,7 @@ workflow surface is always 12 top-level entries.
 
 from __future__ import annotations
 
+import ipaddress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -100,6 +101,26 @@ def build_release_workflow(
     bindings, fetcher = build_role_bindings(env, vm_provider=provider, repo_root=nanofaas)
     executor = RoleBoundCommandTaskExecutor(bindings)
     stack_host = getattr(provider, "connection_host")(stack_req)
+
+    # Open NSG ports for the loadtest (operator CIDR + loadgen VM IP).
+    azure = env.azure
+    if azure is not None and azure.operator_source_cidr is not None:
+        sources = (azure.operator_source_cidr,)
+        # vm_request_for_role was called above with loadtest=True to capture
+        # the loadgen request into build_role_bindings; retrieve it again here
+        # so we can resolve its public IP for the NSG source list.
+        try:
+            loadgen_req = vm_request_for_role(env, "loadgen", loadtest=True)
+            loadgen_host = getattr(provider, "connection_host")(loadgen_req)
+            loadgen_address = ipaddress.ip_address(loadgen_host)
+            sources = tuple(dict.fromkeys((f"{loadgen_address}/{loadgen_address.max_prefixlen}", *sources)))
+        except Exception:
+            pass
+        getattr(provider, "restrict_inbound_sources")(
+            stack_req,
+            ports=(30080, 30081, 30090),
+            source_cidrs=sources,
+        )
 
     remote_root = f"/home/azureuser/nanofaas-release/{request.version}"
     source_dir = f"{remote_root}/source"
