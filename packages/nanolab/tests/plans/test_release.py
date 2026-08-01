@@ -19,6 +19,7 @@ from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.images.plan import ImagePlan
 from nanolab.plans.release import ReleaseRequest, build_release_workflow
+from nanolab.release.publish import PublishPlan
 from nanolab.release.run import CredentialFiles, GitState, ReleaseSettings
 from nanolab.release.state import digest_path
 from nanolab.release.state import ArtifactEvidence
@@ -898,18 +899,35 @@ def test_build_release_request_plans_from_the_commit_not_the_worktree(
     tmp_path: Path,
     canonical_release_configs: tuple[Path, Path],
 ) -> None:
-    """Gitignored leftovers in the checkout must not reach the image matrix."""
+    """Gitignored leftovers in the checkout must not reach the image matrix.
+
+    The stub returns a sentinel that is *not* NANOFAAS_ROOT, and a spy on
+    ``build_image_plan`` records which root it actually receives. A revert
+    to planning from ``source_root`` would make the spy see NANOFAAS_ROOT
+    instead of the sentinel, so this has teeth where comparing
+    ``request.source_tree`` against a value equal to NANOFAAS_ROOT would not.
+    """
     scenario_path, environment_path = canonical_release_configs
     monkeypatch.setattr(
         release_plan, "git_state", lambda _root: GitState(commit="a" * 40, clean=True)
     )
+    sentinel_tree = Path("/sentinel-extracted-tree")
+    assert sentinel_tree != NANOFAAS_ROOT
     extracted: list[tuple[Path, str, Path]] = []
 
     def fake_extract(repo_root: Path, commit: str, destination: Path) -> Path:
         extracted.append((repo_root, commit, destination))
-        return NANOFAAS_ROOT
+        return sentinel_tree
 
     monkeypatch.setattr(release_plan, "extract_commit_tree", fake_extract)
+
+    planned_roots: list[Path] = []
+
+    def fake_build_image_plan(root, version, *, registry, architectures):
+        planned_roots.append(root)
+        return ImagePlan(version=version, registry=registry, targets=(), cells=("dummy-cell",))
+
+    monkeypatch.setattr(release_plan, "build_image_plan", fake_build_image_plan)
     source_tree = tmp_path / "tree"
 
     request = release_plan.build_release_request(
@@ -924,5 +942,68 @@ def test_build_release_request_plans_from_the_commit_not_the_worktree(
     )
 
     assert extracted == [(NANOFAAS_ROOT, "a" * 40, source_tree)]
-    assert request.source_tree == NANOFAAS_ROOT
+    assert planned_roots == [sentinel_tree]
+    assert request.source_tree == sentinel_tree
     assert request.image_plan.cells
+
+
+def test_build_release_workflow_plans_arm64_and_publish_from_the_source_tree(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    canonical_release_configs: tuple[Path, Path],
+) -> None:
+    """The ARM64 and publish plans must read the extracted tree, not the checkout.
+
+    ``request.source_tree`` is overridden to a sentinel distinct from
+    ``request.nanofaas_root`` (both equal NANOFAAS_ROOT otherwise, which
+    would make this assertion pass even if the workflow builder reverted to
+    planning from the checkout). Spies on the two planners confirm they
+    receive the sentinel.
+    """
+    scenario_path, environment_path = canonical_release_configs
+    monkeypatch.setattr(
+        release_plan, "git_state", lambda _root: GitState(commit="a" * 40, clean=True)
+    )
+    monkeypatch.setattr(
+        release_plan,
+        "extract_commit_tree",
+        lambda _repo_root, _commit, _destination: NANOFAAS_ROOT,
+    )
+    request = release_plan.build_release_request(
+        repo_root=NANOLAB_ROOT,
+        nanofaas_root=NANOFAAS_ROOT,
+        scenario_path=scenario_path,
+        environment_path=environment_path,
+        release_config_path=None,
+        run_dir=tmp_path / "run",
+        performance_root=tmp_path / "performance",
+        source_tree=tmp_path / "tree",
+    )
+    sentinel_tree = Path("/sentinel-extracted-tree")
+    assert sentinel_tree != NANOFAAS_ROOT
+    request = replace(request, source_tree=sentinel_tree)
+
+    arm_roots: list[Path] = []
+
+    def fake_build_arm64_image_plan(root, version, *, registry):
+        arm_roots.append(root)
+        return ImagePlan(version=version, registry=registry, targets=(), cells=())
+
+    monkeypatch.setattr(release_plan, "build_arm64_image_plan", fake_build_arm64_image_plan)
+
+    publish_roots: list[Path] = []
+
+    def fake_build_publish_plan(root, version, *, local_registry):
+        publish_roots.append(root)
+        return PublishPlan(
+            version=version, repository="ghcr.io/x", copies=(), manifests=(), aliases=()
+        )
+
+    monkeypatch.setattr(
+        release_plan.release_publish, "build_publish_plan", fake_build_publish_plan
+    )
+
+    build_release_workflow(request, provider=RejectingProvider())
+
+    assert arm_roots == [sentinel_tree]
+    assert publish_roots == [sentinel_tree]

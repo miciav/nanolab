@@ -364,11 +364,12 @@ def extract_commit_tree(repo_root: Path, commit: str, destination: Path) -> Path
     untracked files cannot add phantom targets to the image matrix.
     """
     output = Path(destination)
-    output.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary_name = tempfile.mkstemp(prefix=".commit-tree.", suffix=".tar")
-    os.close(descriptor)
-    archive = Path(temporary_name)
+    archive: Path | None = None
     try:
+        output.mkdir(parents=True, exist_ok=True)
+        descriptor, temporary_name = tempfile.mkstemp(prefix=".commit-tree.", suffix=".tar")
+        os.close(descriptor)
+        archive = Path(temporary_name)
         subprocess.run(
             ("git", "archive", "--format=tar", f"--output={archive}", commit),
             cwd=Path(repo_root),
@@ -379,10 +380,12 @@ def extract_commit_tree(repo_root: Path, commit: str, destination: Path) -> Path
     except (subprocess.CalledProcessError, tarfile.TarError, OSError) as error:
         # The CLI turns ValueError from the preflight into a clean BadParameter;
         # git and tarfile raise neither, so normalize here rather than leaking a
-        # traceback out of an offline preflight.
+        # traceback out of an offline preflight. mkdir/mkstemp are inside the
+        # try too: an OSError from either must not escape unnormalized either.
         raise ValueError(f"could not extract release source for {commit}") from error
     finally:
-        archive.unlink(missing_ok=True)
+        if archive is not None:
+            archive.unlink(missing_ok=True)
     return output
 
 
