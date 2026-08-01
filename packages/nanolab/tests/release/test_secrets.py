@@ -6,10 +6,12 @@ from pathlib import Path
 import traceback
 
 import pytest
+from sonata_engine import TaskInputs, TaskOutcome, Workflow
 from workflow_tasks.tasks.models import CommandTaskSpec
 from workflow_tasks.tasks.rendering import render_task_command
 
 from nanolab.release.secrets import validate_secret_file
+from nanolab.release.resources import ghcr_credentials_resource
 
 
 @dataclass
@@ -72,6 +74,113 @@ class _Provider:
 
 class _BodyFailure(RuntimeError):
     pass
+
+
+def test_ghcr_resource_validates_before_remote_action_and_is_never_infrastructure(
+    tmp_path: Path,
+) -> None:
+    token = tmp_path / "ghcr-token"
+    token.write_text("fixture-ghcr-token-must-not-leak", encoding="utf-8")
+    token.chmod(0o644)
+    provider = _Provider()
+    resource = ghcr_credentials_resource(
+        provider=provider,
+        request=object(),
+        username="release-user",
+        token_file=token,
+    )
+
+    assert resource.infrastructure is False
+    with pytest.raises(PermissionError, match="deny group and world"):
+        resource.acquire(TaskInputs.empty())
+    assert provider.exec_calls == []
+    assert provider.transfer_calls == []
+
+
+def test_ghcr_resource_releases_staged_credentials(tmp_path: Path) -> None:
+    token = tmp_path / "ghcr-token"
+    token.write_text("fixture-ghcr-token-must-not-leak", encoding="utf-8")
+    token.chmod(0o600)
+    provider = _Provider()
+    resource = ghcr_credentials_resource(
+        provider=provider,
+        request=object(),
+        username="release-user",
+        token_file=token,
+    )
+
+    lease = resource.acquire(TaskInputs.empty())
+    assert lease.value.docker_config.endswith("/docker")
+    resource.release(TaskInputs.empty(), lease)
+
+    assert provider.exec_calls[-1][0] == (
+        "rm",
+        "-rf",
+        "--",
+        "/tmp/nanofaas-release-credentials.ABC123",
+    )
+    assert "fixture-ghcr-token-must-not-leak" not in repr(lease)
+
+
+@pytest.mark.parametrize("failure", (RuntimeError("failed"), KeyboardInterrupt()))
+def test_credential_resource_cleans_on_failure_interrupt_and_keep(
+    tmp_path: Path, failure: BaseException
+) -> None:
+    token = tmp_path / "ghcr-token"
+    token.write_text("fixture-ghcr-token-must-not-leak", encoding="utf-8")
+    token.chmod(0o600)
+    provider = _Provider()
+    resource = ghcr_credentials_resource(
+        provider=provider,
+        request=object(),
+        username="release-user",
+        token_file=token,
+    )
+
+    class Fail:
+        title = "Use credentials"
+
+        def run(self, inputs):
+            assert inputs.resource(resource).value.docker_config.endswith("/docker")
+            raise failure
+
+    workflow = Workflow("credential-cleanup", keep_infrastructure=True)
+    workflow.add(Fail(), requires=(resource,))
+    with pytest.raises(type(failure)):
+        workflow.run()
+
+    assert provider.exec_calls[-1][0] == (
+        "rm",
+        "-rf",
+        "--",
+        "/tmp/nanofaas-release-credentials.ABC123",
+    )
+
+
+def test_credential_resource_cleans_on_success_with_keep(tmp_path: Path) -> None:
+    token = tmp_path / "ghcr-token"
+    token.write_text("fixture-ghcr-token-must-not-leak", encoding="utf-8")
+    token.chmod(0o600)
+    provider = _Provider()
+    resource = ghcr_credentials_resource(
+        provider=provider,
+        request=object(),
+        username="release-user",
+        token_file=token,
+    )
+
+    class Pass:
+        title = "Use credentials"
+
+        def run(self, inputs):
+            assert inputs.resource(resource).value.docker_config.endswith("/docker")
+            return TaskOutcome()
+
+    workflow = Workflow("credential-cleanup", keep_infrastructure=True)
+    workflow.add(Pass(), requires=(resource,))
+    workflow.run()
+
+    assert provider.exec_calls[-1][0][:3] == ("rm", "-rf", "--")
 
 
 def _rendered_commands(provider: _Provider) -> str:

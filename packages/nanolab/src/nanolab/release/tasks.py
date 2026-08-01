@@ -134,6 +134,28 @@ def arm64_smoke_task(**kwargs: Any) -> ReleasePhaseTask:
     return ReleasePhaseTask(phase="arm64-smoke", title="Test ARM64 images", **kwargs)
 
 
+def publish_architectures_task(**kwargs: Any) -> ReleasePhaseTask:
+    return ReleasePhaseTask(
+        phase="publish-architectures", title="Publish architecture images", **kwargs
+    )
+
+
+def publish_manifests_task(**kwargs: Any) -> ReleasePhaseTask:
+    return ReleasePhaseTask(phase="publish-manifests", title="Publish image manifests", **kwargs)
+
+
+def publish_aliases_task(**kwargs: Any) -> ReleasePhaseTask:
+    return ReleasePhaseTask(phase="publish-aliases", title="Publish image aliases", **kwargs)
+
+
+def attest_task(**kwargs: Any) -> ReleasePhaseTask:
+    return ReleasePhaseTask(phase="attest", title="Attest published images", **kwargs)
+
+
+def finalize_task(**kwargs: Any) -> ReleasePhaseTask:
+    return ReleasePhaseTask(phase="finalize", title="Finalize release documentation", **kwargs)
+
+
 def registry_evidence(artifacts: Iterable[ArtifactEvidence]) -> tuple[Evidence, ...]:
     return tuple(
         Evidence("local-registry-digest", artifact.reference, artifact.digest)
@@ -153,6 +175,82 @@ def registry_artifacts_from_receipt(
     ):
         raise RuntimeError("ARM64 build receipt does not cover the image matrix")
     return evidence
+
+
+def exact_receipt_artifacts(
+    receipt: Path,
+    phase: str,
+    kind: str,
+    expected_references: Iterable[str],
+) -> tuple[ArtifactEvidence, ...]:
+    """Require one canonical receipt to cover exactly the expected references."""
+    expected = tuple(expected_references)
+    evidence = receipt_artifacts(receipt, phase, kind)
+    references = tuple(item.reference for item in evidence)
+    if (
+        len(expected) != len(set(expected))
+        or len(references) != len(expected)
+        or len(references) != len(set(references))
+        or set(references) != set(expected)
+        or any(not is_sha256_digest(item.digest) for item in evidence)
+    ):
+        raise RuntimeError(f"{phase} receipt does not have exact artifact coverage")
+    return evidence
+
+
+def verified_file_receipt(receipt: Path, phase: str, expected: Path) -> ArtifactEvidence:
+    """Require one exact file artifact and verify its current digest."""
+    artifact = exact_receipt_artifacts(receipt, phase, "file-digest", (str(expected),))[0]
+    if digest_path(expected) != artifact.digest:
+        raise RuntimeError(f"{phase} evidence changed")
+    return artifact
+
+
+def verified_json_receipt(receipt: Path, phase: str, expected: Path) -> Mapping[str, Any]:
+    verified_file_receipt(receipt, phase, expected)
+    try:
+        payload = json.loads(expected.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise RuntimeError(f"{phase} evidence is not valid JSON") from error
+    if not isinstance(payload, Mapping):
+        raise RuntimeError(f"{phase} evidence is not a JSON object")
+    return payload
+
+
+def require_release_barriers(
+    *,
+    gate_receipt: Path,
+    gate_file: Path,
+    smoke_receipt: Path,
+    smoke_file: Path,
+    arm_build_receipt: Path,
+    arm_images: tuple[str, ...],
+) -> tuple[ArtifactEvidence, ...]:
+    decision = verified_json_receipt(gate_receipt, "regression-gate", gate_file)
+    if decision.get("passed") is not True:
+        raise RuntimeError("publication requires a passing regression gate")
+    arm_evidence = exact_receipt_artifacts(
+        arm_build_receipt,
+        "arm64-build",
+        "local-registry-digest",
+        tuple(f"docker://{image}" for image in arm_images),
+    )
+    smoke = verified_json_receipt(smoke_receipt, "arm64-smoke", smoke_file)
+    expected_images = {
+        item.reference.removeprefix("docker://"): item.digest for item in arm_evidence
+    }
+    if smoke.get("architecture") != "linux/arm64" or smoke.get("images") != expected_images:
+        raise RuntimeError("ARM smoke evidence does not match the ARM build")
+    return arm_evidence
+
+
+def require_attestation_predicate(
+    receipt: Path,
+    predicate: Path,
+    expected: Mapping[str, Any],
+) -> None:
+    if verified_json_receipt(receipt, "attest", predicate) != expected:
+        raise RuntimeError("attestation predicate does not match the release evidence")
 
 
 def run_source_steps(steps: Task[Any], inputs: TaskInputs) -> tuple[Evidence, ...]:

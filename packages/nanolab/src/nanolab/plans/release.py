@@ -1,14 +1,15 @@
 """Compile a release scenario into a Sonata workflow.
 
-The 12-phase release pipeline defined in `nanolab release run` replays here as a
+The release pipeline defined in `nanolab release run` replays here as a
 linear DAG built from the Task and Resource primitives defined in sonata-tasks.
 Each phase that iterates over image cells is a composite Steps node so the
-workflow surface is always 12 top-level entries.
+workflow surface remains coarse-grained and selectable.
 """
 
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, replace
+import json
 from pathlib import Path
 from typing import Any
 
@@ -17,10 +18,6 @@ from sonata_engine import Evidence, JournalConfig, Workflow
 from sonata_tasks.buildx import buildx_builder_resource
 from sonata_tasks.release_composites import (
     amd64_build_composite,
-    attest_composite,
-    publish_aliases_composite,
-    publish_architectures_composite,
-    publish_manifests_composite,
     registry_push_composite,
     source_tests_composite,
 )
@@ -38,17 +35,23 @@ from nanolab.release import arm as release_arm
 from nanolab.release import build as release_build
 from nanolab.release.environment import validate_release_environment
 from nanolab.release.benchmark import (
+    _aggregate_from_payload,
     performance_profile,
     regression_policy,
     run_sonata_aggregate,
     run_sonata_benchmark,
     run_sonata_regression_gate,
 )
-from nanolab.release.publish import build_publish_plan
+from nanolab.release import attest as release_attest
+from nanolab.release import publish as release_publish
+from nanolab.release.metrics import build_release_record
 from nanolab.release.resources import (
     arm_build_inputs_resource,
     build_release_resources,
     build_release_source_resources,
+    cosign_credentials_resource,
+    ghcr_credentials_resource,
+    release_execution_guard,
 )
 from nanolab.release.run import (
     Amd64ReleasePlan,
@@ -72,6 +75,15 @@ from nanolab.release.tasks import (
     registry_artifacts_from_receipt,
     registry_evidence,
     source_test_task,
+    publish_architectures_task,
+    publish_manifests_task,
+    publish_aliases_task,
+    attest_task,
+    finalize_task,
+    exact_receipt_artifacts,
+    verified_file_receipt,
+    require_release_barriers,
+    require_attestation_predicate,
     versioned_release_run_dir,
 )
 from nanolab.release.versioning import normalize_version, verify_version_consistency
@@ -215,9 +227,9 @@ def build_release_workflow(
     *,
     provider: Any = None,
 ) -> Workflow:
-    """Compile a ReleaseRequest into a 12-phase linear Sonata workflow.
+    """Compile a ReleaseRequest into a linear Sonata release workflow.
 
-    All 12 top-level nodes are returned so the caller can add them to any
+    All top-level nodes are returned so the caller can add them to any
     workflow, slice them with ``select``, or embed them in a larger plan.
     """
     env = request.environment
@@ -225,6 +237,9 @@ def build_release_workflow(
         raise ValueError("release workflow requires an Azure environment")
 
     nanofaas = request.nanofaas_root or request.repo_root
+    execution_guard = release_execution_guard(
+        request.credentials, repo_roots=(request.repo_root, nanofaas)
+    )
     source_commit = (
         request.identity.source_commit
         if request.identity is not None
@@ -239,7 +254,9 @@ def build_release_workflow(
 
     if provider is None:
         provider = vm_provider_for_environment(env, request.repo_root)
-    infrastructure = build_release_resources(env, nanofaas, provider)
+    infrastructure = build_release_resources(
+        env, nanofaas, provider, requires=(execution_guard,)
+    )
     stack_req = vm_request_for_role(env, "stack", loadtest=True)
     _ = vm_request_for_role(env, "loadgen", loadtest=True)  # captured by build_role_bindings
     arm_req = vm_request_for_role(env, "arm-builder")
@@ -504,47 +521,256 @@ def build_release_workflow(
         ),
     )
 
-    # --- Phase 11: Publish ---
-    pub_plan = build_publish_plan(
+    # --- Publish, attest, and finalize ---
+    pub_plan = release_publish.build_publish_plan(
         nanofaas,
         request.version,
         local_registry=request.image_plan.registry,
     )
-    pub_arch = publish_architectures_composite(
-        pub_plan,
-        executor=executor,
-        role="stack",
-        authfile="/tmp/ghcr-auth/config.json",
+    credentials = request.credentials
+    ghcr = (
+        ghcr_credentials_resource(
+            provider=provider,
+            request=stack_req,
+            username=release_publish.ghcr_username(pub_plan.repository),
+            token_file=credentials.ghcr_token,
+            requires=(infrastructure.stack,),
+        )
+        if credentials is not None
+        else None
     )
-    pub_manifests = publish_manifests_composite(
-        pub_plan,
-        executor=executor,
-        role="stack",
-        docker_config="/tmp/ghcr-auth",
-    )
-    pub_aliases = publish_aliases_composite(
-        pub_plan,
-        executor=executor,
-        role="stack",
-        docker_config="/tmp/ghcr-auth",
+    cosign = (
+        cosign_credentials_resource(
+            provider=provider,
+            request=stack_req,
+            key_file=credentials.cosign_key,
+            password_file=credentials.cosign_password,
+            requires=(infrastructure.stack,),
+        )
+        if credentials is not None and credentials.cosign_password is not None
+        else None
     )
 
-    # --- Phase 12: Attest ---
-    cosign_key = "/secrets/cosign-key"
-    cosign_password = "/secrets/cosign-password"
-    if request.credentials is not None:
-        cosign_key = str(getattr(request.credentials, "cosign_key", cosign_key))
-        cosign_password = str(getattr(request.credentials, "cosign_password", cosign_password))
-    published_images = tuple(copy.destination for copy in pub_plan.copies)
-    attest = attest_composite(
-        images=published_images,
-        predicate_remote=Path(f"{remote_root}/predicate.json"),
-        sbom_dir_remote=Path(f"{remote_root}/sboms"),
-        cosign_key=cosign_key,
-        password_file=cosign_password,
-        docker_config="/tmp/ghcr-auth",
-        executor=executor,
-        role="stack",
+    def docker_credentials(inputs: Any):
+        if ghcr is None:
+            raise ValueError("release credential config is required for publication")
+        return inputs.resource(ghcr).value
+
+    architecture_references = tuple(f"docker://{copy.destination}" for copy in pub_plan.copies)
+    manifest_references = tuple(f"docker://{item.reference}" for item in pub_plan.manifests)
+    alias_references = tuple(f"docker://{item.reference}" for item in pub_plan.aliases)
+
+    def published(
+        receipt: Path, phase: str, references: tuple[str, ...]
+    ) -> dict[str, str]:
+        return {
+            artifact.reference.removeprefix("docker://"): artifact.digest
+            for artifact in exact_receipt_artifacts(
+                receipt, phase, "ghcr-digest", references
+            )
+        }
+
+    def all_published() -> dict[str, str]:
+        return {
+            **published(
+                publish_architectures.receipt,
+                "publish-architectures",
+                architecture_references,
+            ),
+            **published(
+                publish_manifests.receipt,
+                "publish-manifests",
+                manifest_references,
+            ),
+            **published(
+                publish_aliases.receipt, "publish-aliases", alias_references
+            ),
+        }
+
+    def ghcr_evidence(artifacts: tuple[Any, ...]) -> tuple[Evidence, ...]:
+        return tuple(
+            Evidence("ghcr-digest", artifact.reference, artifact.digest)
+            for artifact in artifacts
+        )
+
+    def publication_sources():
+        arm_build_evidence = require_release_barriers(
+            gate_receipt=reg_gate.receipt,
+            gate_file=release_dir / "regression-decision.json",
+            smoke_receipt=arm64_smoke.receipt,
+            smoke_file=arm_runtime_plan.run_dir / "arm64-smoke.json",
+            arm_build_receipt=arm64_build.receipt,
+            arm_images=arm_images,
+        )
+
+        amd64_evidence = exact_receipt_artifacts(
+            registry_push.receipt,
+            "local-registry-push",
+            "local-registry-digest",
+            tuple(f"docker://{image}" for image in release_images),
+        )
+        return release_publish.require_publication_evidence(
+            pub_plan, amd64_evidence + arm_build_evidence
+        )
+
+    publish_architectures = publish_architectures_task(
+        identity=identity,
+        run_dir=request.run_dir,
+        phase_inputs={"plan": pub_plan},
+        prerequisites=(
+            reg_gate.receipt,
+            arm64_smoke.receipt,
+            registry_push.receipt,
+            arm64_build.receipt,
+        ),
+        work=lambda inputs: ghcr_evidence(
+            release_publish.publish_architecture_images(
+                provider,
+                stack_req,
+                pub_plan,
+                publication_sources(),
+                authfile=f"{docker_credentials(inputs).docker_config}/config.json",
+            )
+        ),
+    )
+    publish_manifests = publish_manifests_task(
+        identity=identity,
+        run_dir=request.run_dir,
+        phase_inputs={"manifests": pub_plan.manifests},
+        prerequisites=(publish_architectures.receipt,),
+        work=lambda inputs: ghcr_evidence(
+            release_publish.publish_manifests(
+                provider,
+                stack_req,
+                pub_plan,
+                published(
+                    publish_architectures.receipt,
+                    "publish-architectures",
+                    architecture_references,
+                ),
+                docker_config=docker_credentials(inputs).docker_config,
+            )
+        ),
+    )
+    publish_aliases = publish_aliases_task(
+        identity=identity,
+        run_dir=request.run_dir,
+        phase_inputs={"aliases": pub_plan.aliases},
+        prerequisites=(publish_manifests.receipt,),
+        work=lambda inputs: ghcr_evidence(
+            release_publish.publish_aliases(
+                provider,
+                stack_req,
+                pub_plan,
+                published(
+                    publish_manifests.receipt,
+                    "publish-manifests",
+                    manifest_references,
+                ),
+                docker_config=docker_credentials(inputs).docker_config,
+            )
+        ),
+    )
+
+    publication_receipts = (
+        (publish_architectures.receipt, "publish-architectures"),
+        (publish_manifests.receipt, "publish-manifests"),
+        (publish_aliases.receipt, "publish-aliases"),
+    )
+
+    def release_record() -> dict[str, Any]:
+        aggregate_file = release_dir / "aggregate.json"
+        verified_file_receipt(aggregate.receipt, "aggregate", aggregate_file)
+        return build_release_record(
+            version=request.version,
+            source_commit=identity.source_commit,
+            image_digests=all_published(),
+            aggregate=_aggregate_from_payload(json.loads(aggregate_file.read_text(encoding="utf-8"))),
+            policy=regression_policy(benchmark_plan),
+        )
+
+    predicate_file = release_dir / "predicate.json"
+    remote_predicate = f"{remote_root}/predicate.json"
+
+    def attest_images(inputs: Any) -> tuple[Evidence, ...]:
+        if cosign is None:
+            raise ValueError("release Cosign credentials are required for attestation")
+        release_record()
+        images = all_published()
+        aggregate_evidence = verified_file_receipt(
+            aggregate.receipt, "aggregate", release_dir / "aggregate.json"
+        )
+        predicate_file.write_text(
+            release_attest.render_predicate(
+                release_attest.build_release_predicate(
+                    version=request.version,
+                    source_commit=identity.source_commit,
+                    azure_profile=request.settings.profile,
+                    benchmark_record_digest=aggregate_evidence.digest,
+                    image_digests=images,
+                )
+            ),
+            encoding="utf-8",
+        )
+        result = provider.exec_argv(
+            stack_req, ("mkdir", "-p", remote_root), env=None, cwd=None, dry_run=False
+        )
+        if int(getattr(result, "return_code", 0)) != 0:
+            raise RuntimeError("create remote attestation directory failed")
+        result = provider.transfer_to(
+            stack_req, source=predicate_file, destination=remote_predicate
+        )
+        if int(getattr(result, "return_code", 0)) != 0:
+            raise RuntimeError("transfer release predicate failed")
+        release_attest.attest_release_images(
+            provider,
+            stack_req,
+            images=images,
+            predicate_remote=remote_predicate,
+            sbom_dir_remote=f"{remote_root}/sboms",
+            cosign=inputs.resource(cosign).value,
+            docker_config=docker_credentials(inputs).docker_config,
+        )
+        return (Evidence("file-digest", str(predicate_file), digest_path(predicate_file)),)
+
+    attest = attest_task(
+        identity=identity,
+        run_dir=request.run_dir,
+        phase_inputs={"images": tuple(sorted(published_image.destination for published_image in pub_plan.copies))},
+        prerequisites=tuple(receipt for receipt, _phase in publication_receipts)
+        + (aggregate.receipt,),
+        work=attest_images,
+    )
+
+    def finalize_documentation(_inputs: Any) -> tuple[Evidence, ...]:
+        aggregate_evidence = verified_file_receipt(
+            aggregate.receipt, "aggregate", release_dir / "aggregate.json"
+        )
+        expected_predicate = release_attest.build_release_predicate(
+            version=request.version,
+            source_commit=identity.source_commit,
+            azure_profile=request.settings.profile,
+            benchmark_record_digest=aggregate_evidence.digest,
+            image_digests=all_published(),
+        )
+        require_attestation_predicate(attest.receipt, predicate_file, expected_predicate)
+        artifacts = release_attest.finalize_release(
+            None,
+            record=release_record(),
+            performance_root=request.performance_root,
+        )
+        return tuple(
+            Evidence("file-digest", artifact.reference, artifact.digest) for artifact in artifacts
+        )
+
+    finalize = finalize_task(
+        identity=identity,
+        run_dir=request.run_dir,
+        phase_inputs={"performanceRoot": request.performance_root},
+        prerequisites=(attest.receipt,) + tuple(
+            receipt for receipt, _phase in publication_receipts
+        ) + (aggregate.receipt,),
+        work=finalize_documentation,
     )
 
     # --- Wire the DAG ---
@@ -585,10 +811,13 @@ def build_release_workflow(
         arm64_smoke,
         requires=(infrastructure.stack, infrastructure.arm_builder, tunnel),
     )
-    wf.add(pub_arch, requires=(infrastructure.stack,))  # pyright: ignore[reportArgumentType]
-    wf.add(pub_manifests, requires=(infrastructure.stack,))  # pyright: ignore[reportArgumentType]
-    wf.add(pub_aliases, requires=(infrastructure.stack,))  # pyright: ignore[reportArgumentType]
-    wf.add(attest, requires=(infrastructure.stack,))  # pyright: ignore[reportArgumentType]
+    publish_requires = (infrastructure.stack,) + ((ghcr,) if ghcr is not None else ())
+    wf.add(publish_architectures, requires=publish_requires)  # pyright: ignore[reportArgumentType]
+    wf.add(publish_manifests, requires=publish_requires)  # pyright: ignore[reportArgumentType]
+    wf.add(publish_aliases, requires=publish_requires)  # pyright: ignore[reportArgumentType]
+    attest_requires = publish_requires + ((cosign,) if cosign is not None else ())
+    wf.add(attest, requires=attest_requires)  # pyright: ignore[reportArgumentType]
+    wf.add(finalize)  # pyright: ignore[reportArgumentType]
 
     return wf
 

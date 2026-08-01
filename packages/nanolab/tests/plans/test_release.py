@@ -1,6 +1,7 @@
 """Smoke tests for the release workflow builder."""
 
 import os
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -18,7 +19,7 @@ from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.images.plan import ImagePlan
 from nanolab.plans.release import ReleaseRequest, build_release_workflow
-from nanolab.release.run import GitState, ReleaseSettings
+from nanolab.release.run import CredentialFiles, GitState, ReleaseSettings
 from nanolab.release.state import digest_path
 from nanolab.release.state import ArtifactEvidence
 from nanolab.release.tasks import ReleasePhaseTask
@@ -315,7 +316,7 @@ def _arm_failure_workflow(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, failu
         ),
     )
 
-    def infrastructure(_environment, _root, _provider):
+    def infrastructure(_environment, _root, _provider, *, requires=()):
         def vm(title: str, name: str) -> Resource[VmInfo]:
             return Resource(
                 title=title,
@@ -324,6 +325,7 @@ def _arm_failure_workflow(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, failu
                 ),
                 release=lambda _inputs, _value: None,
                 infrastructure=True,
+                requires=requires,
             )
 
         stack = vm("Acquire release stack VM", "release-stack")
@@ -355,6 +357,18 @@ def _arm_failure_workflow(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, failu
         release_config_path=None,
         run_dir=tmp_path / "run",
         performance_root=tmp_path / "performance",
+    )
+    secret_paths = tuple(tmp_path / name for name in ("ghcr", "cosign.key", "cosign.password"))
+    for path in secret_paths:
+        path.write_text(path.name, encoding="utf-8")
+        path.chmod(0o600)
+    request = replace(
+        request,
+        credentials=CredentialFiles(
+            ghcr_token=secret_paths[0],
+            cosign_key=secret_paths[1],
+            cosign_password=secret_paths[2],
+        ),
     )
     workflow = build_release_workflow(request, provider=provider)
     phases = {
@@ -466,6 +480,11 @@ def test_build_release_workflow_compiles_without_cloud_discovery(
         "Evaluate regression gate",
         "Build ARM64 images",
         "Test ARM64 images",
+        "Publish architecture images",
+        "Publish image manifests",
+        "Publish image aliases",
+        "Attest published images",
+        "Finalize release documentation",
     }
     assert all(
         task.receipt.parent == tmp_path / "run" / "releases" / CURRENT_VERSION
@@ -477,11 +496,31 @@ def test_build_release_workflow_compiles_without_cloud_discovery(
     gate = release_phases["Evaluate regression gate"]
     arm_build = release_phases["Build ARM64 images"]
     arm_smoke = release_phases["Test ARM64 images"]
+    publish_architectures = release_phases["Publish architecture images"]
+    publish_manifests = release_phases["Publish image manifests"]
+    publish_aliases = release_phases["Publish image aliases"]
+    attestation = release_phases["Attest published images"]
+    finalize = release_phases["Finalize release documentation"]
     assert all(task.prerequisites == (push.receipt,) for task in benchmarks)
     assert aggregate.prerequisites == tuple(task.receipt for task in benchmarks)
     assert gate.prerequisites == (aggregate.receipt,)
     assert arm_build.prerequisites == (gate.receipt, release_phases["Run source tests"].receipt)
     assert arm_smoke.prerequisites == (arm_build.receipt,)
+    assert publish_architectures.prerequisites == (
+        gate.receipt,
+        arm_smoke.receipt,
+        push.receipt,
+        arm_build.receipt,
+    )
+    assert publish_manifests.prerequisites == (publish_architectures.receipt,)
+    assert publish_aliases.prerequisites == (publish_manifests.receipt,)
+    assert attestation.prerequisites == (
+        publish_architectures.receipt,
+        publish_manifests.receipt,
+        publish_aliases.receipt,
+        aggregate.receipt,
+    )
+    assert finalize.prerequisites[0] == attestation.receipt
 
     benchmark_slice = workflow.compile(select=Selection(only="run-release-benchmark-1"))
     benchmark_titles = [task.task.title for task in benchmark_slice.tasks]
@@ -509,6 +548,7 @@ def test_build_release_workflow_compiles_without_cloud_discovery(
 
     stack_slice = workflow.compile(select=Selection(only="build-amd64-images"))
     assert [task.task.title for task in stack_slice.tasks] == [
+        "Acquire validated release execution credentials",
         "Acquire release stack VM",
         "Acquire immutable release source archive",
         "Acquire verified source on nanofaas-azure-release",
@@ -518,11 +558,13 @@ def test_build_release_workflow_compiles_without_cloud_discovery(
         "Release verified source on nanofaas-azure-release",
         "Release immutable release source archive",
         "Release release stack VM",
+        "Release validated release execution credentials",
     ]
 
     arm_slice = workflow.compile(select=Selection(only="build-arm64-images"))
     arm_titles = [task.task.title for task in arm_slice.tasks]
-    assert arm_titles[:7] == [
+    assert arm_titles[:8] == [
+        "Acquire validated release execution credentials",
         "Acquire release stack VM",
         "Acquire release ARM builder VM",
         "Acquire registry tunnel to <release-stack>:5000",
@@ -531,7 +573,7 @@ def test_build_release_workflow_compiles_without_cloud_discovery(
         "Acquire immutable release source archive",
         "Acquire verified source on nanofaas-azure-release-arm",
     ]
-    assert arm_titles[-7:] == [
+    assert arm_titles[-8:] == [
         "Release verified source on nanofaas-azure-release-arm",
         "Release immutable release source archive",
         f"Release release-arm64-v{CURRENT_VERSION} buildx builder",
@@ -539,6 +581,7 @@ def test_build_release_workflow_compiles_without_cloud_discovery(
         "Release registry tunnel to <release-stack>:5000",
         "Release release ARM builder VM",
         "Release release stack VM",
+        "Release validated release execution credentials",
     ]
 
     arm_suffix = workflow.compile(select=Selection(start="build-arm64-images"))
@@ -548,6 +591,48 @@ def test_build_release_workflow_compiles_without_cloud_discovery(
     assert "Acquire release loadgen VM" not in suffix_titles
     assert "Release release ARM builder VM" in suffix_titles
     assert "Release release stack VM" in suffix_titles
+
+
+@pytest.mark.parametrize(
+    "selection",
+    (
+        None,
+        Selection(only="build-arm64-images"),
+        Selection(only="publish-architecture-images"),
+    ),
+)
+def test_missing_execution_credentials_fail_before_any_provider_call(
+    selection: Selection | None,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    calls: list[str] = []
+
+    class Provider:
+        def __getattr__(self, name: str):
+            def call(*_args, **_kwargs):
+                calls.append(name)
+                raise AssertionError(name)
+
+            return call
+
+    monkeypatch.setattr(
+        release_plan, "git_state", lambda _root: GitState(commit="a" * 40, clean=True)
+    )
+    request = release_plan.build_release_request(
+        repo_root=NANOLAB_ROOT,
+        nanofaas_root=NANOFAAS_ROOT,
+        scenario_path=_canonical_scenario(tmp_path / "release.yaml"),
+        environment_path=_canonical_environment(tmp_path / "environment.yaml"),
+        release_config_path=None,
+        run_dir=tmp_path / "run",
+        performance_root=tmp_path / "performance",
+    )
+    workflow = build_release_workflow(request, provider=Provider())
+
+    with pytest.raises(ValueError, match="credential config is required"):
+        workflow.run(select=selection)
+    assert calls == []
 
 
 def test_release_scenario_matches_comparable_history() -> None:
@@ -572,9 +657,12 @@ def test_build_release_request_is_offline_and_builds_current_matrix(
     home = tmp_path / "home"
     secrets = home / "secrets"
     secrets.mkdir(parents=True)
+    secret_values = []
     for name in ("ghcr", "cosign.key", "cosign.password"):
         secret = secrets / name
-        secret.write_text(name, encoding="utf-8")
+        value = f"fixture-{name}-must-not-leak"
+        secret_values.append(value)
+        secret.write_text(value, encoding="utf-8")
         secret.chmod(0o600)
     credential_path = tmp_path / "credentials.yaml"
     credential_path.write_text(
@@ -619,6 +707,26 @@ def test_build_release_request_is_offline_and_builds_current_matrix(
     )
     assert request.credentials is not None
     assert request.credentials.ghcr_token == secrets / "ghcr"
+
+    workflow = build_release_workflow(request, provider=SimpleNamespace())
+    assert all(value not in repr(workflow.compile()) for value in secret_values)
+    publish_titles = [
+        item.task.title
+        for item in workflow.compile(select=Selection(only="publish-architecture-images")).tasks
+    ]
+    assert "Acquire staged GHCR credentials" in publish_titles
+    assert "Acquire staged Cosign credentials" not in publish_titles
+    attest_titles = [
+        item.task.title
+        for item in workflow.compile(select=Selection(only="attest-published-images")).tasks
+    ]
+    assert "Acquire staged GHCR credentials" in attest_titles
+    assert "Acquire staged Cosign credentials" in attest_titles
+    finalize_titles = [
+        item.task.title
+        for item in workflow.compile(select=Selection(only="finalize-release-documentation")).tasks
+    ]
+    assert not any("credentials" in title.lower() for title in finalize_titles)
 
 
 def test_build_release_request_requires_credentials_for_execution(tmp_path: Path) -> None:

@@ -16,6 +16,15 @@ from nanolab.release.tasks import (
     registry_artifacts_from_receipt,
     run_image_steps,
     source_test_task,
+    publish_architectures_task,
+    publish_manifests_task,
+    publish_aliases_task,
+    attest_task,
+    finalize_task,
+    exact_receipt_artifacts,
+    verified_file_receipt,
+    require_release_barriers,
+    require_attestation_predicate,
 )
 
 
@@ -322,6 +331,232 @@ def test_arm_work_never_starts_without_its_prerequisite(tmp_path: Path) -> None:
         task.run(TaskInputs.empty())
 
     assert called is False
+
+
+def test_terminal_tasks_keep_finalize_as_the_only_documentation_retry(tmp_path: Path) -> None:
+    common = {"identity": _identity(), "run_dir": tmp_path, "phase_inputs": {"v": 1}}
+    gate = tmp_path / "regression-gate.json"
+    smoke = tmp_path / "arm64-smoke.json"
+    registry = tmp_path / "local-registry-push.json"
+    arm = tmp_path / "arm64-build.json"
+    aggregate = tmp_path / "aggregate.json"
+    architectures = publish_architectures_task(
+        prerequisites=(gate, smoke, registry, arm), work=lambda _inputs: (), **common
+    )
+    manifests = publish_manifests_task(
+        prerequisites=(architectures.receipt,), work=lambda _inputs: (), **common
+    )
+    aliases = publish_aliases_task(
+        prerequisites=(manifests.receipt,), work=lambda _inputs: (), **common
+    )
+    attestation = attest_task(
+        prerequisites=(aliases.receipt, aggregate), work=lambda _inputs: (), **common
+    )
+    finalize = finalize_task(
+        prerequisites=(attestation.receipt,), work=lambda _inputs: (), **common
+    )
+
+    assert [task.phase for task in (architectures, manifests, aliases, attestation, finalize)] == [
+        "publish-architectures",
+        "publish-manifests",
+        "publish-aliases",
+        "attest",
+        "finalize",
+    ]
+    assert finalize.prerequisites == (attestation.receipt,)
+
+
+def test_documentation_failure_resumes_finalize_without_reattesting(tmp_path: Path) -> None:
+    calls = {"attest": 0, "finalize": 0}
+    signed = tmp_path / "signed"
+    documentation = tmp_path / "history.md"
+
+    def sign(_inputs: TaskInputs):
+        calls["attest"] += 1
+        signed.write_text("verified", encoding="utf-8")
+        return (Evidence("file-digest", str(signed), digest_path(signed)),)
+
+    def document(_inputs: TaskInputs):
+        calls["finalize"] += 1
+        if calls["finalize"] == 1:
+            raise RuntimeError("documentation failed")
+        documentation.write_text("published", encoding="utf-8")
+        return (Evidence("file-digest", str(documentation), digest_path(documentation)),)
+
+    workflow = Workflow("release-finalize-resume")
+    attestation = attest_task(
+        identity=_identity(), run_dir=tmp_path, phase_inputs={}, work=sign
+    )
+    finalize = finalize_task(
+        identity=_identity(),
+        run_dir=tmp_path,
+        phase_inputs={},
+        prerequisites=(attestation.receipt,),
+        work=document,
+    )
+    workflow.add(attestation)
+    workflow.add(finalize)
+    journal = JournalConfig(tmp_path / "sonata.jsonl")
+
+    with pytest.raises(RuntimeError, match="documentation failed"):
+        workflow.run(journal=journal, verifiers={"file-digest": file_digest_verifier})
+    workflow.run(
+        journal=journal,
+        resume=True,
+        verifiers={"file-digest": file_digest_verifier},
+    )
+
+    assert calls == {"attest": 1, "finalize": 2}
+
+
+@pytest.mark.parametrize(
+    "references",
+    (
+        ("docker://a:v1",),
+        ("docker://a:v1", "docker://x:v1"),
+        ("docker://a:v1", "docker://a:v1"),
+    ),
+)
+def test_exact_receipt_coverage_rejects_missing_extra_and_duplicate(
+    tmp_path: Path, references: tuple[str, ...]
+) -> None:
+    receipt = tmp_path / "publish.json"
+    receipt.write_text(
+        json.dumps(
+            {
+                "phase": "publish-architectures",
+                "evidence": [
+                    {
+                        "kind": "ghcr-digest",
+                        "reference": reference,
+                        "digest": "sha256:" + "d" * 64,
+                    }
+                    for reference in references
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RuntimeError, match="exact artifact coverage"):
+        exact_receipt_artifacts(
+            receipt,
+            "publish-architectures",
+            "ghcr-digest",
+            ("docker://a:v1", "docker://b:v1"),
+        )
+
+
+def test_verified_file_receipt_rejects_tampered_artifact(tmp_path: Path) -> None:
+    artifact = tmp_path / "decision.json"
+    artifact.write_text('{"passed": true}', encoding="utf-8")
+    receipt = tmp_path / "gate.json"
+    receipt.write_text(
+        json.dumps(
+            {
+                "phase": "regression-gate",
+                "evidence": [
+                    {
+                        "kind": "file-digest",
+                        "reference": str(artifact),
+                        "digest": digest_path(artifact),
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    artifact.write_text('{"passed": false}', encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="changed"):
+        verified_file_receipt(receipt, "regression-gate", artifact)
+
+
+def _file_receipt(receipt: Path, phase: str, artifact: Path) -> None:
+    receipt.write_text(
+        json.dumps(
+            {
+                "phase": phase,
+                "evidence": [
+                    {
+                        "kind": "file-digest",
+                        "reference": str(artifact),
+                        "digest": digest_path(artifact),
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_release_barriers_reject_failed_gate_and_mismatched_smoke(tmp_path: Path) -> None:
+    digest = "sha256:" + "a" * 64
+    image = "registry/image:v1-arm64"
+    arm_receipt = tmp_path / "arm-build.json"
+    arm_receipt.write_text(
+        json.dumps(
+            {
+                "phase": "arm64-build",
+                "evidence": [
+                    {
+                        "kind": "local-registry-digest",
+                        "reference": f"docker://{image}",
+                        "digest": digest,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    gate_file = tmp_path / "regression-decision.json"
+    gate_receipt = tmp_path / "gate.json"
+    smoke_file = tmp_path / "arm64-smoke.json"
+    smoke_receipt = tmp_path / "smoke.json"
+    gate_file.write_text('{"passed": false}', encoding="utf-8")
+    smoke_file.write_text(
+        json.dumps({"architecture": "linux/arm64", "images": {image: digest}}),
+        encoding="utf-8",
+    )
+    _file_receipt(gate_receipt, "regression-gate", gate_file)
+    _file_receipt(smoke_receipt, "arm64-smoke", smoke_file)
+
+    with pytest.raises(RuntimeError, match="passing regression"):
+        require_release_barriers(
+            gate_receipt=gate_receipt,
+            gate_file=gate_file,
+            smoke_receipt=smoke_receipt,
+            smoke_file=smoke_file,
+            arm_build_receipt=arm_receipt,
+            arm_images=(image,),
+        )
+
+    gate_file.write_text('{"passed": true}', encoding="utf-8")
+    _file_receipt(gate_receipt, "regression-gate", gate_file)
+    smoke_file.write_text(
+        json.dumps({"architecture": "linux/amd64", "images": {image: digest}}),
+        encoding="utf-8",
+    )
+    _file_receipt(smoke_receipt, "arm64-smoke", smoke_file)
+    with pytest.raises(RuntimeError, match="does not match"):
+        require_release_barriers(
+            gate_receipt=gate_receipt,
+            gate_file=gate_file,
+            smoke_receipt=smoke_receipt,
+            smoke_file=smoke_file,
+            arm_build_receipt=arm_receipt,
+            arm_images=(image,),
+        )
+
+
+def test_finalize_rejects_semantically_wrong_current_predicate(tmp_path: Path) -> None:
+    predicate = tmp_path / "predicate.json"
+    predicate.write_text('{"version": "wrong"}', encoding="utf-8")
+    receipt = tmp_path / "attest.json"
+    _file_receipt(receipt, "attest", predicate)
+
+    with pytest.raises(RuntimeError, match="does not match"):
+        require_attestation_predicate(receipt, predicate, {"version": "v1"})
 
 
 @pytest.mark.parametrize(

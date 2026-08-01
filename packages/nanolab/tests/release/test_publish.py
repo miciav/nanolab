@@ -69,7 +69,11 @@ class _PublishProvider:
         if argv[:2] == ("skopeo", "copy"):
             source = argv[-2].removeprefix("docker://")
             destination = argv[-1].removeprefix("docker://")
-            digest = _source_digest(source)
+            digest = (
+                "sha256:" + source.rsplit("@sha256:", 1)[1]
+                if "@sha256:" in source
+                else _source_digest(source)
+            )
             if destination in self.copy_corruptions:
                 digest = "sha256:" + "f" * 64
             self.ghcr_digests[destination] = digest
@@ -112,12 +116,14 @@ class _PublishProvider:
 # --- plan derivation -------------------------------------------------------
 
 
-def test_publish_plan_covers_the_full_52_cell_matrix() -> None:
+def test_publish_plan_covers_the_full_dynamic_matrix() -> None:
     plan = _plan()
 
-    assert len(plan.copies) == 52
-    assert len(plan.manifests) == 26
-    assert len(plan.aliases) == 8
+    assert plan.copies
+    assert len(plan.manifests) == len(plan.copies) // 2
+    assert len(plan.aliases) == sum(
+        manifest.reference.endswith("-native") for manifest in plan.manifests
+    )
     assert plan.repository == publish.GHCR_REPOSITORY
     # AMD64 architecture uploads strictly precede ARM64 ones
     architectures = [
@@ -198,7 +204,7 @@ def test_publication_requires_digest_evidence_for_all_52_cells() -> None:
     digests = publish.require_publication_evidence(plan, complete)
     assert set(digests) == {copy.source for copy in plan.copies}
 
-    with pytest.raises(RuntimeError, match="52"):
+    with pytest.raises(RuntimeError, match=str(len(plan.copies))):
         publish.require_publication_evidence(plan, complete[:-1])
 
 
@@ -219,12 +225,14 @@ def test_architecture_copies_preserve_digests_and_use_the_authfile() -> None:
     )
 
     copies = [command for command in provider.commands if command[:2] == ("skopeo", "copy")]
-    assert len(copies) == 52
+    assert len(copies) == len(plan.copies)
     for command in copies:
         assert "--preserve-digests" in command
         assert "--src-tls-verify=false" in command
         assert "--dest-authfile=/tmp/creds/docker/config.json" in command
-    assert len(evidence) == 52
+        source = command[-2].removeprefix("docker://")
+        assert source.rsplit("@", 1)[1] in digests.values()
+    assert len(evidence) == len(plan.copies)
     assert all(artifact.location == "remote" for artifact in evidence)
 
 
@@ -304,8 +312,8 @@ def test_manifests_require_exactly_amd64_and_arm64() -> None:
         for command in provider.commands
         if command[:4] == ("docker", "buildx", "imagetools", "create")
     ]
-    assert len(creations) == 26
-    assert len(evidence) == 26
+    assert len(creations) == len(plan.manifests)
+    assert len(evidence) == len(plan.manifests)
 
 
 def test_attestation_manifest_rows_are_tolerated_but_missing_arm64_is_not() -> None:
@@ -376,7 +384,7 @@ def test_aliases_are_created_last_and_verified_against_their_manifest() -> None:
         docker_config="/tmp/creds/docker",
     )
 
-    assert len(evidence) == 8
+    assert len(evidence) == len(plan.aliases)
     for alias in plan.aliases:
         assert provider.ghcr_digests[alias.reference] == provider.ghcr_digests[alias.source]
 

@@ -170,7 +170,7 @@ def publish_architecture_images(
                 "--preserve-digests",
                 "--src-tls-verify=false",
                 f"--dest-authfile={authfile}",
-                f"docker://{copy.source}",
+                f"docker://{_pin(copy.source, source_digests)}",
                 f"docker://{copy.destination}",
             ),
         )

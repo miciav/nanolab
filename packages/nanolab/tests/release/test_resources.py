@@ -36,6 +36,39 @@ def _environment() -> EnvironmentConfig:
     )
 
 
+def test_execution_guard_validates_metadata_before_cloud_resource(tmp_path: Path) -> None:
+    events: list[str] = []
+
+    class Credentials:
+        def validate(self, *, repo_root: Path):
+            events.append(f"validate:{repo_root.name}")
+            return self
+
+    guard = release_resources.release_execution_guard(
+        Credentials(), repo_roots=(tmp_path / "tool", tmp_path / "source")
+    )
+    cloud = Resource(
+        title="Acquire cloud",
+        acquire=lambda _inputs: events.append("cloud"),
+        release=lambda _inputs, _value: None,
+        requires=(guard,),
+        infrastructure=True,
+    )
+
+    @dataclass
+    class Consume(Task[None]):
+        title: str = "Consume cloud"
+
+        def run(self, _inputs: TaskInputs) -> TaskOutcome[None]:
+            return TaskOutcome()
+
+    workflow = Workflow("guard-order")
+    workflow.add(Consume(), requires=(cloud,))
+    workflow.run()
+
+    assert events == ["validate:tool", "validate:source", "cloud"]
+
+
 class FakeProvider:
     def __init__(self) -> None:
         self.events: list[str] = []

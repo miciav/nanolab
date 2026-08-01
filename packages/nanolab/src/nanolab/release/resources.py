@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from contextlib import AbstractContextManager
 from pathlib import Path, PurePosixPath
-from typing import Any, Callable
+from typing import Any, Callable, Generic, TypeVar
 
 from sonata_engine import Resource, TaskInputs
 from sonata_tasks.vm import vm_resource
@@ -33,6 +34,15 @@ from nanolab.images.plan import ImagePlan
 from nanolab.release.environment import secure_release_endpoints, verify_release_vm_facts
 from nanolab.release.build import create_source_archive, stage_source_archive
 from nanolab.release.state import ArtifactEvidence
+from nanolab.release.secrets import (
+    RemoteCosignCredentials,
+    RemoteDockerCredentials,
+    stage_cosign_credentials,
+    stage_ghcr_credentials,
+)
+
+
+T = TypeVar("T")
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +76,89 @@ class ArmBuildInputs:
     buildkit_config: Path
     remote_bake_file: str
     remote_buildkit_config: str
+
+
+@dataclass(frozen=True, slots=True)
+class CredentialLease(Generic[T]):
+    value: T
+    _manager: AbstractContextManager[T]
+
+    def close(self) -> None:
+        self._manager.__exit__(None, None, None)
+
+
+def release_execution_guard(
+    credentials: object | None,
+    *,
+    repo_roots: tuple[Path, ...],
+) -> Resource[None]:
+    """Fail before cloud resources when an executable release lacks credentials."""
+
+    def acquire(_inputs: TaskInputs) -> None:
+        if credentials is None:
+            raise ValueError("release credential config is required for execution")
+        validate = getattr(credentials, "validate")
+        for root in repo_roots:
+            validate(repo_root=root)
+
+    return Resource(
+        title="Acquire validated release execution credentials",
+        acquire=acquire,
+        release=lambda _inputs, _value: None,
+        infrastructure=False,
+    )
+
+
+def _credential_resource(
+    title: str,
+    manager: Callable[[], AbstractContextManager[T]],
+    requires: tuple[Resource[Any], ...],
+) -> Resource[CredentialLease[T]]:
+    def acquire(_inputs: TaskInputs) -> CredentialLease[T]:
+        context = manager()
+        return CredentialLease(context.__enter__(), context)
+
+    return Resource(
+        title=title,
+        acquire=acquire,
+        release=lambda _inputs, lease: lease.close(),
+        requires=requires,
+        infrastructure=False,
+    )
+
+
+def ghcr_credentials_resource(
+    *,
+    provider: object,
+    request: object,
+    username: str,
+    token_file: Path,
+    requires: tuple[Resource[Any], ...] = (),
+) -> Resource[CredentialLease[RemoteDockerCredentials]]:
+    return _credential_resource(
+        "Acquire staged GHCR credentials",
+        lambda: stage_ghcr_credentials(
+            provider, request, username=username, token_file=token_file
+        ),
+        requires,
+    )
+
+
+def cosign_credentials_resource(
+    *,
+    provider: object,
+    request: object,
+    key_file: Path,
+    password_file: Path,
+    requires: tuple[Resource[Any], ...] = (),
+) -> Resource[CredentialLease[RemoteCosignCredentials]]:
+    return _credential_resource(
+        "Acquire staged Cosign credentials",
+        lambda: stage_cosign_credentials(
+            provider, request, key_file=key_file, password_file=password_file
+        ),
+        requires,
+    )
 
 
 def _release_remote_root(value: str) -> PurePosixPath:
@@ -188,6 +281,8 @@ def build_release_resources(
     environment: EnvironmentConfig,
     repo_root: Path,
     provider: object,
+    *,
+    requires: tuple[Resource[Any], ...] = (),
 ) -> ReleaseResources:
     """Build three ordered VM resources without discovering cloud state."""
     stack_request = vm_request_for_role(environment, "stack", loadtest=True)
@@ -219,18 +314,21 @@ def build_release_resources(
         request=stack_request,
         provider=provider,
         after_ensure=after_stack,
+        requires=requires,
     )
     loadgen = _vm(
         title="Acquire release loadgen VM",
         request=loadgen_request,
         provider=provider,
         after_ensure=after_loadgen,
+        requires=requires,
     )
     arm_builder = _vm(
         title="Acquire release ARM builder VM",
         request=arm_request,
         provider=provider,
         after_ensure=after_arm,
+        requires=requires,
     )
 
     def acquire_endpoints(inputs: TaskInputs) -> ReleaseEndpoints:
