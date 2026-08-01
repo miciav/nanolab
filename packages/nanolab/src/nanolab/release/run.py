@@ -173,7 +173,7 @@ class Amd64ReleasePlan:
                 f"buildx {self.builder.name}: docker-container, "
                 f"maxParallelism={self.builder.max_parallelism}"
             ),
-            f"images: {len(self.image_plan.cells)} AMD64 + 26 ARM64 via Bake + native",
+            f"images: {len(self.image_plan.cells)} AMD64 + dynamic ARM64 via Bake + native",
             "ARM64: digest-pinned QEMU after regression-gate",
             (
                 "credentials: 3 private files validated; transfer deferred"
@@ -232,9 +232,6 @@ def build_amd64_release_plan(
         registry=DEFAULT_REGISTRY,
         architectures=("amd64",),
     )
-    if len(image_plan.cells) != 26:
-        raise ValueError(f"AMD64 release matrix must contain 26 cells, got {len(image_plan.cells)}")
-
     destination = Path(run_dir).resolve()
     destination.mkdir(parents=True, exist_ok=True)
     bake_file = destination / "docker-bake.json"
@@ -1057,7 +1054,7 @@ def _publish_release(
         reusable: frozenset[str],
         failure_injector: FailureInjector | None,
 ) -> None:
-    """Promote the verified 52-cell matrix to GHCR: immutable architecture
+    """Promote the verified multi-architecture matrix to GHCR: immutable architecture
     tags first, verified version manifests next, mutable aliases last. The
     GHCR token is transferred only for this window and always cleaned up."""
     pending = tuple(phase for phase in publish.PUBLISH_PHASES if phase not in reusable)

@@ -36,8 +36,9 @@ from nanolab.cli.execution import build_role_bindings
 from nanolab.cli.vm_provider import vm_provider_for_environment, vm_request_for_role
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
-from nanolab.images.plan import ImagePlan
+from nanolab.images.plan import DEFAULT_REGISTRY, ImagePlan, build_image_plan
 from nanolab.release.arm import build_arm64_image_plan
+from nanolab.release.environment import validate_release_environment
 from nanolab.release.metrics import (
     PerformanceProfile,
     RegressionDecision,
@@ -45,7 +46,8 @@ from nanolab.release.metrics import (
     newest_comparable_record,
 )
 from nanolab.release.publish import build_publish_plan
-from nanolab.release.run import ReleaseSettings, git_state, source_test_commands
+from nanolab.release.run import CredentialFiles, ReleaseSettings, git_state, source_test_commands
+from nanolab.release.state import ReleaseIdentity, digest_path
 from nanolab.release.versioning import normalize_version, verify_version_consistency
 
 
@@ -68,8 +70,110 @@ class ReleaseRequest:
     settings: ReleaseSettings
     run_dir: Path
     performance_root: Path
-    credentials: Any | None = None  # CredentialFiles | None
+    credentials: CredentialFiles | None = None
     nanofaas_root: Path | None = None  # defaults to repo_root
+    identity: ReleaseIdentity | None = None
+
+
+def build_release_request(
+    *,
+    repo_root: Path,
+    nanofaas_root: Path,
+    scenario_path: Path,
+    environment_path: Path,
+    release_config_path: Path | None,
+    run_dir: Path,
+    performance_root: Path,
+    executable: bool = False,
+) -> ReleaseRequest:
+    """Validate local release inputs without constructing cloud infrastructure."""
+    tool_root = Path(repo_root).expanduser().resolve()
+    source_root = Path(nanofaas_root).expanduser().resolve()
+    scenario_file = Path(scenario_path).expanduser().resolve()
+    environment_file = Path(environment_path).expanduser().resolve()
+    scenario = ScenarioConfig.model_validate(_read_yaml(scenario_file))
+    if scenario.workflow != "release" or scenario.release is None:
+        raise ValueError("release preflight requires a release scenario")
+
+    release = scenario.release
+    policy = (
+        release.profile,
+        release.benchmark_scenario,
+        release.throughput_max_loss_percent,
+        release.p95_max_increase_percent,
+        release.error_rate_max,
+    )
+    if policy != (
+        "azure-d8s-v5+d2s-v5-amd64-native-loadtest-v1",
+        "loadtest.yaml",
+        10.0,
+        15.0,
+        0.30,
+    ):
+        raise ValueError("release scenario does not match the canonical Azure performance policy")
+    benchmark_scenario = scenario_file.parent / release.benchmark_scenario
+    if not benchmark_scenario.is_file():
+        raise ValueError("release benchmark scenario must be a file")
+
+    environment = EnvironmentConfig.model_validate(_read_yaml(environment_file))
+    plain_version, version_tag = normalize_version(release.version)
+    source_commit = _release_source_commit(source_root, plain_version)
+    validate_release_environment(environment, source_root, plain_version)
+
+    credentials = None
+    if release_config_path is not None:
+        credential_config = _read_yaml(Path(release_config_path).expanduser().resolve())
+        try:
+            credentials = CredentialFiles(
+                ghcr_token=Path(str(credential_config["ghcr_token_file"])).expanduser().absolute(),
+                cosign_key=Path(str(credential_config["cosign_key_file"])).expanduser().absolute(),
+                cosign_password=Path(
+                    str(credential_config["cosign_password_file"])
+                ).expanduser().absolute(),
+            )
+        except KeyError as error:
+            raise ValueError("release credential configuration is incomplete") from error
+        credentials.validate(repo_root=tool_root).validate(repo_root=source_root)
+    elif executable:
+        raise ValueError("release credential config is required for execution")
+
+    image_plan = build_image_plan(
+        source_root,
+        version_tag,
+        registry=DEFAULT_REGISTRY,
+        architectures=("amd64",),
+    )
+    if not image_plan.cells:
+        raise ValueError("release image matrix must not be empty")
+
+    settings = ReleaseSettings(
+        max_parallelism=release.max_parallelism,
+        scenario=benchmark_scenario,
+        scenario_name=release.benchmark_scenario,
+        benchmark_runs=release.benchmark_runs,
+        profile=release.profile,
+        throughput_max_loss_percent=release.throughput_max_loss_percent,
+        p95_max_increase_percent=release.p95_max_increase_percent,
+        error_rate_max=release.error_rate_max,
+    )
+    return ReleaseRequest(
+        repo_root=tool_root,
+        nanofaas_root=source_root,
+        version=release.version,
+        environment=environment,
+        scenario=scenario,
+        image_plan=image_plan,
+        settings=settings,
+        run_dir=Path(run_dir).expanduser().resolve(),
+        performance_root=Path(performance_root).expanduser().resolve(),
+        credentials=credentials,
+        identity=ReleaseIdentity(
+            source_commit=source_commit,
+            prepared_version=plain_version,
+            release_config_digest=digest_path(scenario_file),
+            environment_digest=digest_path(environment_file),
+        ),
+    )
 
 
 def build_release_workflow(
@@ -87,7 +191,11 @@ def build_release_workflow(
         raise ValueError("release workflow requires an Azure environment")
 
     nanofaas = request.nanofaas_root or request.repo_root
-    source_commit = _release_source_commit(nanofaas, request.version)
+    source_commit = (
+        request.identity.source_commit
+        if request.identity is not None
+        else _release_source_commit(nanofaas, request.version)
+    )
     _, expected_image_tag = normalize_version(request.version)
     if request.image_plan.version != expected_image_tag:
         raise ValueError("release image plan version does not match the requested project version")
@@ -147,9 +255,7 @@ def build_release_workflow(
     from nanolab.config.scenario import ScenarioConfig
     from nanolab.plans.loadtest import build_loadtest_plan
 
-    benchmark_scenario = _read_yaml(
-        request.repo_root / "scenarios-v2" / request.settings.scenario_name
-    )
+    benchmark_scenario = _read_yaml(request.settings.scenario)
     benchmark_config = ScenarioConfig.model_validate(benchmark_scenario)
 
     benchmark_runs = []

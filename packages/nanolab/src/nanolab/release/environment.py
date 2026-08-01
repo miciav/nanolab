@@ -88,5 +88,5 @@ def _validate_operator_source(source: str | None) -> None:
         network = ipaddress.ip_network(source, strict=True) if source is not None else None
     except ValueError:
         network = None
-    if network is None or network.prefixlen == 0:
+    if network is None or network.prefixlen == 0 or not network.is_global:
         raise ValueError("Azure operator source CIDR must be a restricted network")

@@ -40,18 +40,19 @@ def _release_environment(**changes: object) -> EnvironmentConfig:
             "arm_vm_size": "Standard_D8ps_v5",
             "image_urn": "Canonical:ubuntu-24_04-lts:server:24.04.202607140",
             "arm_image_urn": "Canonical:ubuntu-24_04-lts:server-arm64:24.04.202607140",
-            "operator_source_cidr": "203.0.113.0/24",
+            "operator_source_cidr": "8.8.8.8/32",
         },
     }
     data.update(changes)
     return EnvironmentConfig.model_validate(data)
 
 
-def test_release_environment_example_is_pinned_and_comparable() -> None:
+def test_release_environment_example_requires_real_operator_cidr() -> None:
     path = NANOLAB_ROOT / "environments/azure-release.yaml.example"
     environment = EnvironmentConfig.model_validate(yaml.safe_load(path.read_text(encoding="utf-8")))
 
-    validate_release_environment(environment, NANOFAAS_ROOT, CURRENT_VERSION)
+    with pytest.raises(ValueError, match="operator source CIDR"):
+        validate_release_environment(environment, NANOFAAS_ROOT, CURRENT_VERSION)
     assert environment.roles["stack"].disk == "128G"
     assert environment.roles["loadgen"].disk == "30G"
     assert environment.roles["arm-builder"].disk == "64G"
@@ -103,7 +104,7 @@ def test_release_environment_requires_dedicated_vm_names(role: str, name: str) -
 
 @pytest.mark.parametrize(
     "source",
-    (None, "*", "0.0.0.0/0", "::/0", "not-a-cidr"),
+    (None, "*", "0.0.0.0/0", "::/0", "not-a-cidr", "203.0.113.0/24"),
 )
 def test_release_environment_requires_restricted_operator_source(
     source: str | None,

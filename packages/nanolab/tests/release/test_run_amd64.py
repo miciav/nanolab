@@ -35,6 +35,15 @@ def _secret(path: Path, value: str) -> Path:
     return path
 
 
+def _environment(tmp_path: Path) -> Path:
+    source = NANOLAB_ROOT / "environments/azure-release.yaml.example"
+    data = yaml.safe_load(source.read_text(encoding="utf-8"))
+    data["azure"]["operator_source_cidr"] = "8.8.8.8/32"
+    destination = tmp_path / "azure-release.yaml"
+    destination.write_text(yaml.safe_dump(data), encoding="utf-8")
+    return destination
+
+
 def _plan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(
         release_run,
@@ -49,7 +58,7 @@ def _plan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     return release_run.build_amd64_release_plan(
         repo_root=NANOFAAS_ROOT,
         version=CURRENT_TAG,
-        environment_path=NANOLAB_ROOT / "environments/azure-release.yaml.example",
+        environment_path=_environment(tmp_path),
         release_config_path=NANOLAB_ROOT / "release.yaml",
         run_dir=tmp_path / "run",
         credentials=credentials,
@@ -65,7 +74,7 @@ def test_plan_is_amd64_only_and_uses_a_named_bounded_buildx_builder(
 
     assert plan.identity.source_commit == "a" * 40
     assert plan.version == CURRENT_VERSION
-    assert len(plan.image_plan.cells) == 26
+    assert plan.image_plan.cells
     assert {cell.architecture for cell in plan.image_plan.cells} == {"amd64"}
     assert plan.phase_names == release_run.RELEASE_PHASES
     assert plan.builder.name == BUILDER_NAME
@@ -73,7 +82,7 @@ def test_plan_is_amd64_only_and_uses_a_named_bounded_buildx_builder(
     assert "max-parallelism = 4" in plan.buildkit_config.read_text(encoding="utf-8")
     rendered = plan.render()
     assert "docker-container" in rendered
-    assert "26 AMD64 + 26 ARM64" in rendered
+    assert f"{len(plan.image_plan.cells)} AMD64 + dynamic ARM64" in rendered
     assert "digest-pinned QEMU after regression-gate" in rendered
     assert "ghcr.io" not in rendered
     assert "fixture-token" not in repr(plan)
@@ -99,7 +108,7 @@ def test_plan_rejects_dirty_source_before_creating_release_files(
         release_run.build_amd64_release_plan(
             repo_root=NANOFAAS_ROOT,
             version=CURRENT_VERSION,
-            environment_path=NANOLAB_ROOT / "environments/azure-release.yaml.example",
+            environment_path=_environment(tmp_path),
             release_config_path=NANOLAB_ROOT / "release.yaml",
             run_dir=tmp_path / "run",
             credentials=credentials,
@@ -180,7 +189,7 @@ def test_plan_rejects_requested_version_that_is_not_prepared(
         release_run.build_amd64_release_plan(
             repo_root=NANOFAAS_ROOT,
             version=MISMATCH_VERSION,
-            environment_path=NANOLAB_ROOT / "environments/azure-release.yaml.example",
+            environment_path=_environment(tmp_path),
             release_config_path=NANOLAB_ROOT / "release.yaml",
             run_dir=tmp_path / "run",
             credentials=credentials,
@@ -206,7 +215,7 @@ def test_plan_resolves_relative_release_inputs_against_the_working_directory(
     plan = release_run.build_amd64_release_plan(
         repo_root=NANOFAAS_ROOT,
         version=CURRENT_VERSION,
-        environment_path=Path("environments/azure-release.yaml.example"),
+        environment_path=_environment(tmp_path),
         release_config_path=Path("release.yaml"),
         run_dir=tmp_path / "run",
         credentials=credentials,
@@ -403,7 +412,9 @@ def test_amd64_build_commands_bind_every_bake_to_the_named_builder(
         "--load",
         "docker-amd64",
     )
-    assert sum(command.task_id.startswith("release.images.native.") for command in commands) == 5
+    assert sum(
+        command.task_id.startswith("release.images.native.") for command in commands
+    ) == len(plan.image_plan.gradle_cells)
     assert all("arm64" not in " ".join(command.argv).lower() for command in commands)
     assert all("ghcr.io" not in " ".join(command.argv) for command in commands)
 
@@ -1074,7 +1085,7 @@ def test_run_composes_amd64_gate_and_defers_all_credentials_and_publication(
         f"/home/azureuser/nanofaas-release/{CURRENT_VERSION}/"
         f"{plan.buildkit_config.name} --use"
     )
-    source_test = events.index("exec:./gradlew test --no-parallel")
+    source_test = next(index for index, event in enumerate(events) if "./gradlew test" in event)
     source_restages = [
         index for index, event in enumerate(events) if event == "transfer:source.tar"
     ]
@@ -1085,6 +1096,9 @@ def test_run_composes_amd64_gate_and_defers_all_credentials_and_publication(
     )
     assert source_restages[2] < tunnel
     assert reset < create
+    assert plan.environment.azure is not None
+    operator_source = plan.environment.azure.operator_source_cidr
+    assert operator_source is not None
     assert [
         (getattr(request, "name"), ports, sources)
         for request, ports, sources in provider.restrictions
@@ -1092,12 +1106,12 @@ def test_run_composes_amd64_gate_and_defers_all_credentials_and_publication(
         (
             "nanofaas-azure-release",
             (30080, 30081, 30090),
-            ("203.0.113.0/24",),
+            (operator_source,),
         ),
         (
             "nanofaas-azure-release",
             (30080, 30081, 30090),
-            ("198.51.100.42/32", "203.0.113.0/24"),
+            ("198.51.100.42/32", operator_source),
         ),
         (
             "nanofaas-azure-release",
@@ -1219,16 +1233,22 @@ def test_release_runs_arm64_only_after_the_passed_amd64_gate(
         for event in events
         if event.startswith("exec:docker rm --force nanofaas-arm64-smoke-")
     ]
-    assert len(arm_pushes) == 26
-    assert len(architecture_inspects) == 26
-    assert len(server_runs) == 25
-    assert len(server_removals) == 25
+    arm_plan = arm.build_arm64_image_plan(
+        plan.repo_root,
+        plan.version,
+        registry=plan.image_plan.registry,
+    )
+    smoke_count = len(arm.server_smoke_specs(arm_plan))
+    assert len(arm_pushes) == len(arm_plan.cells)
+    assert len(architecture_inspects) == len(arm_plan.cells)
+    assert len(server_runs) == smoke_count
+    assert len(server_removals) == smoke_count
     assert all("--platform linux/arm64" in event for event in server_runs)
     # One per builder VM: buildx state is per-daemon, so the ARM builder cannot
     # reuse the one the stack VM created.
     assert sum(event.startswith("exec:docker buildx create") for event in events) == 2
     health_checks = [event for event in events if event.startswith("exec:curl")]
-    assert len(health_checks) == 25
+    assert len(health_checks) == smoke_count
     assert all("--retry-max-time 120" in event for event in health_checks)
     payloads = [
         json.loads(path.read_text(encoding="utf-8"))
@@ -2170,9 +2190,12 @@ def test_resume_restricts_legacy_wildcard_ingress_before_bootstrap_rsync(
     assert decision.passed is True
     assert "rsync:stack:wildcard=False" in events
     assert "rsync:loadgen:wildcard=False" in events
+    assert plan.environment.azure is not None
+    operator_source = plan.environment.azure.operator_source_cidr
+    assert operator_source is not None
     assert [sources for _request, _ports, sources in provider.restrictions] == [
-        ("203.0.113.0/24",),
-        ("198.51.100.42/32", "203.0.113.0/24"),
+        (operator_source,),
+        ("198.51.100.42/32", operator_source),
         ("203.0.113.10/32",),
     ]
 

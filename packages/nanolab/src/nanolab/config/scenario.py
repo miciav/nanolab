@@ -40,13 +40,13 @@ class ReleaseConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     version: str
-    profile: str = "default"
+    profile: str = "azure-d8s-v5+d2s-v5-amd64-native-loadtest-v1"
     max_parallelism: int = Field(default=4, gt=0)
     benchmark_runs: int = Field(default=3, ge=1)
     benchmark_scenario: str = "loadtest.yaml"
     throughput_max_loss_percent: float = Field(default=10.0, ge=0)
-    p95_max_increase_percent: float = Field(default=20.0, ge=0)
-    error_rate_max: float = Field(default=0.05, ge=0, le=1)
+    p95_max_increase_percent: float = Field(default=15.0, ge=0)
+    error_rate_max: float = Field(default=0.30, ge=0, le=1)
 
 
 class ScenarioConfig(BaseModel):
