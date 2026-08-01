@@ -539,6 +539,30 @@ def test_generic_release_run_removes_the_extracted_tree(release_cli_harness) -> 
     assert not trees[0].exists()
 
 
+def test_generic_release_preflight_rejection_removes_the_extracted_tree(
+    release_cli_harness,
+) -> None:
+    """A preflight rejection (not just a clean run) must not leak the tree."""
+    assert release_cli_harness.invoke("--provision").exit_code == 0
+
+    trees: list[Path] = []
+    original = release_plan.build_release_request
+
+    def record(**kwargs):
+        trees.append(Path(kwargs["source_tree"]))
+        return original(**kwargs)
+
+    release_cli_harness.monkeypatch.setattr(product_module, "build_release_request", record)
+
+    result = release_cli_harness.invoke("--provision")
+
+    assert result.exit_code != 0
+    assert "pass --resume" in result.output
+    assert len(trees) == 1
+    assert trees[0].is_absolute()
+    assert not trees[0].exists()
+
+
 def test_generic_release_plan_stays_offline(release_cli_harness) -> None:
     result = CliRunner().invoke(
         app,

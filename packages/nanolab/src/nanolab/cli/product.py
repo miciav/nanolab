@@ -371,27 +371,36 @@ def install_product_commands(app: typer.Typer) -> None:
         release_provider: object | None = None
         release_journal = None
         # The extracted tree is throwaway and only has to outlive workflow
-        # compilation; the ExitStack closes it on every exit path.
+        # compilation; the ExitStack closes it on every exit path. A
+        # dedicated guard covers the preflight itself: it must not route
+        # through the workflow-execution try/except below, which would
+        # write a failure run-metadata file for a plain preflight rejection.
         lifetime = ExitStack()
-        if release:
-            source_tree = Path(
-                lifetime.enter_context(tempfile.TemporaryDirectory(prefix="nanofaas-release-"))
-            )
-            release_request, release_provider = _release_request(
-                scenario, environment, release_config, run_dir,
-                executable=True,
-                source_tree=source_tree,
-            )
-            release_journal = release_journal_config(release_request)
-            if resume and not release_journal.path.is_file():
-                raise typer.BadParameter("--resume requires an existing release journal")
-            if not resume and release_journal.path.exists():
-                raise typer.BadParameter(
-                    "release journal already exists; pass --resume to verify and reuse it"
+        try:
+            if release:
+                source_tree = Path(
+                    lifetime.enter_context(
+                        tempfile.TemporaryDirectory(prefix="nanofaas-release-")
+                    )
                 )
-            # Evidence, receipts and metadata all live beside the journal, one
-            # directory per prepared version -- never a reused `latest`.
-            effective_run_dir = release_journal.path.parent
+                release_request, release_provider = _release_request(
+                    scenario, environment, release_config, run_dir,
+                    executable=True,
+                    source_tree=source_tree,
+                )
+                release_journal = release_journal_config(release_request)
+                if resume and not release_journal.path.is_file():
+                    raise typer.BadParameter("--resume requires an existing release journal")
+                if not resume and release_journal.path.exists():
+                    raise typer.BadParameter(
+                        "release journal already exists; pass --resume to verify and reuse it"
+                    )
+                # Evidence, receipts and metadata all live beside the journal, one
+                # directory per prepared version -- never a reused `latest`.
+                effective_run_dir = release_journal.path.parent
+        except BaseException:
+            lifetime.close()
+            raise
         sink = ConsoleProgressSink()
         started_at = datetime.now(UTC)
         provenance = _git_provenance(paths.nanofaas_root)
