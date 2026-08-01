@@ -231,3 +231,33 @@ def test_plan_metadata_is_immutable() -> None:
 
     with pytest.raises(FrozenInstanceError):
         plan.cells[0].tag = "mutable"  # type: ignore[misc]
+
+
+def test_plan_discovers_functions_under_the_given_root(tmp_path: Path) -> None:
+    """The matrix follows the root it is handed, not NANOFAAS_ROOT.
+
+    Before this, _all_targets read the global catalog while _function_target
+    computed example_dir.relative_to(repo_root), so a divergence raised an
+    opaque ValueError instead of planning the given tree.
+    """
+    for relative in (
+        "platform/control-plane",
+        "services/java/warm-echo",
+        "runtimes/watchdog",
+        "functions/python/solo",
+    ):
+        target = tmp_path / relative
+        target.mkdir(parents=True)
+        (target / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
+    (tmp_path / "functions/python/solo/function.yaml").write_text(
+        "name: solo\nruntime: python\nfamily: solo\n", encoding="utf-8"
+    )
+
+    plan = build_image_plan(tmp_path, "v0.0.1", registry=REGISTRY)
+
+    # control-plane, java-warm-echo and watchdog are hardcoded platform targets;
+    # everything else must come from the given root, so nothing from the real
+    # NANOFAAS_ROOT checkout may appear here.
+    assert plan.target_names == frozenset(
+        {"control-plane", "java-warm-echo", "watchdog", "python-solo"}
+    )

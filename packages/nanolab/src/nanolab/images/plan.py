@@ -154,7 +154,7 @@ def _all_targets(repo_root: Path) -> tuple[ImageTarget, ...]:
         ),
         *(
             _function_target(repo_root, function)
-            for function in list_functions()
+            for function in list_functions(repo_root)
             if function.example_dir is not None
         ),
     ]
