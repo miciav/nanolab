@@ -14,6 +14,7 @@ from nanolab.images.plan import ImagePlan
 from nanolab.plans.release import ReleaseRequest, build_release_workflow
 from nanolab.release.run import GitState, ReleaseSettings
 from nanolab.release.state import digest_path
+from nanolab.release.tasks import ReleasePhaseTask
 from nanolab.release.versioning import read_project_version
 
 
@@ -42,6 +43,14 @@ _AZURE_ENV = EnvironmentConfig.model_validate(
         },
     }
 )
+
+
+def test_release_journal_is_scoped_to_the_versioned_run(tmp_path: Path) -> None:
+    request = type("Request", (), {"run_dir": tmp_path, "version": "v1.2.3"})()
+
+    assert release_plan.release_journal_config(request).path == (
+        tmp_path / "releases" / "1.2.3" / "sonata.jsonl"
+    )
 
 
 def test_release_request_rejects_non_azure_environment():
@@ -231,6 +240,21 @@ def test_build_release_workflow_compiles_without_cloud_discovery(
 
     workflow = build_release_workflow(request, provider=OfflineProvider())
     compiled = workflow.compile()
+
+    release_phases = {
+        task.task.title: task.task
+        for task in compiled.tasks
+        if isinstance(task.task, ReleasePhaseTask)
+    }
+    assert set(release_phases) == {
+        "Run source tests",
+        "Build AMD64 images",
+        "Push AMD64 images to local registry",
+    }
+    assert all(
+        task.receipt.parent == tmp_path / "run" / "releases" / CURRENT_VERSION
+        for task in release_phases.values()
+    )
 
     titles = [task.task.title for task in compiled.tasks]
     assert titles.index("Acquire release stack VM") < titles.index(

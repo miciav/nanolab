@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from sonata_engine import Task, TaskInputs, TaskOutcome, Workflow
+from sonata_engine import JournalConfig, Task, TaskInputs, TaskOutcome, Workflow
 from sonata_tasks.archive import source_archive_resource
 from sonata_tasks.buildx import buildx_builder_resource
 from sonata_tasks.release_composites import (
@@ -49,6 +49,14 @@ from nanolab.release.publish import build_publish_plan
 from nanolab.release.resources import build_release_resources
 from nanolab.release.run import CredentialFiles, ReleaseSettings, git_state, source_test_commands
 from nanolab.release.state import ReleaseIdentity, digest_path
+from nanolab.release.tasks import (
+    amd64_build_task,
+    registry_push_task,
+    run_image_steps,
+    run_source_steps,
+    source_test_task,
+    versioned_release_run_dir,
+)
 from nanolab.release.versioning import normalize_version, verify_version_consistency
 
 
@@ -74,6 +82,14 @@ class ReleaseRequest:
     credentials: CredentialFiles | None = None
     nanofaas_root: Path | None = None  # defaults to repo_root
     identity: ReleaseIdentity | None = None
+
+
+def release_journal_config(request: ReleaseRequest) -> JournalConfig:
+    """Use one Sonata journal per prepared release version."""
+    return JournalConfig(
+        versioned_release_run_dir(request.run_dir, normalize_version(request.version)[0])
+        / "sonata.jsonl"
+    )
 
 
 def build_release_request(
@@ -197,6 +213,9 @@ def build_release_workflow(
         if request.identity is not None
         else _release_source_commit(nanofaas, request.version)
     )
+    if request.identity is None:
+        raise ValueError("release workflow requires a validated release identity")
+    identity = request.identity
     _, expected_image_tag = normalize_version(request.version)
     if request.image_plan.version != expected_image_tag:
         raise ValueError("release image plan version does not match the requested project version")
@@ -231,9 +250,24 @@ def build_release_workflow(
         request=stack_req,
     )
     archive = replace(archive, requires=(infrastructure.stack,))
-    source_tests = source_tests_composite(
-        source_test_commands(Path(source_dir)),
-        executor=executor,
+    source_commands = source_test_commands(Path(source_dir))
+    source_steps = source_tests_composite(source_commands, executor=executor)
+    source_tests = source_test_task(
+        identity=identity,
+        run_dir=request.run_dir,
+        phase_inputs={
+            "commands": tuple(
+                (
+                    command.argv,
+                    tuple(sorted(command.env.items())),
+                    str(command.remote_dir),
+                    str(command.cwd),
+                    command.timeout_seconds,
+                )
+                for command in source_commands
+            )
+        },
+        work=lambda inputs: run_source_steps(source_steps, inputs),
     )
 
     # --- Phase 2: AMD64 Build ---
@@ -243,19 +277,62 @@ def build_release_workflow(
         role="stack",
         requires=(infrastructure.stack,),
     )
-    amd64_build = amd64_build_composite(
+    amd64_steps = amd64_build_composite(
         request.image_plan,
         executor=executor,
         role="stack",
         cwd=Path(source_dir),
     )
+    amd64_build = amd64_build_task(
+        identity=identity,
+        run_dir=request.run_dir,
+        phase_inputs={
+            "cells": tuple(
+                (
+                    cell.image,
+                    cell.architecture,
+                    cell.flavor,
+                    cell.build_kind,
+                    str(cell.target.dockerfile),
+                    str(cell.target.context),
+                    cell.gradle_command,
+                )
+                for cell in request.image_plan.cells
+            ),
+            "maxParallelism": request.settings.max_parallelism,
+            "sourceDir": source_dir,
+        },
+        prerequisites=(source_tests.receipt,),
+        work=lambda inputs: run_image_steps(
+            amd64_steps,
+            inputs,
+            executor,
+            tuple(cell.image for cell in request.image_plan.cells),
+            registry=False,
+        ),
+    )
 
     # --- Phase 3: Registry Push ---
-    registry_push = registry_push_composite(
+    registry_steps = registry_push_composite(
         request.image_plan,
         executor=executor,
         role="stack",
         tls_verify=False,
+    )
+    release_images = tuple(cell.image for cell in request.image_plan.cells)
+    registry_push = registry_push_task(
+        identity=identity,
+        run_dir=request.run_dir,
+        phase_inputs={"images": release_images, "tlsVerify": False},
+        prerequisites=(source_tests.receipt, amd64_build.receipt),
+        expected_images=release_images,
+        work=lambda inputs: run_image_steps(
+            registry_steps,
+            inputs,
+            executor,
+            release_images,
+            registry=True,
+        ),
     )
 
     # --- Phases 4-6: Benchmarks ---
