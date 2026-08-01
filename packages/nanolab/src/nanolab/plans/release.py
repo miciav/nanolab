@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from sonata_engine import Evidence, JournalConfig, Workflow
+from sonata_engine import Evidence, JournalConfig, Verifier, Workflow
 from sonata_tasks.buildx import buildx_builder_resource
 from sonata_tasks.release_composites import (
     amd64_build_composite,
@@ -34,6 +34,7 @@ from nanolab.release.arm import build_arm64_image_plan
 from nanolab.release import arm as release_arm
 from nanolab.release import build as release_build
 from nanolab.release.environment import validate_release_environment
+from nanolab.release.evidence import release_evidence_verifiers
 from nanolab.release.benchmark import (
     _aggregate_from_payload,
     performance_profile,
@@ -111,6 +112,18 @@ class ReleaseRequest:
     credentials: CredentialFiles | None = None
     nanofaas_root: Path | None = None  # defaults to repo_root
     identity: ReleaseIdentity | None = None
+
+
+def release_verifiers(request: ReleaseRequest, provider: Any) -> dict[str, Verifier]:
+    """Bind evidence verifiers to the VM that serves registry inspection.
+
+    Which host that is belongs to the release plan, not to the caller: a
+    verifier pointed at the wrong VM fails closed and is indistinguishable
+    from invalidated evidence.
+    """
+    return release_evidence_verifiers(
+        provider, vm_request_for_role(request.environment, "stack", loadtest=True)
+    )
 
 
 def release_journal_config(request: ReleaseRequest) -> JournalConfig:

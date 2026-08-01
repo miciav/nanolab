@@ -25,6 +25,8 @@ from nanolab.release.state import ArtifactEvidence
 from nanolab.release.tasks import ReleasePhaseTask
 from nanolab.release.versioning import read_project_version
 
+from ..conftest import RejectingProvider
+
 
 NANOFAAS_ROOT = Path(os.environ["NANOFAAS_ROOT"]).resolve()
 NANOLAB_ROOT = Path(__file__).resolve().parents[2]
@@ -158,66 +160,6 @@ def test_build_release_workflow_compiles_to_a_workflow():
     pass
 
 
-def _canonical_environment(path: Path) -> Path:
-    path.write_text(
-        yaml.safe_dump(
-            {
-                "provider": "azure",
-                "roles": {
-                    "stack": {"name": "nanofaas-azure-release", "disk": "128G"},
-                    "loadgen": {
-                        "name": "nanofaas-azure-release-loadgen",
-                        "disk": "30G",
-                    },
-                    "arm-builder": {
-                        "name": "nanofaas-azure-release-arm",
-                        "disk": "64G",
-                    },
-                },
-                "azure": {
-                    "resource_group": "nanofaas-rg",
-                    "location": "westeurope",
-                    "vm_size": "Standard_D8s_v5",
-                    "loadgen_vm_size": "Standard_D2s_v5",
-                    "arm_vm_size": "Standard_D8ps_v5",
-                    "image_urn": "Canonical:ubuntu-24_04-lts:server:24.04.202607140",
-                    "arm_image_urn": ("Canonical:ubuntu-24_04-lts:server-arm64:24.04.202607140"),
-                    "operator_source_cidr": "8.8.8.8/32",
-                },
-            }
-        ),
-        encoding="utf-8",
-    )
-    return path
-
-
-def _canonical_scenario(path: Path) -> Path:
-    path.write_text(
-        yaml.safe_dump(
-            {
-                "workflow": "release",
-                "functions": ["word-stats-java"],
-                "release": {
-                    "version": f"v{CURRENT_VERSION}",
-                    "profile": "azure-d8s-v5+d2s-v5-amd64-native-loadtest-v1",
-                    "max_parallelism": 4,
-                    "benchmark_runs": 3,
-                    "benchmark_scenario": "loadtest.yaml",
-                    "throughput_max_loss_percent": 10,
-                    "p95_max_increase_percent": 15,
-                    "error_rate_max": 0.30,
-                },
-            }
-        ),
-        encoding="utf-8",
-    )
-    (path.parent / "loadtest.yaml").write_text(
-        "workflow: loadtest\nfunctions: [word-stats-java]\n",
-        encoding="utf-8",
-    )
-    return path
-
-
 class _ArmWorkflowExecutor:
     def __init__(self) -> None:
         self.commands = []
@@ -292,7 +234,13 @@ class _ArmWorkflowProvider:
         return SimpleNamespace(return_code=0, stdout="", stderr="")
 
 
-def _arm_failure_workflow(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, failure: str):
+def _arm_failure_workflow(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    failure: str,
+    scenario_path: Path,
+    environment_path: Path,
+):
     provider = _ArmWorkflowProvider(failure)
     executor = _ArmWorkflowExecutor()
     monkeypatch.setattr(
@@ -352,8 +300,8 @@ def _arm_failure_workflow(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, failu
     request = release_plan.build_release_request(
         repo_root=NANOLAB_ROOT,
         nanofaas_root=NANOFAAS_ROOT,
-        scenario_path=_canonical_scenario(tmp_path / "release.yaml"),
-        environment_path=_canonical_environment(tmp_path / "environment.yaml"),
+        scenario_path=scenario_path,
+        environment_path=environment_path,
         release_config_path=None,
         run_dir=tmp_path / "run",
         performance_root=tmp_path / "performance",
@@ -393,9 +341,15 @@ def _arm_failure_workflow(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, failu
     ),
 )
 def test_new_arm_workflow_failures_cleanup_and_never_publish(
-    failure: str, error: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    failure: str,
+    error: str,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    canonical_release_configs: tuple[Path, Path],
 ) -> None:
-    workflow, provider, executor, phases = _arm_failure_workflow(monkeypatch, tmp_path, failure)
+    workflow, provider, executor, phases = _arm_failure_workflow(
+        monkeypatch, tmp_path, failure, *canonical_release_configs
+    )
 
     with pytest.raises(RuntimeError, match=error):
         workflow.run(select=Selection(start="build-arm64-images"))
@@ -418,10 +372,11 @@ def test_new_arm_workflow_failures_cleanup_and_never_publish(
 
 
 def test_new_arm_source_transfer_failure_compensates_all_acquired_resources(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    canonical_release_configs: tuple[Path, Path],
 ) -> None:
     workflow, provider, executor, phases = _arm_failure_workflow(
-        monkeypatch, tmp_path, "source-transfer"
+        monkeypatch, tmp_path, "source-transfer", *canonical_release_configs
     )
 
     with pytest.raises(RuntimeError, match="source transfer failed"):
@@ -438,14 +393,9 @@ def test_new_arm_source_transfer_failure_compensates_all_acquired_resources(
 def test_build_release_workflow_compiles_without_cloud_discovery(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    canonical_release_configs: tuple[Path, Path],
 ) -> None:
-    class OfflineProvider:
-        def __getattr__(self, name: str):
-            def reject(*_args, **_kwargs):
-                raise AssertionError(f"cloud method called while compiling: {name}")
-
-            return reject
-
+    scenario_path, environment_path = canonical_release_configs
     monkeypatch.setattr(
         release_plan,
         "git_state",
@@ -454,14 +404,14 @@ def test_build_release_workflow_compiles_without_cloud_discovery(
     request = release_plan.build_release_request(
         repo_root=NANOLAB_ROOT,
         nanofaas_root=NANOFAAS_ROOT,
-        scenario_path=_canonical_scenario(tmp_path / "release.yaml"),
-        environment_path=_canonical_environment(tmp_path / "environment.yaml"),
+        scenario_path=scenario_path,
+        environment_path=environment_path,
         release_config_path=None,
         run_dir=tmp_path / "run",
         performance_root=tmp_path / "performance",
     )
 
-    workflow = build_release_workflow(request, provider=OfflineProvider())
+    workflow = build_release_workflow(request, provider=RejectingProvider())
     compiled = workflow.compile()
 
     release_phases = {
@@ -605,16 +555,10 @@ def test_missing_execution_credentials_fail_before_any_provider_call(
     selection: Selection | None,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    canonical_release_configs: tuple[Path, Path],
 ) -> None:
-    calls: list[str] = []
-
-    class Provider:
-        def __getattr__(self, name: str):
-            def call(*_args, **_kwargs):
-                calls.append(name)
-                raise AssertionError(name)
-
-            return call
+    scenario_path, environment_path = canonical_release_configs
+    provider = RejectingProvider()
 
     monkeypatch.setattr(
         release_plan, "git_state", lambda _root: GitState(commit="a" * 40, clean=True)
@@ -622,17 +566,17 @@ def test_missing_execution_credentials_fail_before_any_provider_call(
     request = release_plan.build_release_request(
         repo_root=NANOLAB_ROOT,
         nanofaas_root=NANOFAAS_ROOT,
-        scenario_path=_canonical_scenario(tmp_path / "release.yaml"),
-        environment_path=_canonical_environment(tmp_path / "environment.yaml"),
+        scenario_path=scenario_path,
+        environment_path=environment_path,
         release_config_path=None,
         run_dir=tmp_path / "run",
         performance_root=tmp_path / "performance",
     )
-    workflow = build_release_workflow(request, provider=Provider())
+    workflow = build_release_workflow(request, provider=provider)
 
     with pytest.raises(ValueError, match="credential config is required"):
         workflow.run(select=selection)
-    assert calls == []
+    assert provider.calls == []
 
 
 def test_release_scenario_matches_comparable_history() -> None:
@@ -651,9 +595,9 @@ def test_release_scenario_matches_comparable_history() -> None:
 def test_build_release_request_is_offline_and_builds_current_matrix(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    canonical_release_configs: tuple[Path, Path],
 ) -> None:
-    environment_path = _canonical_environment(tmp_path / "environment.yaml")
-    scenario_path = _canonical_scenario(tmp_path / "release.yaml")
+    scenario_path, environment_path = canonical_release_configs
     home = tmp_path / "home"
     secrets = home / "secrets"
     secrets.mkdir(parents=True)
@@ -729,13 +673,14 @@ def test_build_release_request_is_offline_and_builds_current_matrix(
     assert not any("credentials" in title.lower() for title in finalize_titles)
 
 
-def test_build_release_request_requires_credentials_for_execution(tmp_path: Path) -> None:
+def test_build_release_request_requires_credentials_for_execution(tmp_path: Path, canonical_release_configs: tuple[Path, Path]) -> None:
+    scenario_path, environment_path = canonical_release_configs
     with pytest.raises(ValueError, match="credential config is required"):
         release_plan.build_release_request(
             repo_root=NANOLAB_ROOT,
             nanofaas_root=NANOFAAS_ROOT,
-            scenario_path=_canonical_scenario(tmp_path / "release.yaml"),
-            environment_path=_canonical_environment(tmp_path / "environment.yaml"),
+            scenario_path=scenario_path,
+            environment_path=environment_path,
             release_config_path=None,
             run_dir=tmp_path / "run",
             performance_root=tmp_path / "performance",
@@ -746,8 +691,9 @@ def test_build_release_request_requires_credentials_for_execution(tmp_path: Path
 def test_build_release_request_rejects_missing_benchmark_scenario(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    canonical_release_configs: tuple[Path, Path],
 ) -> None:
-    scenario_path = _canonical_scenario(tmp_path / "release.yaml")
+    scenario_path, environment_path = canonical_release_configs
     (tmp_path / "loadtest.yaml").unlink()
     monkeypatch.setattr(
         release_plan,
@@ -760,7 +706,7 @@ def test_build_release_request_rejects_missing_benchmark_scenario(
             repo_root=NANOLAB_ROOT,
             nanofaas_root=NANOFAAS_ROOT,
             scenario_path=scenario_path,
-            environment_path=_canonical_environment(tmp_path / "environment.yaml"),
+            environment_path=environment_path,
             release_config_path=None,
             run_dir=tmp_path / "run",
             performance_root=tmp_path / "performance",
@@ -770,7 +716,9 @@ def test_build_release_request_rejects_missing_benchmark_scenario(
 def test_build_release_request_rejects_symlink_credential(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    canonical_release_configs: tuple[Path, Path],
 ) -> None:
+    scenario_path, environment_path = canonical_release_configs
     secrets = tmp_path / "secrets"
     secrets.mkdir()
     target = secrets / "real-token"
@@ -804,8 +752,8 @@ def test_build_release_request_rejects_symlink_credential(
         release_plan.build_release_request(
             repo_root=NANOLAB_ROOT,
             nanofaas_root=NANOFAAS_ROOT,
-            scenario_path=_canonical_scenario(tmp_path / "release.yaml"),
-            environment_path=_canonical_environment(tmp_path / "environment.yaml"),
+            scenario_path=scenario_path,
+            environment_path=environment_path,
             release_config_path=credential_path,
             run_dir=tmp_path / "run",
             performance_root=tmp_path / "performance",
@@ -813,8 +761,8 @@ def test_build_release_request_rejects_symlink_credential(
         )
 
 
-def test_build_release_request_rejects_noncanonical_policy(tmp_path: Path) -> None:
-    scenario_path = _canonical_scenario(tmp_path / "release.yaml")
+def test_build_release_request_rejects_noncanonical_policy(tmp_path: Path, canonical_release_configs: tuple[Path, Path]) -> None:
+    scenario_path, environment_path = canonical_release_configs
     scenario = yaml.safe_load(scenario_path.read_text(encoding="utf-8"))
     scenario["release"]["profile"] = "different-profile"
     scenario_path.write_text(yaml.safe_dump(scenario), encoding="utf-8")
@@ -824,7 +772,7 @@ def test_build_release_request_rejects_noncanonical_policy(tmp_path: Path) -> No
             repo_root=NANOLAB_ROOT,
             nanofaas_root=NANOFAAS_ROOT,
             scenario_path=scenario_path,
-            environment_path=_canonical_environment(tmp_path / "environment.yaml"),
+            environment_path=environment_path,
             release_config_path=None,
             run_dir=tmp_path / "run",
             performance_root=tmp_path / "performance",
@@ -836,7 +784,9 @@ def test_build_release_request_rejects_credentials_inside_either_repository(
     repository: str,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    canonical_release_configs: tuple[Path, Path],
 ) -> None:
+    scenario_path, environment_path = canonical_release_configs
     tool_root = tmp_path / "nanolab"
     source_root = tmp_path / "nanofaas"
     tool_root.mkdir()
@@ -868,8 +818,8 @@ def test_build_release_request_rejects_credentials_inside_either_repository(
         release_plan.build_release_request(
             repo_root=tool_root,
             nanofaas_root=source_root,
-            scenario_path=_canonical_scenario(tmp_path / "release.yaml"),
-            environment_path=_canonical_environment(tmp_path / "environment.yaml"),
+            scenario_path=scenario_path,
+            environment_path=environment_path,
             release_config_path=credential_path,
             run_dir=tmp_path / "run",
             performance_root=tmp_path / "performance",
@@ -880,7 +830,9 @@ def test_build_release_request_rejects_credentials_inside_either_repository(
 def test_build_release_request_rejects_dirty_source(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    canonical_release_configs: tuple[Path, Path],
 ) -> None:
+    scenario_path, environment_path = canonical_release_configs
     monkeypatch.setattr(
         release_plan,
         "git_state",
@@ -891,8 +843,8 @@ def test_build_release_request_rejects_dirty_source(
         release_plan.build_release_request(
             repo_root=NANOLAB_ROOT,
             nanofaas_root=NANOFAAS_ROOT,
-            scenario_path=_canonical_scenario(tmp_path / "release.yaml"),
-            environment_path=_canonical_environment(tmp_path / "environment.yaml"),
+            scenario_path=scenario_path,
+            environment_path=environment_path,
             release_config_path=None,
             run_dir=tmp_path / "run",
             performance_root=tmp_path / "performance",

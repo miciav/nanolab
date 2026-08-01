@@ -22,6 +22,8 @@ from nanolab.release.run import GitState
 from nanolab.release.versioning import read_project_version
 from nanolab.workspace.paths import ToolPaths
 
+from ..conftest import RejectingProvider
+
 
 NANOFAAS_ROOT = Path(os.environ["NANOFAAS_ROOT"]).resolve()
 NANOLAB_ROOT = Path(__file__).resolve().parents[2]
@@ -280,16 +282,6 @@ def test_fresh_release_run_accepts_explicit_provision(
 # --- Generic `nanolab run <release scenario>` surface (Sonata release) ---------
 
 
-class _FakeProvider:
-    """Stands in for the Azure provider; the CLI must never need a live one."""
-
-    def __getattr__(self, name: str):
-        def reject(*_args, **_kwargs):
-            raise AssertionError(f"CLI reached the cloud provider: {name}")
-
-        return reject
-
-
 class _SpyWorkflow(SonataWorkflow):
     """A real Sonata workflow that records how the CLI invoked run()."""
 
@@ -314,15 +306,19 @@ class _Phase(Task[None]):
 
 
 @pytest.fixture
-def release_cli_harness(monkeypatch, tmp_path: Path, canonical_release_configs, nanofaas_root):
+def release_cli_harness(
+    monkeypatch,
+    tmp_path: Path,
+    canonical_release_configs: tuple[Path, Path],
+    nanofaas_root: Path,
+):
     """Drive `nanolab run <release scenario>` with no cloud and a one-phase DAG."""
     tool_root = tmp_path / "tool"
     tool_root.mkdir()
-    config_dir = tmp_path / "config"
-    scenario_path, environment_path = canonical_release_configs(config_dir)
+    scenario_path, environment_path = canonical_release_configs
     secrets = tmp_path / "secrets"
     secrets.mkdir()
-    release_config = config_dir / "release-config.yaml"
+    release_config = tmp_path / "release-config.yaml"
     release_config.write_text(
         yaml.safe_dump(
             {
@@ -351,7 +347,7 @@ def release_cli_harness(monkeypatch, tmp_path: Path, canonical_release_configs, 
         release_plan, "git_state", lambda _root: GitState(commit="a" * 40, clean=True)
     )
     monkeypatch.setattr(
-        product_module, "vm_provider_for_environment", lambda *_args, **_kwargs: _FakeProvider()
+        product_module, "vm_provider_for_environment", lambda *_args, **_kwargs: RejectingProvider()
     )
 
     def build(request, *, provider=None):

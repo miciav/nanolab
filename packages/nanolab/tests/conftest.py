@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 from contextlib import contextmanager
 import os
 from pathlib import Path
@@ -43,9 +42,38 @@ def fake_sink() -> FakeSink:
     return FakeSink()
 
 
-def write_canonical_release_environment(path: Path) -> Path:
-    """The one Azure environment `validate_release_environment` accepts."""
-    path.write_text(
+@pytest.fixture
+def canonical_release_configs(tmp_path: Path, nanofaas_root: Path) -> tuple[Path, Path]:
+    """The (scenario, environment) pair the release preflight accepts, in tmp_path.
+
+    Every value here is pinned by `validate_release_environment` and by the
+    canonical policy check in `build_release_request`, so it lives in one place.
+    """
+    scenario = tmp_path / "release.yaml"
+    scenario.write_text(
+        yaml.safe_dump(
+            {
+                "workflow": "release",
+                "functions": ["word-stats-java"],
+                "release": {
+                    "version": f"v{read_project_version(nanofaas_root)}",
+                    "profile": "azure-d8s-v5+d2s-v5-amd64-native-loadtest-v1",
+                    "max_parallelism": 4,
+                    "benchmark_runs": 3,
+                    "benchmark_scenario": "loadtest.yaml",
+                    "throughput_max_loss_percent": 10,
+                    "p95_max_increase_percent": 15,
+                    "error_rate_max": 0.30,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "loadtest.yaml").write_text(
+        "workflow: loadtest\nfunctions: [word-stats-java]\n", encoding="utf-8"
+    )
+    environment = tmp_path / "environment.yaml"
+    environment.write_text(
         yaml.safe_dump(
             {
                 "provider": "azure",
@@ -68,52 +96,21 @@ def write_canonical_release_environment(path: Path) -> Path:
         ),
         encoding="utf-8",
     )
-    return path
+    return scenario, environment
 
 
-def write_canonical_release_scenario(path: Path, *, nanofaas_root: Path) -> Path:
-    """A release scenario matching the canonical performance policy, plus its benchmark."""
-    path.write_text(
-        yaml.safe_dump(
-            {
-                "workflow": "release",
-                "functions": ["word-stats-java"],
-                "release": {
-                    "version": f"v{read_project_version(nanofaas_root)}",
-                    "profile": "azure-d8s-v5+d2s-v5-amd64-native-loadtest-v1",
-                    "max_parallelism": 4,
-                    "benchmark_runs": 3,
-                    "benchmark_scenario": "loadtest.yaml",
-                    "throughput_max_loss_percent": 10,
-                    "p95_max_increase_percent": 15,
-                    "error_rate_max": 0.30,
-                },
-            }
-        ),
-        encoding="utf-8",
-    )
-    (path.parent / "loadtest.yaml").write_text(
-        "workflow: loadtest\nfunctions: [word-stats-java]\n",
-        encoding="utf-8",
-    )
-    return path
+class RejectingProvider:
+    """A VM provider whose every method fails: proves a path stayed offline."""
 
+    def __init__(self) -> None:
+        self.calls: list[str] = []
 
-@pytest.fixture
-def canonical_release_configs(
-    tmp_path: Path, nanofaas_root: Path
-) -> Callable[[Path], tuple[Path, Path]]:
-    """Write (scenario, environment) canonical release configuration into a directory."""
+    def __getattr__(self, name: str):
+        def reject(*_args, **_kwargs):
+            self.calls.append(name)
+            raise AssertionError(f"cloud provider called: {name}")
 
-    def write(directory: Path | None = None) -> tuple[Path, Path]:
-        target = directory or tmp_path
-        target.mkdir(parents=True, exist_ok=True)
-        return (
-            write_canonical_release_scenario(target / "release.yaml", nanofaas_root=nanofaas_root),
-            write_canonical_release_environment(target / "environment.yaml"),
-        )
-
-    return write
+        return reject
 
 
 @pytest.fixture(scope="session")

@@ -121,8 +121,9 @@ def test_generated_json_roundtrips_through_buildx_print(tmp_path: Path) -> None:
             pytest.skip("Docker Buildx is absent")
         pytest.fail(f"Docker Buildx version check failed:\n{detail}")
 
+    plan = _plan()
     bake_file = tmp_path / "docker-bake.json"
-    bake_file.write_text(render_bake_json(_plan()), encoding="utf-8")
+    bake_file.write_text(render_bake_json(plan), encoding="utf-8")
     rendered = subprocess.run(
         [docker, "buildx", "bake", "--file", str(bake_file), "--print"],
         cwd=NANOFAAS_ROOT,
@@ -132,4 +133,4 @@ def test_generated_json_roundtrips_through_buildx_print(tmp_path: Path) -> None:
     )
 
     assert rendered.returncode == 0, rendered.stderr
-    assert len(json.loads(rendered.stdout)["target"]) == len(_plan().bake_cells)
+    assert len(json.loads(rendered.stdout)["target"]) == len(plan.bake_cells)

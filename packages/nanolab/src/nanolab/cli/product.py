@@ -21,7 +21,7 @@ from nanolab.config import EnvironmentConfig, ScenarioConfig
 from nanolab.cli.execution import build_role_bindings, resolve_loadtest_urls
 from nanolab.cli.progress import ConsoleProgressSink
 from nanolab.cli.provisioning import provision_environment
-from nanolab.cli.vm_provider import vm_provider_for_environment, vm_request_for_role
+from nanolab.cli.vm_provider import vm_provider_for_environment
 from nanolab.plans.offload import build_offload_plan
 from nanolab.plans.offload_loadtest import build_offload_loadtest_plan, format_offload_summary
 from nanolab.plans.cli import build_cli_plan
@@ -31,13 +31,13 @@ from nanolab.plans.release import (
     build_release_request,
     build_release_workflow,
     release_journal_config,
+    release_verifiers,
 )
 from nanolab.release.environment import (
     ReleaseRunInProgressError,
     release_lock_path,
     release_run_lock,
 )
-from nanolab.release.evidence import release_evidence_verifiers
 from nanolab.plans.validate import build_validate_plan
 from nanolab.workspace.paths import default_tool_paths, discover_tool_root
 
@@ -80,7 +80,6 @@ def _workflow(
     run_dir: Path | None = None,
     dry_run: bool = False,
     provision: bool = False,
-    release_config: Path | None = None,
 ):
     bindings, fetcher = build_role_bindings(environment)
     paths = default_tool_paths()
@@ -327,7 +326,14 @@ def install_product_commands(app: typer.Typer) -> None:
         ),
         control_plane_url: str | None = typer.Option(None, "--control-plane-url"),
         prometheus_url: str | None = typer.Option(None, "--prometheus-url"),
-        run_dir: Path | None = typer.Option(None, "--run-dir"),
+        run_dir: Path | None = typer.Option(
+            None,
+            "--run-dir",
+            help=(
+                "Where results are written. A release treats this as a root and "
+                "writes each run under releases/<version>/."
+            ),
+        ),
         release_config: Path | None = typer.Option(None, "--release-config", exists=True),
     ) -> None:
         scenario_config = _scenario(scenario)
@@ -386,25 +392,24 @@ def install_product_commands(app: typer.Typer) -> None:
             # legacy bind only if that execution layer itself stops routing
             # through workflow_log.
             with bind_workflow_sink(sink), bind_sonata_sink(sink):
-                provisioning = (
-                    provision_environment(
+                if _uses_legacy_provisioning(
+                    scenario_config, provision=provision, cli_provisioned=cli_provisioned
+                ):
+                    provisioning = provision_environment(
                         scenario_config,
                         environment_config,
                         repo_root=paths.nanofaas_root,
                         keep=keep,
                     )
-                    if _uses_legacy_provisioning(
-                        scenario_config,
-                        provision=provision,
-                        cli_provisioned=cli_provisioned,
-                    )
+                elif release_request is not None:
                     # A release owns its VMs inside the Sonata DAG; the outer
                     # context only holds the lock that keeps two coordinators off
                     # the same Azure VMs.
-                    else release_run_lock(release_lock_path(environment_config))
-                    if release
-                    else nullcontext()
-                )
+                    provisioning = release_run_lock(
+                        release_lock_path(release_request.environment)
+                    )
+                else:
+                    provisioning = nullcontext()
                 with provisioning:
                     if scenario_config.workflow == "loadtest":
                         control_plane_url, prometheus_url = resolve_loadtest_urls(
@@ -425,7 +430,6 @@ def install_product_commands(app: typer.Typer) -> None:
                                 prometheus_url=prometheus_url or "http://127.0.0.1:9090",
                                 run_dir=effective_run_dir,
                                 provision=provision,
-                                release_config=release_config,
                             ),
                         )
                     )
@@ -436,11 +440,8 @@ def install_product_commands(app: typer.Typer) -> None:
                             sonata_workflow.run(
                                 journal=release_journal,
                                 resume=resume,
-                                verifiers=release_evidence_verifiers(
-                                    release_provider,
-                                    vm_request_for_role(
-                                        release_request.environment, "stack", loadtest=True
-                                    ),
+                                verifiers=release_verifiers(
+                                    release_request, release_provider
                                 ),
                                 select=selection,
                             )
@@ -513,7 +514,14 @@ def install_product_commands(app: typer.Typer) -> None:
         ),
         control_plane_url: str | None = typer.Option(None, "--control-plane-url"),
         prometheus_url: str | None = typer.Option(None, "--prometheus-url"),
-        run_dir: Path | None = typer.Option(None, "--run-dir"),
+        run_dir: Path | None = typer.Option(
+            None,
+            "--run-dir",
+            help=(
+                "Where results are written. A release treats this as a root and "
+                "writes each run under releases/<version>/."
+            ),
+        ),
         release_config: Path | None = typer.Option(None, "--release-config", exists=True),
     ) -> None:
         scenario_config = _scenario(scenario)
@@ -546,7 +554,6 @@ def install_product_commands(app: typer.Typer) -> None:
                     prometheus_url=prometheus_url or "http://127.0.0.1:9090",
                     run_dir=run_dir,
                     dry_run=True,
-                    release_config=release_config,
                 ),
             )
         try:
