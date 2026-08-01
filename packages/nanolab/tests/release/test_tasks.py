@@ -6,6 +6,7 @@ from sonata_engine import Evidence, JournalConfig, TaskInputs, TaskOutcome, Work
 from workflow_tasks.tasks.models import TaskResult
 
 from nanolab.release.evidence import file_digest_verifier
+from nanolab.release import tasks as release_tasks
 from nanolab.release.state import ReleaseIdentity, digest_path
 from nanolab.release.tasks import (
     amd64_build_task,
@@ -231,6 +232,37 @@ def test_registry_push_rejects_duplicate_matrix_evidence(tmp_path: Path) -> None
 
     with pytest.raises(RuntimeError, match="does not cover the image matrix"):
         task.run(TaskInputs.empty())
+
+
+def test_benchmark_gate_tasks_form_a_digest_prerequisite_chain(tmp_path: Path) -> None:
+    common = {"identity": _identity(), "run_dir": tmp_path, "phase_inputs": {"v": 1}}
+    push = tmp_path / "local-registry-push.json"
+    runs = tuple(
+        release_tasks.benchmark_task(
+            index=index,
+            prerequisites=(push,),
+            work=lambda _inputs: (),
+            **common,
+        )
+        for index in range(1, 4)
+    )
+    aggregate = release_tasks.aggregate_benchmarks_task(
+        prerequisites=tuple(task.receipt for task in runs),
+        work=lambda _inputs: (),
+        **common,
+    )
+    gate = release_tasks.regression_gate_task(
+        prerequisites=(aggregate.receipt,),
+        work=lambda _inputs: (),
+        **common,
+    )
+
+    assert [task.phase for task in runs] == ["benchmark-1", "benchmark-2", "benchmark-3"]
+    assert aggregate.phase == "aggregate"
+    assert gate.phase == "regression-gate"
+    assert aggregate.prerequisites == tuple(task.receipt for task in runs)
+    assert gate.prerequisites == (aggregate.receipt,)
+    assert len({task.reuse_key for task in (*runs, aggregate, gate)}) == 5
 
 
 def test_image_steps_capture_every_current_registry_digest() -> None:

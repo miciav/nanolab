@@ -8,12 +8,12 @@ workflow surface is always 12 top-level entries.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
 
 import yaml
-from sonata_engine import JournalConfig, Task, TaskInputs, TaskOutcome, Workflow
+from sonata_engine import JournalConfig, Workflow
 from sonata_tasks.archive import source_archive_resource
 from sonata_tasks.buildx import buildx_builder_resource
 from sonata_tasks.release_composites import (
@@ -27,10 +27,9 @@ from sonata_tasks.release_composites import (
     registry_push_composite,
     source_tests_composite,
 )
-from nanolab.plans.release_metrics import AggregateBenchmarks
+from nanolab.plans import loadtest as loadtest_plan
 from sonata_tasks.registry_tunnel import registry_tunnel_resource
 from workflow_tasks.execution.bindings import RoleBoundCommandTaskExecutor
-from workflow_tasks.loadtest.adapters import HttpPrometheusClient
 
 from nanolab.cli.execution import build_role_bindings
 from nanolab.cli.vm_provider import vm_provider_for_environment, vm_request_for_role
@@ -39,19 +38,23 @@ from nanolab.config.scenario import ScenarioConfig
 from nanolab.images.plan import DEFAULT_REGISTRY, ImagePlan, build_image_plan
 from nanolab.release.arm import build_arm64_image_plan
 from nanolab.release.environment import validate_release_environment
-from nanolab.release.metrics import (
-    PerformanceProfile,
-    RegressionDecision,
-    RegressionPolicy,
-    newest_comparable_record,
+from nanolab.release.benchmark import (
+    performance_profile,
+    regression_policy,
+    run_sonata_aggregate,
+    run_sonata_benchmark,
+    run_sonata_regression_gate,
 )
 from nanolab.release.publish import build_publish_plan
 from nanolab.release.resources import build_release_resources
 from nanolab.release.run import CredentialFiles, ReleaseSettings, git_state, source_test_commands
 from nanolab.release.state import ReleaseIdentity, digest_path
 from nanolab.release.tasks import (
+    aggregate_benchmarks_task,
     amd64_build_task,
+    benchmark_task,
     registry_push_task,
+    regression_gate_task,
     run_image_steps,
     run_source_steps,
     source_test_task,
@@ -228,15 +231,10 @@ def build_release_workflow(
     arm_req = vm_request_for_role(env, "arm-builder")
     bindings, fetcher = build_role_bindings(env, vm_provider=provider, repo_root=nanofaas)
     executor = RoleBoundCommandTaskExecutor(bindings)
-    # Runtime consumers resolve the real addresses from `infrastructure.endpoints`.
-    # Phase tasks still accept strings today; their migration consumes that value
-    # directly in the benchmark task added later in this plan.
     stack_host = "<release-stack>"
 
     remote_root = f"/home/azureuser/nanofaas-release/{request.version}"
     source_dir = f"{remote_root}/source"
-    control_plane_url = f"http://{stack_host}:30080"
-    prometheus_url = f"http://{stack_host}:30090"
 
     wf = Workflow(workflow_id=f"release-{request.version}")
 
@@ -336,50 +334,65 @@ def build_release_workflow(
     )
 
     # --- Phases 4-6: Benchmarks ---
-    from nanolab.config.scenario import ScenarioConfig
-    from nanolab.plans.loadtest import build_loadtest_plan
-
     benchmark_scenario = _read_yaml(request.settings.scenario)
     benchmark_config = ScenarioConfig.model_validate(benchmark_scenario)
-
+    benchmark_plan = replace(
+        request,
+        repo_root=Path(source_dir),
+        scenario=benchmark_config,
+        run_dir=versioned_release_run_dir(request.run_dir, identity.prepared_version),
+    )
     benchmark_runs = []
     for i in range(1, request.settings.benchmark_runs + 1):
-        bench_wf = build_loadtest_plan(
-            benchmark_config,
-            env,
-            bindings,
-            control_plane_url=control_plane_url,
-            prometheus_client=HttpPrometheusClient(prometheus_url),
-            run_dir=request.run_dir / f"run-{i}",
-            fetcher=fetcher,
-            repo_root=Path(source_dir),
+        benchmark_runs.append(
+            benchmark_task(
+                index=i,
+                identity=identity,
+                run_dir=request.run_dir,
+                phase_inputs={
+                    "run": i,
+                    "scenario": digest_path(request.settings.scenario),
+                    "images": release_images,
+                },
+                prerequisites=(registry_push.receipt,),
+                work=lambda inputs, index=i: (
+                    run_sonata_benchmark(
+                        benchmark_plan,
+                        index,
+                        loadtest_plan.build_loadtest_plan,
+                        bindings,
+                        fetcher,
+                        inputs.resource(infrastructure.endpoints),
+                        registry_push.receipt,
+                    ),
+                ),
+            )
         )
-        benchmark_runs.append(bench_wf)
 
     # --- Phase 7: Aggregate ---
-    aggregate = AggregateBenchmarks(
+    aggregate = aggregate_benchmarks_task(
+        identity=identity,
         run_dir=request.run_dir,
-        benchmark_count=request.settings.benchmark_runs,
-        profile=PerformanceProfile(
-            name=request.settings.profile,
-            provider="azure",
-            stack_vm=env.azure.vm_size if env.azure else "unknown",
-            loadgen_vm=env.azure.loadgen_vm_size if env.azure else "unknown",
-            architecture="amd64",
-            flavor="native",
-            scenario=request.settings.scenario_name,
+        phase_inputs={
+            "runs": request.settings.benchmark_runs,
+            "profile": asdict(performance_profile(benchmark_plan)),
+        },
+        prerequisites=tuple(task.receipt for task in benchmark_runs),
+        work=lambda _inputs: (
+            run_sonata_aggregate(
+                benchmark_plan, tuple(task.receipt for task in benchmark_runs)
+            ),
         ),
     )
 
     # --- Phase 8: Regression Gate ---
-    reg_gate = _RegressionGate(
+    reg_gate = regression_gate_task(
+        identity=identity,
         run_dir=request.run_dir,
-        performance_root=request.performance_root,
-        version=request.version,
-        policy=RegressionPolicy(
-            throughput_max_loss_percent=request.settings.throughput_max_loss_percent,
-            p95_max_increase_percent=request.settings.p95_max_increase_percent,
-            error_rate_max=request.settings.error_rate_max,
+        phase_inputs={"policy": asdict(regression_policy(benchmark_plan))},
+        prerequisites=(aggregate.receipt,),
+        work=lambda _inputs: (
+            run_sonata_regression_gate(benchmark_plan, aggregate.receipt),
         ),
     )
 
@@ -469,9 +482,9 @@ def build_release_workflow(
         amd64_build, requires=(infrastructure.stack, amd64_builder)
     )
     wf.add(registry_push, requires=(infrastructure.stack,))  # pyright: ignore[reportArgumentType]
-    for _i, bw in enumerate(benchmark_runs):
+    for benchmark in benchmark_runs:
         wf.add(  # pyright: ignore[reportArgumentType]
-            _SubWorkflowTask(bw),
+            benchmark,
             requires=(
                 infrastructure.stack,
                 infrastructure.loadgen,
@@ -512,75 +525,3 @@ def _release_source_commit(repo_root: Path, requested_version: str) -> str:
             f"the committed nanoFaaS project version {prepared}"
         )
     return source.commit
-
-
-@dataclass
-class _SubWorkflowTask(Task[None]):
-    """Run a sub-workflow as a single task node."""
-
-    workflow: Workflow
-    title: str = ""
-
-    def __post_init__(self) -> None:
-        if not self.title:
-            self.title = f"Run {self.workflow.workflow_id}"
-
-    def run(self, inputs: TaskInputs) -> TaskOutcome[None]:
-        self.workflow.run()
-        return TaskOutcome(value=None)
-
-
-@dataclass
-class _RegressionGate(Task[RegressionDecision]):
-    """Resolve baseline at runtime and evaluate the regression gate."""
-
-    run_dir: Path
-    performance_root: Path
-    version: str
-    policy: RegressionPolicy
-    title: str = "Evaluate regression gate"
-
-    def run(self, inputs: TaskInputs) -> TaskOutcome[RegressionDecision]:
-        import json
-
-        from nanolab.release.metrics import (
-            PerformanceAggregate,
-            evaluate_regression,
-        )
-
-        # Read the aggregate produced by the previous phase
-        agg_path = self.run_dir / "aggregate.json"
-        if not agg_path.is_file():
-            raise RuntimeError(f"aggregate not found: {agg_path}")
-        payload = json.loads(agg_path.read_text(encoding="utf-8"))
-        aggregate = PerformanceAggregate(
-            profile=PerformanceProfile(**payload["profile"]),
-            run_count=int(payload["run_count"]),
-            metrics={k: float(v) for k, v in payload["metrics"].items()},
-        )
-
-        # Resolve baseline from history
-        records_dir = self.performance_root / "releases"
-        records = []
-        if records_dir.is_dir():
-            for path in sorted(records_dir.glob("*.json")):
-                if path.stem != self.version:
-                    records.append(json.loads(path.read_text(encoding="utf-8")))
-        baseline = newest_comparable_record(tuple(records), aggregate.profile)
-
-        baseline_agg = None
-        if baseline is not None:
-            baseline_agg = PerformanceAggregate(
-                profile=PerformanceProfile(**baseline["profile"]),
-                run_count=int(baseline["runCount"]),
-                metrics={k: float(v) for k, v in baseline["aggregates"].items()},
-            )
-
-        decision = evaluate_regression(
-            aggregate,
-            baseline_agg,
-            self.policy,
-            k6_passed=True,
-            autoscaling_passed=True,
-        )
-        return TaskOutcome(value=decision)

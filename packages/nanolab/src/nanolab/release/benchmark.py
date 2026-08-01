@@ -5,8 +5,13 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import asdict
 import json
+import os
 from pathlib import Path
+import shutil
+import stat
 from typing import TYPE_CHECKING, Any
+
+from sonata_engine import Evidence
 
 from nanolab.functions.catalog import resolve_function_definition
 from nanolab.release.metrics import (
@@ -22,6 +27,7 @@ from nanolab.release.state import ArtifactEvidence, digest_path
 from workflow_tasks.loadtest.adapters import HttpPrometheusClient
 
 if TYPE_CHECKING:
+    from nanolab.release.resources import ReleaseEndpoints
     from nanolab.release.run import Amd64ReleasePlan
     from nanolab.release.state import ReleaseJournal
 
@@ -254,3 +260,183 @@ def _evaluate_gate(
 
 performance_profile = _performance_profile
 regression_policy = _regression_policy
+
+
+def _receipt_artifacts(
+    path: Path, phase: str, expected_kind: str
+) -> tuple[ArtifactEvidence, ...]:
+    payload = _read_json_file(path)
+    evidence = payload.get("evidence")
+    if (
+        payload.get("phase") != phase
+        or not isinstance(evidence, list)
+        or any(
+            not isinstance(item, Mapping) or item.get("kind") != expected_kind
+            for item in evidence
+        )
+    ):
+        raise ValueError(f"invalid {phase} receipt")
+    return tuple(
+        ArtifactEvidence(
+            "remote" if expected_kind == "local-registry-digest" else "local",
+            str(item["reference"]),
+            str(item["digest"]),
+        )
+        for item in evidence
+    )
+
+
+def _file_evidence(artifact: ArtifactEvidence) -> Evidence:
+    return Evidence("file-digest", artifact.reference, artifact.digest)
+
+
+def run_sonata_benchmark(
+    plan: Amd64ReleasePlan,
+    index: int,
+    loadtest_builder: LoadtestBuilder,
+    bindings: object,
+    fetcher: object | None,
+    endpoints: ReleaseEndpoints,
+    registry_receipt: Path,
+) -> Evidence:
+    """Run one isolated load test against the digest-pinned release matrix."""
+    from nanolab.release.build import _registry_digest_map
+
+    digests = _registry_digest_map(
+        plan,
+        _receipt_artifacts(
+            registry_receipt, "local-registry-push", "local-registry-digest"
+        ),
+    )
+    if index < 1:
+        raise ValueError("benchmark index must be positive")
+    run_dir = _clean_local_run_dir(Path(plan.run_dir), index)
+    summary = run_dir / "summary.json"
+    role = plan.environment.target(
+        "loadgen" if "loadgen" in plan.environment.roles else "stack"
+    )
+    home = role.home or ("/root" if role.user == "root" else f"/home/{role.user}")
+    remote_run_dir = (
+        Path(home)
+        / "nanofaas-release"
+        / plan.version
+        / "benchmarks"
+        / f"run-{index}"
+    )
+    workflow = loadtest_builder(
+        plan.scenario,
+        plan.environment,
+        bindings,
+        control_plane_url=endpoints.control_plane,
+        prometheus_client=HttpPrometheusClient(endpoints.prometheus),
+        run_dir=run_dir,
+        remote_run_dir=remote_run_dir,
+        fetcher=fetcher,
+        repo_root=plan.repo_root,
+        prebuilt_control_plane_image=_pinned_native_image_from_evidence(
+            plan, "control-plane", digests
+        ),
+        prebuilt_function_images={
+            function: _pinned_native_image_from_evidence(
+                plan, _function_target_name(function), digests
+            )
+            for function in plan.scenario.functions
+        },
+    )
+    workflow.run()  # type: ignore[attr-defined]
+    if not summary.is_file():
+        raise RuntimeError(f"load-test summary was not written: {summary}")
+    return Evidence("file-digest", str(summary), digest_path(summary))
+
+
+def _clean_local_run_dir(run_root: Path, index: int) -> Path:
+    if (
+        not run_root.is_absolute()
+        or run_root.resolve(strict=True) != run_root
+        or ".." in run_root.parts
+    ):
+        raise ValueError("benchmark run root must be a canonical non-symlink directory")
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    parent_fd = os.open(run_root.anchor, flags)
+    try:
+        for component in run_root.parts[1:]:
+            child_fd = os.open(component, flags, dir_fd=parent_fd)
+            os.close(parent_fd)
+            parent_fd = child_fd
+        name = f"run-{index}"
+        try:
+            target = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            pass
+        else:
+            if not stat.S_ISDIR(target.st_mode):
+                raise ValueError("benchmark run directory must be a real directory")
+            shutil.rmtree(name, dir_fd=parent_fd)
+        os.mkdir(name, dir_fd=parent_fd)
+    finally:
+        os.close(parent_fd)
+    return run_root / name
+
+
+def _pinned_native_image_from_evidence(
+    plan: Amd64ReleasePlan, target_name: str, digests: Mapping[str, str]
+) -> str:
+    tagged = _native_image(plan, target_name)
+    repository, _ = tagged.rsplit(":", 1)
+    return f"{repository}@{digests[tagged]}"
+
+
+def run_sonata_aggregate(
+    plan: Amd64ReleasePlan,
+    benchmark_receipts: tuple[Path, ...],
+) -> Evidence:
+    summaries = []
+    for index, receipt in enumerate(benchmark_receipts, 1):
+        expected = plan.run_dir / f"run-{index}" / "summary.json"
+        artifacts = _receipt_artifacts(receipt, f"benchmark-{index}", "file-digest")
+        if len(artifacts) != 1 or artifacts[0].reference != str(expected):
+            raise ValueError(f"invalid benchmark-{index} evidence")
+        if digest_path(expected) != artifacts[0].digest:
+            raise RuntimeError(f"benchmark-{index} evidence changed")
+        summaries.append(_read_json_file(expected))
+    aggregate = aggregate_runs(_performance_profile(plan), tuple(summaries))
+    return _file_evidence(_write_json(plan.run_dir / "aggregate.json", asdict(aggregate)))
+
+
+def run_sonata_regression_gate(
+    plan: Amd64ReleasePlan,
+    aggregate_receipt: Path | None = None,
+) -> Evidence:
+    aggregate_path = plan.run_dir / "aggregate.json"
+    if aggregate_receipt is not None:
+        artifacts = _receipt_artifacts(aggregate_receipt, "aggregate", "file-digest")
+        if (
+            len(artifacts) != 1
+            or artifacts[0].reference != str(aggregate_path)
+            or artifacts[0].digest != digest_path(aggregate_path)
+        ):
+            raise RuntimeError("aggregate evidence changed")
+    aggregate = _aggregate_from_payload(_read_json_file(aggregate_path))
+    record = newest_comparable_record(
+        tuple(
+            item
+            for item in _release_records(plan.performance_root / "releases")
+            if str(item.get("version")).removeprefix("v")
+            != plan.version.removeprefix("v")
+        ),
+        aggregate.profile,
+    )
+    baseline = _aggregate_from_record(record) if record is not None else None
+    decision = evaluate_regression(
+        aggregate,
+        baseline,
+        _regression_policy(plan),
+        k6_passed=True,
+        autoscaling_passed=True,
+    )
+    evidence = _file_evidence(
+        _write_json(plan.run_dir / "regression-decision.json", asdict(decision))
+    )
+    if not decision.passed:
+        raise RuntimeError("release regression gate failed: " + "; ".join(decision.failures))
+    return evidence

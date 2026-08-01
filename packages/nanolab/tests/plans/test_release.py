@@ -250,11 +250,32 @@ def test_build_release_workflow_compiles_without_cloud_discovery(
         "Run source tests",
         "Build AMD64 images",
         "Push AMD64 images to local registry",
+        "Run release benchmark 1",
+        "Run release benchmark 2",
+        "Run release benchmark 3",
+        "Aggregate benchmarks",
+        "Evaluate regression gate",
     }
     assert all(
         task.receipt.parent == tmp_path / "run" / "releases" / CURRENT_VERSION
         for task in release_phases.values()
     )
+    benchmarks = tuple(
+        release_phases[f"Run release benchmark {index}"] for index in range(1, 4)
+    )
+    push = release_phases["Push AMD64 images to local registry"]
+    aggregate = release_phases["Aggregate benchmarks"]
+    gate = release_phases["Evaluate regression gate"]
+    assert all(task.prerequisites == (push.receipt,) for task in benchmarks)
+    assert aggregate.prerequisites == tuple(task.receipt for task in benchmarks)
+    assert gate.prerequisites == (aggregate.receipt,)
+
+    benchmark_slice = workflow.compile(select=Selection(only="run-release-benchmark-1"))
+    benchmark_titles = [task.task.title for task in benchmark_slice.tasks]
+    assert "Acquire release stack VM" in benchmark_titles
+    assert "Acquire release loadgen VM" in benchmark_titles
+    assert "Acquire release endpoints" in benchmark_titles
+    assert "Acquire release ARM builder VM" not in benchmark_titles
 
     titles = [task.task.title for task in compiled.tasks]
     assert titles.index("Acquire release stack VM") < titles.index(

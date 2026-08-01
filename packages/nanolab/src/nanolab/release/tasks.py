@@ -111,6 +111,22 @@ def registry_push_task(**kwargs: Any) -> ReleasePhaseTask:
     )
 
 
+def benchmark_task(index: int, **kwargs: Any) -> ReleasePhaseTask:
+    return ReleasePhaseTask(
+        phase=f"benchmark-{index}", title=f"Run release benchmark {index}", **kwargs
+    )
+
+
+def aggregate_benchmarks_task(**kwargs: Any) -> ReleasePhaseTask:
+    return ReleasePhaseTask(phase="aggregate", title="Aggregate benchmarks", **kwargs)
+
+
+def regression_gate_task(**kwargs: Any) -> ReleasePhaseTask:
+    return ReleasePhaseTask(
+        phase="regression-gate", title="Evaluate regression gate", **kwargs
+    )
+
+
 def run_source_steps(steps: Task[Any], inputs: TaskInputs) -> tuple[Evidence, ...]:
     _run_steps(steps, inputs)
     return ()
