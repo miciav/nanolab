@@ -38,8 +38,9 @@ def test_bake_json_is_deterministic_and_has_expected_groups() -> None:
         "docker-arm64",
         "docker-all",
     ]
-    assert len(document["group"]["docker-amd64"]["targets"]) == 21
-    assert len(document["group"]["docker-arm64"]["targets"]) == 21
+    bake_per_arch = len(plan.bake_cells) // 2
+    assert len(document["group"]["docker-amd64"]["targets"]) == bake_per_arch
+    assert len(document["group"]["docker-arm64"]["targets"]) == bake_per_arch
     assert document["group"]["docker-all"]["targets"] == (
         document["group"]["docker-amd64"]["targets"]
         + document["group"]["docker-arm64"]["targets"]
@@ -48,11 +49,12 @@ def test_bake_json_is_deterministic_and_has_expected_groups() -> None:
 
 
 def test_bake_targets_have_unique_names_tags_and_single_platforms() -> None:
-    document = render_bake(_plan())
+    plan = _plan()
+    document = render_bake(plan)
     targets = document["target"]
     tags = [target["tags"][0] for target in targets.values()]
 
-    assert len(targets) == 42
+    assert len(targets) == len(plan.bake_cells)
     assert len(targets) == len(set(targets))
     assert len(tags) == len(set(tags))
     assert all(len(target["tags"]) == 1 for target in targets.values())
@@ -130,4 +132,4 @@ def test_generated_json_roundtrips_through_buildx_print(tmp_path: Path) -> None:
     )
 
     assert rendered.returncode == 0, rendered.stderr
-    assert len(json.loads(rendered.stdout)["target"]) == 42
+    assert len(json.loads(rendered.stdout)["target"]) == len(_plan().bake_cells)

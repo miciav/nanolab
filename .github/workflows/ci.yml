@@ -23,10 +23,13 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: miciav/nanofaas
-          # nanofaas main at "Prepare release v0.17.1". Carries the
-          # deploymentObjects field the control plane now reports, and the 0.17.1
-          # version bump — which the release tests read rather than assume.
-          ref: ef80fd3b67e9f858f18e1868955ac8931ad43c03
+          # nanofaas feat/spring-boot-4.1 at "Refresh GitNexus index metadata",
+          # the checkout release work is developed against: Java 25 / GraalVM
+          # 25.2.4, unified Java native builds, and the java-figlet,
+          # python-mlimage and java-lite targets the image matrix now expands.
+          # Tests read the version and the matrix from this checkout rather than
+          # assuming them, so moving the pin needs no test edits.
+          ref: f18f1be61491011224ed660eec142418ac9e3e26
           path: .nanofaas-source
           token: ${{ secrets.NANOFAAS_CHECKOUT_TOKEN }}
 

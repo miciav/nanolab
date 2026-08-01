@@ -211,13 +211,13 @@ def test_build_specs_use_one_bake_group_per_arch_and_verify_all_cells(
     ]
     assert all("--load" in spec.argv for spec in bake_specs)
     verification = next(spec for spec in specs if spec.task_id == "images.verify")
-    assert verification.summary == "Verify 52 logical image digests"
+    assert verification.summary == f"Verify {len(plan.cells)} logical image digests"
     assert verification.argv[:3] == (
         "docker",
         "image",
         "inspect",
     )
-    assert len(verification.argv[4:]) == 52
+    assert len(verification.argv[4:]) == len(plan.cells)
 
 
 def test_images_build_dry_run_renders_build_without_execution(tmp_path: Path) -> None:

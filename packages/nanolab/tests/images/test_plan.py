@@ -36,8 +36,33 @@ def test_plan_contains_platform_and_every_discovered_function() -> None:
     assert "tool-metrics-echo" not in plan.target_names
 
 
-def test_plan_expands_to_exactly_52_cells() -> None:
-    assert len(_plan().cells) == 52
+def _spring_targets() -> set[str]:
+    """Platform Spring apps plus every full-Java function in the live catalog."""
+    return {"control-plane", "java-warm-echo"} | {
+        _function_image_name(function.runtime, function.family)
+        for function in list_functions()
+        if function.runtime == "java" and function.example_dir is not None
+    }
+
+
+def _java_lite_targets() -> set[str]:
+    return {
+        _function_image_name(function.runtime, function.family)
+        for function in list_functions()
+        if function.runtime == "java-lite" and function.example_dir is not None
+    }
+
+
+def test_plan_expands_every_target_across_both_architectures() -> None:
+    """The catalog grows, so assert the expansion rule rather than a cell count."""
+    plan = _plan()
+    cells = [(cell.target.name, cell.architecture, cell.flavor) for cell in plan.cells]
+
+    assert len(cells) == len(set(cells))
+    amd64 = {(name, flavor) for name, arch, flavor in cells if arch == "amd64"}
+    arm64 = {(name, flavor) for name, arch, flavor in cells if arch == "arm64"}
+    assert amd64 == arm64
+    assert {target.name for target in plan.targets} == {name for name, _ in amd64}
 
 
 def test_runtime_flavors_are_expanded_by_build_capability() -> None:
@@ -47,18 +72,8 @@ def test_runtime_flavors_are_expanded_by_build_capability() -> None:
         for target in plan.targets
     }
 
-    spring_targets = {
-        "control-plane",
-        "java-warm-echo",
-        "java-word-stats",
-        "java-json-transform",
-        "java-roman-numeral",
-    }
-    java_lite_targets = {
-        "java-lite-word-stats",
-        "java-lite-json-transform",
-        "java-lite-roman-numeral",
-    }
+    spring_targets = _spring_targets()
+    java_lite_targets = _java_lite_targets()
     assert {name: flavors_by_target[name] for name in spring_targets} == {
         name: {"jvm", "native"} for name in spring_targets
     }
@@ -118,11 +133,11 @@ def test_each_discovered_function_dockerfile_maps_to_one_target() -> None:
     assert len(mapped) == len(function_dockerfiles)
 
 
-def test_plan_partitions_into_42_bake_and_10_gradle_cells() -> None:
+def test_plan_partitions_cells_into_bake_and_gradle_without_loss() -> None:
     plan = _plan()
 
-    assert len(plan.bake_cells) == 42
-    assert len(plan.gradle_cells) == 10
+    assert len(plan.bake_cells) + len(plan.gradle_cells) == len(plan.cells)
+    assert set(plan.bake_cells).isdisjoint(plan.gradle_cells)
     assert {cell.build_kind for cell in plan.bake_cells} == {"bake"}
     assert {cell.build_kind for cell in plan.gradle_cells} == {"gradle"}
 
@@ -183,14 +198,7 @@ def test_every_spring_native_arm64_cell_overrides_builder_and_run_image() -> Non
         if cell.architecture == "arm64"
     ]
 
-    assert len(cells) == 5
-    assert {cell.target.name for cell in cells} == {
-        "control-plane",
-        "java-warm-echo",
-        "java-word-stats",
-        "java-json-transform",
-        "java-roman-numeral",
-    }
+    assert {cell.target.name for cell in cells} == _spring_targets()
     for cell in cells:
         assert "-PimageBuilder=dashaun/builder:tiny" in cell.gradle_command
         assert (
