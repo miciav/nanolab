@@ -146,8 +146,9 @@ def test_teardown_vm_not_found_is_ignored(mock_client_cls) -> None:
     assert result.return_code == 0
 
 
+@patch("workflow_tasks.vm.azure.AzureVmProvider._exists_in_azure", return_value=True)
 @patch("workflow_tasks.vm.azure.AzureClient")
-def test_ensure_running(mock_client_cls) -> None:
+def test_ensure_running(mock_client_cls, _exists) -> None:
     client_mock = MagicMock()
     mock_client_cls.return_value = client_mock
     provider = _make_provider()
@@ -157,8 +158,9 @@ def test_ensure_running(mock_client_cls) -> None:
     assert result.return_code == 0
 
 
+@patch("workflow_tasks.vm.azure.AzureVmProvider._exists_in_azure", return_value=True)
 @patch("workflow_tasks.vm.azure.AzureClient")
-def test_ensure_running_forwards_request_disk_as_gibibytes(mock_client_cls) -> None:
+def test_ensure_running_forwards_request_disk_as_gibibytes(mock_client_cls, _exists) -> None:
     client_mock = MagicMock()
     mock_client_cls.return_value = client_mock
     provider = _make_provider()
@@ -345,3 +347,34 @@ def test_transfer_from_no_ssh_key(mock_client_cls, mock_subproc) -> None:
         result = provider.transfer_from(req, source="/remote/file", destination=Path("/local"))
     assert result.return_code == 0
     assert "-i" not in result.command
+
+
+@patch("workflow_tasks.vm.azure.subprocess.run")
+@patch("workflow_tasks.vm.azure.AzureClient")
+def test_ensure_running_recreates_a_vm_deleted_outside_tofu(mock_client_cls, mock_run) -> None:
+    """The SDK reports "running" from the local tofu workspace, whose vm_state
+    output only echoes the desired_state variable, so a VM deleted out of band
+    looks running forever. Azure is the authority."""
+    client_mock = MagicMock()
+    mock_client_cls.return_value = client_mock
+    missing = MagicMock(returncode=1, stdout="", stderr="(ResourceNotFound)")
+    mock_run.return_value = missing
+
+    result = _make_provider().ensure_running(_make_request())
+
+    client_mock.launch.assert_called_once()
+    client_mock.ensure_running.assert_not_called()
+    assert result.return_code == 0
+
+
+@patch("workflow_tasks.vm.azure.subprocess.run")
+@patch("workflow_tasks.vm.azure.AzureClient")
+def test_ensure_running_keeps_the_fast_path_for_a_live_vm(mock_client_cls, mock_run) -> None:
+    client_mock = MagicMock()
+    mock_client_cls.return_value = client_mock
+    mock_run.return_value = MagicMock(returncode=0, stdout='"Succeeded"\n', stderr="")
+
+    _make_provider().ensure_running(_make_request())
+
+    client_mock.ensure_running.assert_called_once()
+    client_mock.launch.assert_not_called()

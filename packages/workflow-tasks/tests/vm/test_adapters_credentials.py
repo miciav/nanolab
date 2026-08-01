@@ -55,6 +55,8 @@ def test_azure_provider_forwards_open_ports_to_sdk(monkeypatch) -> None:
 
     provider = AzureVmProvider(repo_root=".")
     monkeypatch.setattr(provider, "_client", lambda request: _FakeClient())
+    # A live VM keeps the SDK fast path; recreation is covered in test_azure_provider.
+    monkeypatch.setattr(provider, "_exists_in_azure", lambda request: True)
 
     provider.ensure_running(
         VmRequest(

@@ -74,16 +74,46 @@ class AzureVmProvider:
             pass
         return _ok(["azure", "delete", name])
 
+    def _exists_in_azure(self, request: VmRequest) -> bool:
+        process = subprocess.run(
+            [
+                "az",
+                "vm",
+                "show",
+                "--resource-group",
+                request.azure_resource_group or "",
+                "--name",
+                self._vm_name(request),
+                "--query",
+                "provisioningState",
+                "-o",
+                "tsv",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        return process.returncode == 0
+
     def ensure_running(self, request: VmRequest) -> ShellExecutionResult:
         name = self._vm_name(request)
-        self._client(request).ensure_running(
-            name,
-            vm_size=request.azure_vm_size,
-            image_urn=request.azure_image_urn,
-            ssh_key_path=request.azure_ssh_key_path,
-            open_ports=request.azure_open_ports,
-            disk_size_gb=_disk_size_gb(request.disk),
-        )
+        client = self._client(request)
+        parameters = {
+            "vm_size": request.azure_vm_size,
+            "image_urn": request.azure_image_urn,
+            "ssh_key_path": request.azure_ssh_key_path,
+            "open_ports": request.azure_open_ports,
+            "disk_size_gb": _disk_size_gb(request.disk),
+        }
+        # The SDK decides "already running" from the local tofu workspace, whose
+        # `vm_state` output merely echoes the `desired_state` input variable. A VM
+        # deleted outside tofu -- a cleaned resource group, a console delete, an
+        # interrupted teardown -- therefore reports RUNNING forever and
+        # ensure_running returns without touching Azure. Ask Azure, which is the
+        # authority, and force a converging apply when the workspace is lying.
+        if self._exists_in_azure(request):
+            client.ensure_running(name, **parameters)
+        else:
+            client.launch(name, **parameters)
         return _ok(["azure", "ensure_running", name])
 
     def release_vm_facts(self, request: VmRequest) -> AzureVmFacts:
