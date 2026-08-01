@@ -196,6 +196,23 @@ class _ReleaseProvider(_ArchiveProvider):
         self.fact_overrides: dict[str, dict[str, object]] = {}
         self.restrictions: list[tuple[object, tuple[int, ...], tuple[str, ...]]] = []
 
+    def _resolve_registry(self, reference: str) -> str | None:
+        """Resolve a tag or a `repository@sha256:` pin, like a real registry does."""
+        stored = self.registry_digests.get(reference)
+        if stored is not None:
+            return stored
+        repository, separator, digest = reference.partition("@")
+        if not separator:
+            return None
+        return next(
+            (
+                value
+                for key, value in self.registry_digests.items()
+                if value == digest and key.rsplit(":", 1)[0] == repository
+            ),
+            None,
+        )
+
     def teardown(self, request: object) -> _TransferResult:
         self.events.append(f"teardown:{getattr(request, 'name', None)}")
         return _TransferResult()
@@ -279,8 +296,7 @@ class _ReleaseProvider(_ArchiveProvider):
             self.registry_digests[argv[-1]] = _registry_digest(argv[-1])
             return _TransferResult()
         if argv[:2] == ("skopeo", "inspect"):
-            reference = argv[-1].removeprefix("docker://")
-            digest = self.registry_digests.get(reference)
+            digest = self._resolve_registry(argv[-1].removeprefix("docker://"))
             return (
                 _TransferResult(stdout=f"{digest}\n")
                 if digest is not None
@@ -289,9 +305,10 @@ class _ReleaseProvider(_ArchiveProvider):
         if argv[:2] == ("mktemp", "-d"):
             return _TransferResult(stdout="/tmp/nanofaas-release-credentials.fake01\n")
         if argv[:2] == ("skopeo", "copy"):
-            source = argv[-2].removeprefix("docker://")
-            destination = argv[-1].removeprefix("docker://")
-            self.registry_digests[destination] = self.registry_digests[source]
+            digest = self._resolve_registry(argv[-2].removeprefix("docker://"))
+            if digest is None:
+                return _TransferResult(return_code=1)
+            self.registry_digests[argv[-1].removeprefix("docker://")] = digest
             return _TransferResult()
         if argv[:4] == ("docker", "buildx", "imagetools", "create"):
             tag = argv[argv.index("--tag") + 1]

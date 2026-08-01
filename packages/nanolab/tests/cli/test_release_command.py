@@ -160,6 +160,16 @@ def test_release_plan_uses_the_real_planner_without_cloud_or_secrets(
     monkeypatch.setattr(release_run, "provision_environment", reject_cloud)
     monkeypatch.setattr(release_run, "build_loadtest_plan", reject_cloud)
 
+    # The shipped example intentionally carries an RFC 5737 documentation CIDR,
+    # which preflight rejects as a placeholder; an operator supplies a real one.
+    environment = tmp_path / "azure-release.yaml"
+    environment.write_text(
+        (NANOLAB_ROOT / "environments/azure-release.yaml.example")
+        .read_text(encoding="utf-8")
+        .replace("203.0.113.0/24", "8.8.8.8/32"),
+        encoding="utf-8",
+    )
+
     result = CliRunner().invoke(
         app,
         [
@@ -167,7 +177,7 @@ def test_release_plan_uses_the_real_planner_without_cloud_or_secrets(
             "plan",
             CURRENT_VERSION,
             "--environment",
-            str(NANOLAB_ROOT / "environments/azure-release.yaml.example"),
+            str(environment),
             "--release-config",
             str(NANOLAB_ROOT / "release.yaml"),
             "--run-dir",
