@@ -37,7 +37,12 @@ jobs:
         uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
         with:
           distribution: 'temurin'
-          java-version: '21'
+          # Must track `javaVersion` in the pinned nanoFaaS gradle.properties.
+          # The Gradle toolchain compiles to that release, but the cli-container
+          # smoke test launches the control-plane jar with the ambient `java`
+          # (plans/_local_control_plane.argv), so a lower runtime here builds
+          # green and then dies with UnsupportedClassVersionError in one second.
+          java-version: '25'
           cache: 'gradle'
 
       - name: Install uv
