@@ -285,3 +285,39 @@ def test_demo_all_does_not_auto_include_new_discovered_functions() -> None:
     preset = resolve_function_preset("demo-all")
 
     assert "roman-numeral-java" not in {function.key for function in preset.functions}
+
+
+def test_catalog_discovers_from_an_explicit_root(tmp_path: Path) -> None:
+    """An explicit root makes discovery independent of NANOFAAS_ROOT."""
+    example = tmp_path / "functions" / "python" / "solo"
+    example.mkdir(parents=True)
+    (example / "function.yaml").write_text(
+        "name: solo\nruntime: python\nfamily: solo\n", encoding="utf-8"
+    )
+
+    keys = {function.key for function in list_functions(tmp_path)}
+
+    assert "solo-python" in keys
+
+
+def test_catalog_roots_do_not_leak_into_each_other(tmp_path: Path) -> None:
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    for root, family in ((first, "alpha"), (second, "beta")):
+        example = root / "functions" / "python" / family
+        example.mkdir(parents=True)
+        (example / "function.yaml").write_text(
+            f"name: {family}\nruntime: python\nfamily: {family}\n", encoding="utf-8"
+        )
+
+    first_keys = {function.key for function in list_functions(first)}
+    second_keys = {function.key for function in list_functions(second)}
+
+    assert "alpha-python" in first_keys and "alpha-python" not in second_keys
+    assert "beta-python" in second_keys and "beta-python" not in first_keys
+
+
+def test_catalog_default_root_is_the_configured_checkout(nanofaas_root: Path) -> None:
+    assert [function.key for function in list_functions()] == [
+        function.key for function in list_functions(nanofaas_root)
+    ]

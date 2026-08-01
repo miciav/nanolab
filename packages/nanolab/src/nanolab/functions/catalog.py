@@ -199,11 +199,11 @@ _FIXTURE_FUNCTIONS: tuple[FunctionDefinition, ...] = (
 )
 
 
-def _load_functions() -> tuple[FunctionDefinition, ...]:
+def _load_functions(root: Path | None = None) -> tuple[FunctionDefinition, ...]:
     paths = default_tool_paths()
     functions = (
         *_discover_example_functions(
-            paths.nanofaas_root / "functions",
+            (Path(root) if root is not None else paths.nanofaas_root) / "functions",
             paths.scenario_payloads_dir,
         ),
         *_FIXTURE_FUNCTIONS,
@@ -216,8 +216,8 @@ def _load_functions() -> tuple[FunctionDefinition, ...]:
     return functions
 
 
-def _function_index() -> dict[str, FunctionDefinition]:
-    return {function.key: function for function in _load_functions()}
+def _function_index(root: Path | None = None) -> dict[str, FunctionDefinition]:
+    return {function.key: function for function in _load_functions(root)}
 
 
 def _definition_from_index(
@@ -230,12 +230,14 @@ def _definition_from_index(
         raise ValueError(f"Unknown function: {key}") from exc
 
 
-def list_functions() -> list[FunctionDefinition]:
-    return list(_load_functions())
+def list_functions(root: Path | None = None) -> list[FunctionDefinition]:
+    return list(_load_functions(root))
 
 
-def resolve_function_definition(key: str) -> FunctionDefinition:
-    return _definition_from_index(_function_index(), key)
+def resolve_function_definition(
+    key: str, root: Path | None = None
+) -> FunctionDefinition:
+    return _definition_from_index(_function_index(root), key)
 
 
 def _resolve_preset(spec: FunctionPresetSpec) -> FunctionPreset:
