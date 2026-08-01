@@ -179,8 +179,12 @@ def test_plan_discovers_functions_under_the_given_root(tmp_path: Path) -> None:
 
     plan = build_image_plan(tmp_path, "v0.0.1", registry=REGISTRY)
 
-    assert "python-solo" in plan.target_names
-    assert not any(name.startswith("java-") for name in plan.target_names)
+    # control-plane, java-warm-echo and watchdog are hardcoded platform targets;
+    # everything else must come from the given root, so nothing from the real
+    # NANOFAAS_ROOT checkout may appear here.
+    assert plan.target_names == frozenset(
+        {"control-plane", "java-warm-echo", "watchdog", "python-solo"}
+    )
 ```
 
 - [ ] **Step 2: Run the test and verify it fails**
