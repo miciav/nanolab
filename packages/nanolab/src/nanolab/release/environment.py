@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
+import fcntl
+import hashlib
 import ipaddress
+import json
+import os
 import re
 from pathlib import Path
+import tempfile
 
 from nanolab.config import EnvironmentConfig
 from nanolab.config.environment import ExecutionRole
@@ -23,6 +30,45 @@ _STACK_NAME = "nanofaas-azure-release"
 _LOADGEN_NAME = "nanofaas-azure-release-loadgen"
 _ARM_NAME = "nanofaas-azure-release-arm"
 _URN_COMPONENT = re.compile(r"[A-Za-z0-9._-]+")
+
+
+class ReleaseRunInProgressError(RuntimeError):
+    """Another coordinator already holds the lock for these Azure release VMs."""
+
+
+def release_lock_path(environment: EnvironmentConfig) -> Path:
+    """One lock per Azure VM identity, independent of version and run directory."""
+    azure = environment.azure
+    assert azure is not None
+    identity = json.dumps(
+        (
+            azure.resource_group.casefold(),
+            (environment.target("stack").name or "").casefold(),
+            (environment.target("loadgen").name or "").casefold(),
+        ),
+        separators=(",", ":"),
+    )
+    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+    return Path(tempfile.gettempdir()) / f"nanofaas-release-locks-{os.getuid()}" / f"{digest}.lock"
+
+
+@contextmanager
+def release_run_lock(lock_path: Path) -> Iterator[None]:
+    lock_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    descriptor = os.open(
+        lock_path,
+        os.O_CREAT | os.O_RDWR | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+        0o600,
+    )
+    try:
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise ReleaseRunInProgressError("release run is already in progress") from error
+        yield
+    finally:
+        fcntl.flock(descriptor, fcntl.LOCK_UN)
+        os.close(descriptor)
 
 
 def validate_release_environment(
@@ -135,8 +181,8 @@ def secure_release_endpoints(
     stack_host = provider.connection_host(stack_request)  # type: ignore[attr-defined]
     sources = (azure.operator_source_cidr,)
     if loadgen_request is not None:
-        loadgen_address = ipaddress.ip_address(  # type: ignore[attr-defined]
-            provider.connection_host(loadgen_request)
+        loadgen_address = ipaddress.ip_address(
+            provider.connection_host(loadgen_request)  # type: ignore[attr-defined]
         )
         sources = tuple(
             dict.fromkeys((f"{loadgen_address}/{loadgen_address.max_prefixlen}", *sources))

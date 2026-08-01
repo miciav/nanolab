@@ -21,13 +21,23 @@ from nanolab.config import EnvironmentConfig, ScenarioConfig
 from nanolab.cli.execution import build_role_bindings, resolve_loadtest_urls
 from nanolab.cli.progress import ConsoleProgressSink
 from nanolab.cli.provisioning import provision_environment
-from nanolab.cli.vm_provider import vm_provider_for_environment
+from nanolab.cli.vm_provider import vm_provider_for_environment, vm_request_for_role
 from nanolab.plans.offload import build_offload_plan
 from nanolab.plans.offload_loadtest import build_offload_loadtest_plan, format_offload_summary
 from nanolab.plans.cli import build_cli_plan
 from nanolab.plans.loadtest import build_loadtest_plan
-from nanolab.plans.release import ReleaseRequest, build_release_workflow
-from nanolab.release.run import ReleaseSettings
+from nanolab.plans.release import (
+    ReleaseRequest,
+    build_release_request,
+    build_release_workflow,
+    release_journal_config,
+)
+from nanolab.release.environment import (
+    ReleaseRunInProgressError,
+    release_lock_path,
+    release_run_lock,
+)
+from nanolab.release.evidence import release_evidence_verifiers
 from nanolab.plans.validate import build_validate_plan
 from nanolab.workspace.paths import default_tool_paths, discover_tool_root
 
@@ -103,52 +113,6 @@ def _workflow(
             provision=provision,
             environment=environment,
         )
-    if scenario.workflow == "release":
-        assert scenario.release is not None
-        from nanolab.images.plan import build_image_plan, DEFAULT_REGISTRY
-
-        image_plan = build_image_plan(
-            paths.nanofaas_root,
-            scenario.release.version,
-            registry=DEFAULT_REGISTRY,
-            architectures=("amd64",),
-        )
-        settings = ReleaseSettings(
-            max_parallelism=scenario.release.max_parallelism,
-            scenario=Path("scenarios-v2") / scenario.release.benchmark_scenario,
-            scenario_name=scenario.release.benchmark_scenario,
-            benchmark_runs=scenario.release.benchmark_runs,
-            profile=scenario.release.profile,
-            throughput_max_loss_percent=scenario.release.throughput_max_loss_percent,
-            p95_max_increase_percent=scenario.release.p95_max_increase_percent,
-            error_rate_max=scenario.release.error_rate_max,
-        )
-        credentials = None
-        if release_config is not None:
-            from nanolab.release.run import CredentialFiles
-
-            config = yaml.safe_load(release_config.read_text(encoding="utf-8"))
-            if not isinstance(config, dict):
-                raise typer.BadParameter(f"invalid release config: {release_config}")
-            credentials = CredentialFiles(
-                ghcr_token=Path(str(config["ghcr_token_file"])),
-                cosign_key=Path(str(config["cosign_key_file"])),
-                cosign_password=Path(str(config.get("cosign_password_file", ""))),
-            )
-        request = ReleaseRequest(
-            repo_root=paths.tool_root,
-            version=scenario.release.version,
-            environment=environment,
-            scenario=scenario,
-            image_plan=image_plan,
-            settings=settings,
-            run_dir=run_dir or paths.runs_dir / "release" / "latest",
-            performance_root=paths.nanofaas_root / "docs" / "performance",
-            nanofaas_root=paths.nanofaas_root,
-            credentials=credentials,
-        )
-        provider = vm_provider_for_environment(environment, paths.tool_root)
-        return build_release_workflow(request, provider=provider)
     return build_loadtest_plan(
         scenario,
         environment,
@@ -160,6 +124,34 @@ def _workflow(
         repo_root=paths.nanofaas_root,
         tool_root=paths.tool_root,
     )
+
+
+def _release_request(
+    scenario_path: Path,
+    environment_path: Path | None,
+    release_config: Path | None,
+    run_dir: Path | None,
+    *,
+    executable: bool,
+) -> tuple[ReleaseRequest, object]:
+    """Validate every local release input offline, then bind the VM provider."""
+    if environment_path is None:
+        raise typer.BadParameter("release workflow requires --environment")
+    paths = default_tool_paths()
+    try:
+        request = build_release_request(
+            repo_root=paths.tool_root,
+            nanofaas_root=paths.nanofaas_root,
+            scenario_path=scenario_path,
+            environment_path=environment_path,
+            release_config_path=release_config,
+            run_dir=run_dir or paths.runs_dir / "release",
+            performance_root=paths.nanofaas_root / "docs" / "performance",
+            executable=executable,
+        )
+    except (ValueError, subprocess.CalledProcessError) as error:
+        raise typer.BadParameter(str(error)) from None
+    return request, vm_provider_for_environment(request.environment, request.repo_root)
 
 
 def _require_cli_endpoint(
@@ -340,10 +332,16 @@ def install_product_commands(app: typer.Typer) -> None:
     ) -> None:
         scenario_config = _scenario(scenario)
         environment_config = _environment(environment)
-        if scenario_config.workflow == "release":
-            raise typer.BadParameter("Sonata release migration is incomplete")
-        if resume:
+        release = scenario_config.workflow == "release"
+        if release and environment is None:
+            raise typer.BadParameter("release workflow requires --environment")
+        if resume and not release:
             raise typer.BadParameter("--resume is only supported for release workflows")
+        if release and not (provision or resume):
+            raise typer.BadParameter(
+                "a fresh release run requires --provision; pass --resume to continue an "
+                "existing release"
+            )
         if provision and environment_config.provider == "local":
             raise typer.BadParameter("--provision requires a non-local environment")
         _validate_cli_container_options(
@@ -355,11 +353,28 @@ def install_product_commands(app: typer.Typer) -> None:
         cli_provisioned = _cli_provisioned(scenario_config, provision=provision)
         paths = default_tool_paths()
         effective_run_dir = run_dir
-        if effective_run_dir is None:
-            if scenario_config.workflow == "release":
-                effective_run_dir = paths.runs_dir / "release" / "latest"
-            elif scenario_config.workflow in ("loadtest", "offload-loadtest"):
-                effective_run_dir = paths.runs_dir / "latest"
+        if effective_run_dir is None and scenario_config.workflow in (
+            "loadtest",
+            "offload-loadtest",
+        ):
+            effective_run_dir = paths.runs_dir / "latest"
+        release_request: ReleaseRequest | None = None
+        release_provider: object | None = None
+        release_journal = None
+        if release:
+            release_request, release_provider = _release_request(
+                scenario, environment, release_config, run_dir, executable=True
+            )
+            release_journal = release_journal_config(release_request)
+            if resume and not release_journal.path.is_file():
+                raise typer.BadParameter("--resume requires an existing release journal")
+            if not resume and release_journal.path.exists():
+                raise typer.BadParameter(
+                    "release journal already exists; pass --resume to verify and reuse it"
+                )
+            # Evidence, receipts and metadata all live beside the journal, one
+            # directory per prepared version -- never a reused `latest`.
+            effective_run_dir = release_journal.path.parent
         sink = ConsoleProgressSink()
         started_at = datetime.now(UTC)
         provenance = _git_provenance(paths.nanofaas_root)
@@ -383,33 +398,13 @@ def install_product_commands(app: typer.Typer) -> None:
                         provision=provision,
                         cli_provisioned=cli_provisioned,
                     )
+                    # A release owns its VMs inside the Sonata DAG; the outer
+                    # context only holds the lock that keeps two coordinators off
+                    # the same Azure VMs.
+                    else release_run_lock(release_lock_path(environment_config))
+                    if release
                     else nullcontext()
                 )
-                if scenario_config.workflow == "release" and scenario_config.release is not None:
-                    from nanolab.release.run import git_state
-                    from nanolab.release.versioning import (
-                        normalize_version,
-                        verify_version_consistency,
-                    )
-
-                    try:
-                        source = git_state(paths.nanofaas_root)
-                        requested_plain, _ = normalize_version(scenario_config.release.version)
-                        prepared = verify_version_consistency(paths.nanofaas_root)
-                    except (subprocess.CalledProcessError, ValueError) as error:
-                        raise typer.BadParameter(str(error)) from error
-                    if not source.clean:
-                        raise typer.BadParameter(
-                            "release requires a clean nanoFaaS Git tree; "
-                            "commit the prepared version changes first"
-                        )
-                    if prepared != requested_plain:
-                        raise typer.BadParameter(
-                            f"requested release {requested_plain} does not match "
-                            f"the committed nanoFaaS project version {prepared}; "
-                            f"run 'nanolab release prepare {requested_plain}' and "
-                            "commit the changes first"
-                        )
                 with provisioning:
                     if scenario_config.workflow == "loadtest":
                         control_plane_url, prometheus_url = resolve_loadtest_urls(
@@ -418,26 +413,39 @@ def install_product_commands(app: typer.Typer) -> None:
                             control_plane_url=control_plane_url,
                             prometheus_url=prometheus_url,
                         )
-                    if (
-                        scenario_config.workflow == "release"
-                        and environment_config.provider != "azure"
-                    ):
-                        raise typer.BadParameter("release workflow requires an Azure environment")
-                    sonata_workflow = cast(
-                        SonataWorkflow,
-                        _workflow(
-                            scenario_config,
-                            environment_config,
-                            control_plane_url=control_plane_url,
-                            prometheus_url=prometheus_url or "http://127.0.0.1:9090",
-                            run_dir=effective_run_dir,
-                            provision=provision,
-                            release_config=release_config,
-                        ),
+                    sonata_workflow = (
+                        build_release_workflow(release_request, provider=release_provider)
+                        if release_request is not None
+                        else cast(
+                            SonataWorkflow,
+                            _workflow(
+                                scenario_config,
+                                environment_config,
+                                control_plane_url=control_plane_url,
+                                prometheus_url=prometheus_url or "http://127.0.0.1:9090",
+                                run_dir=effective_run_dir,
+                                provision=provision,
+                                release_config=release_config,
+                            ),
+                        )
                     )
                     sonata_workflow.keep_infrastructure = keep
+                    selection = Selection(only=only, start=start, until=until)
                     try:
-                        sonata_workflow.run(select=Selection(only=only, start=start, until=until))
+                        if release_request is not None:
+                            sonata_workflow.run(
+                                journal=release_journal,
+                                resume=resume,
+                                verifiers=release_evidence_verifiers(
+                                    release_provider,
+                                    vm_request_for_role(
+                                        release_request.environment, "stack", loadtest=True
+                                    ),
+                                ),
+                                select=selection,
+                            )
+                        else:
+                            sonata_workflow.run(select=selection)
                         if (
                             scenario_config.workflow == "offload-loadtest"
                             and effective_run_dir is not None
@@ -445,6 +453,8 @@ def install_product_commands(app: typer.Typer) -> None:
                             _print_offload_summary(effective_run_dir)
                     except SelectionError as error:
                         raise typer.BadParameter(str(error)) from None
+        except ReleaseRunInProgressError as error:
+            raise typer.BadParameter(str(error)) from None
         except BaseException as exc:
             if effective_run_dir is not None:
                 try:
@@ -520,19 +530,25 @@ def install_product_commands(app: typer.Typer) -> None:
                 prometheus_url=prometheus_url,
                 dry_run=True,
             )
-        sonata_workflow = cast(
-            SonataWorkflow,
-            _workflow(
-                scenario_config,
-                environment_config,
-                control_plane_url=control_plane_url,
-                provision=provision,
-                prometheus_url=prometheus_url or "http://127.0.0.1:9090",
-                run_dir=run_dir,
-                dry_run=True,
-                release_config=release_config,
-            ),
-        )
+        if scenario_config.workflow == "release":
+            request, provider = _release_request(
+                scenario, environment, release_config, run_dir, executable=False
+            )
+            sonata_workflow = build_release_workflow(request, provider=provider)
+        else:
+            sonata_workflow = cast(
+                SonataWorkflow,
+                _workflow(
+                    scenario_config,
+                    environment_config,
+                    control_plane_url=control_plane_url,
+                    provision=provision,
+                    prometheus_url=prometheus_url or "http://127.0.0.1:9090",
+                    run_dir=run_dir,
+                    dry_run=True,
+                    release_config=release_config,
+                ),
+            )
         try:
             compiled = sonata_workflow.compile(
                 select=Selection(only=only, start=start, until=until)

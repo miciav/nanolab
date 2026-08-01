@@ -126,27 +126,21 @@ def test_run_renders_normalized_task_progress(monkeypatch) -> None:
     assert "[001.test-task] passed" in result.stdout
 
 
-def test_generic_release_run_fails_closed_before_provisioning_or_workflow(
+def test_generic_release_run_requires_an_environment_and_never_provisions(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     provision = MagicMock(side_effect=AssertionError("must not provision"))
     build = MagicMock(side_effect=AssertionError("must not build workflow"))
     monkeypatch.setattr(product_module, "provision_environment", provision)
-    monkeypatch.setattr(product_module, "_workflow", build)
+    monkeypatch.setattr(product_module, "build_release_workflow", build)
 
     result = CliRunner().invoke(
         app,
-        [
-            "run",
-            "scenarios-v2/release.yaml",
-            "--environment",
-            "environments/azure.yaml.example",
-            "--provision",
-        ],
+        ["run", "scenarios-v2/release.yaml", "--provision"],
     )
 
     assert result.exit_code != 0
-    assert "Sonata release migration is incomplete" in result.output
+    assert "release workflow requires --environment" in result.output
     assert "Traceback" not in result.output
     provision.assert_not_called()
     build.assert_not_called()

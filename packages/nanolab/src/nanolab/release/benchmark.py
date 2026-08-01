@@ -28,9 +28,14 @@ from nanolab.release.state import ArtifactEvidence, digest_path
 from workflow_tasks.loadtest.adapters import HttpPrometheusClient
 
 if TYPE_CHECKING:
+    from nanolab.plans.release import ReleaseRequest
     from nanolab.release.resources import ReleaseEndpoints
     from nanolab.release.run import Amd64ReleasePlan
     from nanolab.release.state import ReleaseJournal
+
+    # Benchmark phases read the same eight fields from the legacy procedural plan
+    # and from the Sonata request; neither may be imported at runtime (cycle).
+    type ReleasePlanLike = Amd64ReleasePlan | ReleaseRequest
 
 LoadtestBuilder = Callable[..., object]
 
@@ -56,7 +61,7 @@ def _write_json(*args: Any, **kwargs: Any) -> Any:
 
 
 def _run_benchmark(
-    plan: Amd64ReleasePlan,
+    plan: ReleasePlanLike,
     index: int,
     loadtest_builder: LoadtestBuilder,
     bindings: object,
@@ -102,7 +107,7 @@ def _run_benchmark(
     return (ArtifactEvidence("local", str(summary), digest_path(summary)),)
 
 
-def _native_image(plan: Amd64ReleasePlan, target_name: str) -> str:
+def _native_image(plan: ReleasePlanLike, target_name: str) -> str:
     for cell in plan.image_plan.cells:
         if cell.target.name == target_name and cell.flavor == "native":
             return cell.image
@@ -110,7 +115,7 @@ def _native_image(plan: Amd64ReleasePlan, target_name: str) -> str:
 
 
 def _pinned_native_image(
-    plan: Amd64ReleasePlan,
+    plan: ReleasePlanLike,
     target_name: str,
     provider: object,
     request: object,
@@ -131,7 +136,7 @@ def _function_target_name(function_key: str) -> str:
     return f"{prefix}-{function.family}"
 
 
-def _performance_profile(plan: Amd64ReleasePlan) -> PerformanceProfile:
+def _performance_profile(plan: ReleasePlanLike) -> PerformanceProfile:
     azure = plan.environment.azure
     assert azure is not None
     return PerformanceProfile(
@@ -145,7 +150,7 @@ def _performance_profile(plan: Amd64ReleasePlan) -> PerformanceProfile:
     )
 
 
-def _regression_policy(plan: Amd64ReleasePlan) -> RegressionPolicy:
+def _regression_policy(plan: ReleasePlanLike) -> RegressionPolicy:
     return RegressionPolicy(
         throughput_max_loss_percent=plan.settings.throughput_max_loss_percent,
         p95_max_increase_percent=plan.settings.p95_max_increase_percent,
@@ -212,7 +217,7 @@ def _read_json_file(path: Path) -> dict[str, Any]:
 
 
 def _write_aggregate(
-    plan: Amd64ReleasePlan,
+    plan: ReleasePlanLike,
     journal: ReleaseJournal,
 ) -> ArtifactEvidence:
     summaries = tuple(
@@ -228,7 +233,7 @@ def _write_aggregate(
 
 
 def _evaluate_gate(
-    plan: Amd64ReleasePlan,
+    plan: ReleasePlanLike,
     journal: ReleaseJournal,
 ) -> tuple[RegressionDecision, ArtifactEvidence]:
     aggregate = _aggregate_from_payload(
@@ -268,7 +273,7 @@ def _file_evidence(artifact: ArtifactEvidence) -> Evidence:
 
 
 def run_sonata_benchmark(
-    plan: Amd64ReleasePlan,
+    plan: ReleasePlanLike,
     index: int,
     loadtest_builder: LoadtestBuilder,
     bindings: object,
@@ -280,7 +285,7 @@ def run_sonata_benchmark(
     from nanolab.release.build import _registry_digest_map
 
     digests = _registry_digest_map(
-        plan,
+        plan.image_plan,
         _receipt_artifacts(registry_receipt, "local-registry-push", "local-registry-digest"),
     )
     if index < 1:
@@ -346,7 +351,7 @@ def _clean_local_run_dir(run_root: Path, index: int) -> Path:
 
 
 def _pinned_native_image_from_evidence(
-    plan: Amd64ReleasePlan, target_name: str, digests: Mapping[str, str]
+    plan: ReleasePlanLike, target_name: str, digests: Mapping[str, str]
 ) -> str:
     tagged = _native_image(plan, target_name)
     repository, _ = tagged.rsplit(":", 1)
@@ -354,7 +359,7 @@ def _pinned_native_image_from_evidence(
 
 
 def run_sonata_aggregate(
-    plan: Amd64ReleasePlan,
+    plan: ReleasePlanLike,
     benchmark_receipts: tuple[Path, ...],
 ) -> Evidence:
     summaries = []
@@ -371,7 +376,7 @@ def run_sonata_aggregate(
 
 
 def run_sonata_regression_gate(
-    plan: Amd64ReleasePlan,
+    plan: ReleasePlanLike,
     aggregate_receipt: Path | None = None,
 ) -> Evidence:
     aggregate_path = plan.run_dir / "aggregate.json"

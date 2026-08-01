@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Iterator, Mapping
-from contextlib import AbstractContextManager, contextmanager
+from collections.abc import Callable, Iterable, Mapping
+from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
-import fcntl
 import hashlib
 import json
 import math
@@ -72,6 +71,8 @@ from nanolab.release.benchmark import (  # noqa: F401 - compatibility re-exports
     _write_aggregate,
 )
 from nanolab.release.environment import (
+    release_lock_path,
+    release_run_lock,
     secure_release_endpoints,
     validate_release_environment,
     verify_release_vm_facts,
@@ -301,44 +302,10 @@ FailureInjector = Callable[[str], None]
 
 
 def _release_lock_path(plan: Amd64ReleasePlan) -> Path:
-    azure = plan.environment.azure
-    assert azure is not None
-    identity = json.dumps(
-        (
-            azure.resource_group.casefold(),
-            (plan.environment.target("stack").name or "").casefold(),
-            (plan.environment.target("loadgen").name or "").casefold(),
-        ),
-        separators=(",", ":"),
-    )
-    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()
-    return (
-            Path(tempfile.gettempdir())
-            / f"nanofaas-release-locks-{os.getuid()}"
-            / f"{digest}.lock"
-    )
+    return release_lock_path(plan.environment)
 
 
-@contextmanager
-def _release_run_lock(lock_path: Path) -> Iterator[None]:
-    lock_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    descriptor = os.open(
-        lock_path,
-        os.O_CREAT
-        | os.O_RDWR
-        | getattr(os, "O_CLOEXEC", 0)
-        | getattr(os, "O_NOFOLLOW", 0),
-        0o600,
-    )
-    try:
-        try:
-            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as error:
-            raise RuntimeError("release run is already in progress") from error
-        yield
-    finally:
-        fcntl.flock(descriptor, fcntl.LOCK_UN)
-        os.close(descriptor)
+_release_run_lock = release_run_lock
 
 
 def _assert_guarded_source(plan: Amd64ReleasePlan) -> None:
@@ -567,7 +534,7 @@ def _run_amd64_release_locked(
         )
         pending_benchmarks = tuple(phase for phase in benchmark_phases if phase not in reusable)
         if pending_benchmarks:
-            expected_registry_digests = _registry_digest_map(plan, registry_evidence)
+            expected_registry_digests = _registry_digest_map(plan.image_plan, registry_evidence)
             bindings, fetcher = build_role_bindings(
                 plan.environment,
                 vm_provider=provider,

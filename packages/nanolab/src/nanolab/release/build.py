@@ -915,11 +915,11 @@ def _inspect_registry_digest(provider: object, request: object, reference: str) 
 
 
 def _registry_digest_map(
-    plan: Amd64ReleasePlan,
+    image_plan: ImagePlan,
     artifacts: Iterable[ArtifactEvidence],
 ) -> dict[str, str]:
     by_reference = {artifact.reference: artifact.digest for artifact in artifacts}
-    expected = {f"docker://{cell.image}" for cell in plan.image_plan.cells}
+    expected = {f"docker://{cell.image}" for cell in image_plan.cells}
     if set(by_reference) != expected:
         raise ValueError("local-registry-push evidence does not cover the image matrix")
-    return {cell.image: by_reference[f"docker://{cell.image}"] for cell in plan.image_plan.cells}
+    return {cell.image: by_reference[f"docker://{cell.image}"] for cell in image_plan.cells}

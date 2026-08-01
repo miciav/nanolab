@@ -1,17 +1,26 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+import yaml
+from sonata_engine import Resource, Task, TaskInputs, TaskOutcome
+from sonata_engine import Workflow as SonataWorkflow
 from typer.testing import CliRunner
 
 from nanolab.app.main import app
 import nanolab.cli.release as release_cli
+import nanolab.cli.product as product_module
+import nanolab.plans.release as release_plan
 from nanolab.release import run as release_run
+from nanolab.release.environment import release_lock_path, release_run_lock
 from nanolab.release.metrics import RegressionDecision
 from nanolab.release.run import GitState
 from nanolab.release.versioning import read_project_version
+from nanolab.workspace.paths import ToolPaths
 
 
 NANOFAAS_ROOT = Path(os.environ["NANOFAAS_ROOT"]).resolve()
@@ -256,3 +265,258 @@ def test_fresh_release_run_accepts_explicit_provision(
 
     assert result.exit_code == 0, result.output
     assert calls == [(plan, False, False)]
+
+
+# --- Generic `nanolab run <release scenario>` surface (Sonata release) ---------
+
+
+class _FakeProvider:
+    """Stands in for the Azure provider; the CLI must never need a live one."""
+
+    def __getattr__(self, name: str):
+        def reject(*_args, **_kwargs):
+            raise AssertionError(f"CLI reached the cloud provider: {name}")
+
+        return reject
+
+
+class _SpyWorkflow(SonataWorkflow):
+    """A real Sonata workflow that records how the CLI invoked run()."""
+
+    def run(self, **kwargs):
+        self.run_kwargs = dict(kwargs)  # pyright: ignore[reportAttributeAccessIssue]
+        return super().run(**kwargs)
+
+
+class _Phase(Task[None]):
+    title = "Run source tests"
+
+    def __init__(self, events: list[str], failure: BaseException | None) -> None:
+        self.events = events
+        self.failure = failure
+
+    def run(self, inputs: TaskInputs) -> TaskOutcome[None]:
+        del inputs
+        self.events.append("phase")
+        if self.failure is not None:
+            raise self.failure
+        return TaskOutcome()
+
+
+@pytest.fixture
+def release_cli_harness(monkeypatch, tmp_path: Path, canonical_release_configs, nanofaas_root):
+    """Drive `nanolab run <release scenario>` with no cloud and a one-phase DAG."""
+    tool_root = tmp_path / "tool"
+    tool_root.mkdir()
+    config_dir = tmp_path / "config"
+    scenario_path, environment_path = canonical_release_configs(config_dir)
+    secrets = tmp_path / "secrets"
+    secrets.mkdir()
+    release_config = config_dir / "release-config.yaml"
+    release_config.write_text(
+        yaml.safe_dump(
+            {
+                "ghcr_token_file": str(_file(secrets / "ghcr-token")),
+                "cosign_key_file": str(_file(secrets / "cosign.key")),
+                "cosign_password_file": str(_file(secrets / "cosign.password")),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    state = SimpleNamespace(
+        events=[],
+        built=[],
+        workflows=[],
+        failure=None,
+        paths=ToolPaths.from_roots(nanofaas_root, tool_root),
+        scenario=scenario_path,
+        environment=environment_path,
+        release_config=release_config,
+        version=read_project_version(nanofaas_root),
+    )
+
+    monkeypatch.setattr(product_module, "default_tool_paths", lambda: state.paths)
+    monkeypatch.setattr(
+        release_plan, "git_state", lambda _root: GitState(commit="a" * 40, clean=True)
+    )
+    monkeypatch.setattr(
+        product_module, "vm_provider_for_environment", lambda *_args, **_kwargs: _FakeProvider()
+    )
+
+    def build(request, *, provider=None):
+        state.built.append((request, provider))
+        workflow = _SpyWorkflow(workflow_id="release-test")
+        resource = Resource(
+            title="Acquire release stack VM",
+            acquire=lambda _inputs: state.events.append("acquire") or "vm",
+            release=lambda _inputs, _value: state.events.append("release"),
+            infrastructure=True,
+        )
+        workflow.add(_Phase(state.events, state.failure), requires=(resource,))
+        state.workflows.append(workflow)
+        return workflow
+
+    monkeypatch.setattr(product_module, "build_release_workflow", build)
+
+    def invoke(*extra: str, run_dir: Path | None = tmp_path / "run"):
+        args = [
+            "run",
+            str(state.scenario),
+            "--environment",
+            str(state.environment),
+            "--release-config",
+            str(state.release_config),
+            *(("--run-dir", str(run_dir)) if run_dir is not None else ()),
+            *extra,
+        ]
+        return CliRunner().invoke(app, args)
+
+    state.invoke = invoke
+    state.release_dir = tmp_path / "run" / "releases" / state.version
+    return state
+
+
+def test_generic_release_run_requires_explicit_provision_acknowledgement(
+    release_cli_harness,
+) -> None:
+    result = release_cli_harness.invoke()
+
+    assert result.exit_code != 0
+    assert "--provision" in result.output
+    assert "Traceback" not in result.output
+    assert release_cli_harness.built == []
+    assert release_cli_harness.events == []
+
+
+def test_generic_release_run_provisions_journals_and_passes(release_cli_harness) -> None:
+    result = release_cli_harness.invoke("--provision")
+
+    assert result.exit_code == 0, result.output
+    assert release_cli_harness.events == ["acquire", "phase", "release"]
+    journal = release_cli_harness.release_dir / "sonata.jsonl"
+    assert journal.is_file()
+    kwargs = release_cli_harness.workflows[0].run_kwargs
+    assert kwargs["journal"].path == journal
+    assert kwargs["resume"] is False
+    assert set(kwargs["verifiers"]) == {
+        "file-digest",
+        "local-image-digest",
+        "local-registry-digest",
+        "ghcr-digest",
+    }
+    metadata = json.loads(
+        (release_cli_harness.release_dir / "run-metadata.json").read_text(encoding="utf-8")
+    )
+    assert metadata["status"] == "passed"
+
+
+def test_generic_release_run_uses_a_versioned_default_run_directory(
+    release_cli_harness,
+) -> None:
+    result = release_cli_harness.invoke("--provision", run_dir=None)
+
+    assert result.exit_code == 0, result.output
+    journal = release_cli_harness.workflows[0].run_kwargs["journal"].path
+    expected = (
+        release_cli_harness.paths.runs_dir
+        / "release"
+        / "releases"
+        / release_cli_harness.version
+        / "sonata.jsonl"
+    )
+    assert journal == expected
+    assert "latest" not in str(journal)
+
+
+def test_generic_release_run_forwards_keep_and_selection(release_cli_harness) -> None:
+    result = release_cli_harness.invoke("--provision", "--keep", "--until", "run-source-tests")
+
+    assert result.exit_code == 0, result.output
+    workflow = release_cli_harness.workflows[0]
+    assert workflow.keep_infrastructure is True
+    assert workflow.run_kwargs["select"].until == "run-source-tests"
+    # `--keep` retains only infrastructure, so the VM resource is never released.
+    assert release_cli_harness.events == ["acquire", "phase"]
+
+
+def test_generic_release_resume_requires_an_existing_journal(release_cli_harness) -> None:
+    result = release_cli_harness.invoke("--resume")
+
+    assert result.exit_code != 0
+    assert "--resume requires an existing release journal" in result.output
+    assert "Traceback" not in result.output
+    assert release_cli_harness.built == []
+
+
+def test_generic_release_fresh_run_refuses_to_overwrite_a_journal(release_cli_harness) -> None:
+    assert release_cli_harness.invoke("--provision").exit_code == 0
+
+    repeated = release_cli_harness.invoke("--provision")
+
+    assert repeated.exit_code != 0
+    assert "pass --resume" in repeated.output
+    assert "Traceback" not in repeated.output
+
+
+def test_generic_release_resume_reuses_the_verified_journal(release_cli_harness) -> None:
+    assert release_cli_harness.invoke("--provision").exit_code == 0
+    release_cli_harness.events.clear()
+
+    result = release_cli_harness.invoke("--resume")
+
+    assert result.exit_code == 0, result.output
+    assert release_cli_harness.workflows[1].run_kwargs["resume"] is True
+
+
+def test_generic_release_failure_releases_resources_and_records_metadata(
+    release_cli_harness,
+) -> None:
+    release_cli_harness.failure = RuntimeError("source tests failed")
+
+    result = release_cli_harness.invoke("--provision")
+
+    assert result.exit_code != 0
+    assert release_cli_harness.events == ["acquire", "phase", "release"]
+    metadata = json.loads(
+        (release_cli_harness.release_dir / "run-metadata.json").read_text(encoding="utf-8")
+    )
+    assert metadata["status"] == "failed"
+    assert "source tests failed" in metadata["error"]
+
+
+def test_generic_release_interrupt_still_releases_infrastructure(release_cli_harness) -> None:
+    release_cli_harness.failure = KeyboardInterrupt()
+
+    result = release_cli_harness.invoke("--provision")
+
+    assert result.exit_code != 0
+    assert release_cli_harness.events == ["acquire", "phase", "release"]
+
+
+def test_generic_release_run_rejects_a_concurrent_coordinator(release_cli_harness) -> None:
+    environment = product_module._environment(release_cli_harness.environment)
+
+    with release_run_lock(release_lock_path(environment)):
+        result = release_cli_harness.invoke("--provision")
+
+    assert result.exit_code != 0
+    assert "already in progress" in result.output
+    assert "Traceback" not in result.output
+    assert release_cli_harness.events == []
+
+
+def test_generic_release_plan_stays_offline(release_cli_harness) -> None:
+    result = CliRunner().invoke(
+        app,
+        [
+            "plan",
+            str(release_cli_harness.scenario),
+            "--environment",
+            str(release_cli_harness.environment),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "run-source-tests" in result.output
+    assert release_cli_harness.events == []
