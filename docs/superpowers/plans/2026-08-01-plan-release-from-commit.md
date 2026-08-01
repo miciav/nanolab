@@ -45,7 +45,7 @@ def test_catalog_discovers_from_an_explicit_root(tmp_path: Path) -> None:
 
     keys = {function.key for function in list_functions(tmp_path)}
 
-    assert "python-solo" in keys
+    assert "solo-python" in keys
 
 
 def test_catalog_roots_do_not_leak_into_each_other(tmp_path: Path) -> None:
@@ -61,8 +61,8 @@ def test_catalog_roots_do_not_leak_into_each_other(tmp_path: Path) -> None:
     first_keys = {function.key for function in list_functions(first)}
     second_keys = {function.key for function in list_functions(second)}
 
-    assert "python-alpha" in first_keys and "python-alpha" not in second_keys
-    assert "python-beta" in second_keys and "python-beta" not in first_keys
+    assert "alpha-python" in first_keys and "alpha-python" not in second_keys
+    assert "beta-python" in second_keys and "beta-python" not in first_keys
 
 
 def test_catalog_default_root_is_the_configured_checkout(nanofaas_root: Path) -> None:
