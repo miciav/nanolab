@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import json
-from contextlib import nullcontext
+from contextlib import ExitStack, nullcontext
 from datetime import UTC, datetime
 from pathlib import Path
 import subprocess
+import tempfile
 from typing import cast
 
 import typer
@@ -132,6 +133,7 @@ def _release_request(
     run_dir: Path | None,
     *,
     executable: bool,
+    source_tree: Path,
 ) -> tuple[ReleaseRequest, object]:
     """Validate every local release input offline, then bind the VM provider."""
     if environment_path is None:
@@ -146,6 +148,7 @@ def _release_request(
             release_config_path=release_config,
             run_dir=run_dir or paths.runs_dir / "release",
             performance_root=paths.nanofaas_root / "docs" / "performance",
+            source_tree=source_tree,
             executable=executable,
         )
     except (ValueError, subprocess.CalledProcessError) as error:
@@ -367,9 +370,17 @@ def install_product_commands(app: typer.Typer) -> None:
         release_request: ReleaseRequest | None = None
         release_provider: object | None = None
         release_journal = None
+        # The extracted tree is throwaway and only has to outlive workflow
+        # compilation; the ExitStack closes it on every exit path.
+        lifetime = ExitStack()
         if release:
+            source_tree = Path(
+                lifetime.enter_context(tempfile.TemporaryDirectory(prefix="nanofaas-release-"))
+            )
             release_request, release_provider = _release_request(
-                scenario, environment, release_config, run_dir, executable=True
+                scenario, environment, release_config, run_dir,
+                executable=True,
+                source_tree=source_tree,
             )
             release_journal = release_journal_config(release_request)
             if resume and not release_journal.path.is_file():
@@ -488,6 +499,8 @@ def install_product_commands(app: typer.Typer) -> None:
                     sink=sink,
                     provenance=provenance,
                 )
+        finally:
+            lifetime.close()
 
     @app.command("plan")
     def plan_command(
@@ -539,23 +552,33 @@ def install_product_commands(app: typer.Typer) -> None:
                 dry_run=True,
             )
         if scenario_config.workflow == "release":
-            request, provider = _release_request(
-                scenario, environment, release_config, run_dir, executable=False
-            )
-            sonata_workflow = build_release_workflow(request, provider=provider)
-        else:
-            sonata_workflow = cast(
-                SonataWorkflow,
-                _workflow(
-                    scenario_config,
-                    environment_config,
-                    control_plane_url=control_plane_url,
-                    provision=provision,
-                    prometheus_url=prometheus_url or "http://127.0.0.1:9090",
-                    run_dir=run_dir,
-                    dry_run=True,
-                ),
-            )
+            with tempfile.TemporaryDirectory(prefix="nanofaas-plan-") as source_tree:
+                request, provider = _release_request(
+                    scenario, environment, release_config, run_dir,
+                    executable=False,
+                    source_tree=Path(source_tree),
+                )
+                sonata_workflow = build_release_workflow(request, provider=provider)
+                try:
+                    compiled = sonata_workflow.compile(
+                        select=Selection(only=only, start=start, until=until)
+                    )
+                except SelectionError as error:
+                    raise typer.BadParameter(str(error)) from None
+            _render_compiled(compiled)
+            return
+        sonata_workflow = cast(
+            SonataWorkflow,
+            _workflow(
+                scenario_config,
+                environment_config,
+                control_plane_url=control_plane_url,
+                provision=provision,
+                prometheus_url=prometheus_url or "http://127.0.0.1:9090",
+                run_dir=run_dir,
+                dry_run=True,
+            ),
+        )
         try:
             compiled = sonata_workflow.compile(
                 select=Selection(only=only, start=start, until=until)

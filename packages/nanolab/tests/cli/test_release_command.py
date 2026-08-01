@@ -340,11 +340,19 @@ def release_cli_harness(
         environment=environment_path,
         release_config=release_config,
         version=read_project_version(nanofaas_root),
+        monkeypatch=monkeypatch,
     )
 
     monkeypatch.setattr(product_module, "default_tool_paths", lambda: state.paths)
     monkeypatch.setattr(
         release_plan, "git_state", lambda _root: GitState(commit="a" * 40, clean=True)
+    )
+    # The guarded commit is fake, so extraction can't really `git archive` it;
+    # plan straight from the real checkout instead, same as tests/plans/test_release.py.
+    monkeypatch.setattr(
+        release_plan,
+        "extract_commit_tree",
+        lambda _repo_root, _commit, _destination: nanofaas_root,
     )
     monkeypatch.setattr(
         product_module, "vm_provider_for_environment", lambda *_args, **_kwargs: RejectingProvider()
@@ -510,6 +518,25 @@ def test_generic_release_run_rejects_a_concurrent_coordinator(release_cli_harnes
     assert "already in progress" in result.output
     assert "Traceback" not in result.output
     assert release_cli_harness.events == []
+
+
+def test_generic_release_run_removes_the_extracted_tree(release_cli_harness) -> None:
+    """The extraction is throwaway: nothing survives the command."""
+    trees: list[Path] = []
+    original = release_plan.build_release_request
+
+    def record(**kwargs):
+        trees.append(Path(kwargs["source_tree"]))
+        return original(**kwargs)
+
+    release_cli_harness.monkeypatch.setattr(product_module, "build_release_request", record)
+
+    result = release_cli_harness.invoke("--provision")
+
+    assert result.exit_code == 0, result.output
+    assert len(trees) == 1
+    assert trees[0].is_absolute()
+    assert not trees[0].exists()
 
 
 def test_generic_release_plan_stays_offline(release_cli_harness) -> None:
