@@ -177,12 +177,12 @@ def attest_release_images(
 
 
 def finalize_release(
-    journal: ReleaseJournal,
+    journal: ReleaseJournal | None,
     *,
     record: Mapping[str, Any],
     performance_root: Path,
 ) -> tuple[ArtifactEvidence, ...]:
-    """Atomically publish the performance record and history, then journal it.
+    """Atomically publish the performance record and history, optionally journaling it.
 
     A failure writing either documentation file leaves the journal without its
     final record, so `--resume` retries finalization without rebuilding.
@@ -204,7 +204,8 @@ def finalize_release(
         ArtifactEvidence("local", str(release_file), digest_path(release_file)),
         ArtifactEvidence("local", str(history_file), digest_path(history_file)),
     )
-    journal.record("finalize", artifacts=evidence)
+    if journal is not None:
+        journal.record("finalize", artifacts=evidence)
     return evidence
 
 
@@ -311,9 +312,5 @@ def _exec(
     )
     return_code = int(getattr(result, "return_code", 0))
     if return_code != 0:
-        detail = str(getattr(result, "stderr", "") or getattr(result, "stdout", "")).strip()
-        raise RuntimeError(
-            f"release attestation step failed (exit {return_code}): {action}"
-            + (f"\n{detail}" if detail else "")
-        )
+        raise RuntimeError(f"release attestation step failed (exit {return_code}): {action}")
     return result

@@ -331,20 +331,26 @@ class TestRegistryPushComposite:
 
 
 class TestArm64BuildComposite:
-    def test_uses_builder_name_in_create_command(self) -> None:
+    def test_uses_resource_owned_builder_without_creating_another(self) -> None:
         executor = RecordingExecutor()
         plan = _plan_with_cells(
             _bake_cell("ctrl", "reg/ctrl:v1-arm64", arch="arm64"),
         )
 
-        composite = arm64_build_composite(plan, executor, "arm-builder", "my-builder")
+        composite = arm64_build_composite(
+            plan,
+            executor,
+            "arm-builder",
+            "my-builder",
+            remote_bake_file="/release/docker-bake.json",
+        )
         workflow = Workflow("arm64-build")
         workflow.add(composite)
         workflow.run()
 
-        builder_create = [s for s in executor.seen if "create" in s.argv]
-        assert len(builder_create) >= 1
-        assert "my-builder" in builder_create[0].argv
+        assert not [s for s in executor.seen if "create" in s.argv]
+        bake = next(s for s in executor.seen if "bake" in s.argv)
+        assert bake.argv[bake.argv.index("--builder") + 1] == "my-builder"
 
     def test_skips_amd64_cells(self) -> None:
         executor = RecordingExecutor()
@@ -358,7 +364,7 @@ class TestArm64BuildComposite:
         workflow.add(composite)
         workflow.run()
 
-        assert len(executor.seen) >= 2  # builder setup + bake/build
+        assert len(executor.seen) == 1
 
     def test_registry_tunnel_delegated_to_resource(self) -> None:
         executor = RecordingExecutor()

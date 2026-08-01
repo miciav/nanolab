@@ -247,6 +247,67 @@ def test_dedicated_loadgen_uses_the_staged_nanolab_k6_asset(tmp_path: Path) -> N
     assert "/home/ubuntu/nanolab-assets/k6/two-vm-function-invoke.js" in k6
 
 
+def test_explicit_remote_run_directory_is_cleaned_before_k6(tmp_path: Path) -> None:
+    executor = RecordingExecutor()
+    fetcher = FakeFetcher()
+    remote_run_dir = Path("/home/ubuntu/nanofaas-release/v1.2.3/benchmarks/run-1")
+    workflow = build_loadtest_plan(
+        SCENARIO,
+        EnvironmentConfig.model_validate(
+            {
+                "provider": "external",
+                "roles": {
+                    "stack": {"host": "stack.example"},
+                    "loadgen": {"host": "load.example"},
+                },
+            }
+        ),
+        RoleBindings(host=executor, stack=executor, loadgen=executor),
+        control_plane_url="http://stack:30080",
+        prometheus_client=NoopPrometheus(),
+        run_dir=tmp_path,
+        remote_run_dir=remote_run_dir,
+        fetcher=fetcher,
+    )
+
+    commands = _run(workflow, executor)
+    cleanup = next(index for index, command in enumerate(commands) if "rm -rf --" in command)
+    k6 = next(index for index, command in enumerate(commands) if command.startswith("k6 run"))
+
+    assert cleanup < k6
+    assert str(remote_run_dir) in commands[cleanup]
+    assert str(remote_run_dir / "k6-summary.json") in commands[k6]
+    assert fetcher.fetched == [(str(remote_run_dir / "k6-summary.json"), tmp_path)]
+
+
+@pytest.mark.parametrize(
+    "remote_run_dir",
+    (
+        Path("/run-1"),
+        Path("/home/ubuntu/nanofaas-release/v1.2.3/benchmarks/../run-1"),
+        Path("/tmp/nanofaas-release/v1.2.3/benchmarks/run-1"),
+        Path("/home/ubuntu/nanofaas-release/v1.2.3"),
+        Path("/home/ubuntu/nanofaas-release/benchmarks/run-1"),
+    ),
+)
+def test_remote_cleanup_rejects_paths_outside_release_benchmark_run(
+    tmp_path: Path, remote_run_dir: Path
+) -> None:
+    with pytest.raises(ValueError, match="run-N child"):
+        build_loadtest_plan(
+            SCENARIO,
+            EnvironmentConfig.model_validate(
+                {"provider": "multipass", "roles": {"stack": {"name": "stack"}}}
+            ),
+            RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor()),
+            control_plane_url="http://stack:30080",
+            prometheus_client=NoopPrometheus(),
+            run_dir=tmp_path,
+            remote_run_dir=remote_run_dir,
+            fetcher=FakeFetcher(),
+        )
+
+
 def test_local_loadtest_reads_k6_script_from_the_nanolab_package(tmp_path: Path) -> None:
     tool_root = tmp_path / "nanolab"
     executor = RecordingExecutor()

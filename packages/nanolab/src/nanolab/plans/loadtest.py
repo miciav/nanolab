@@ -1,7 +1,7 @@
 from collections.abc import Mapping
 from dataclasses import replace
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, cast
 
 from sonata_engine import Task, Workflow
@@ -138,6 +138,7 @@ def build_loadtest_plan(
     control_plane_url: str,
     prometheus_client: PrometheusClient,
     run_dir: Path,
+    remote_run_dir: Path | None = None,
     fetcher: RemoteFileFetcher | object | None = None,
     repo_root: Path | None = None,
     tool_root: Path | None = None,
@@ -204,7 +205,28 @@ def build_loadtest_plan(
         role_target = environment.target("loadgen" if dedicated else "stack")
         home = _home(role_target.user, role_target.home)
         script_path = Path(home) / f"nanolab-assets/k6/{script_name}"
-        summary_path = Path(home) / "nanofaas-loadtest/k6-summary.json"
+        output_dir = remote_run_dir or Path(home) / "nanofaas-loadtest"
+        if remote_run_dir is not None:
+            remote = PurePosixPath(str(remote_run_dir))
+            selected_home = PurePosixPath(home)
+            try:
+                relative = remote.relative_to(selected_home)
+            except ValueError:
+                relative = PurePosixPath()
+            parts = relative.parts
+            run_number = remote.name.removeprefix("run-")
+            if (
+                not remote.is_absolute()
+                or ".." in remote.parts
+                or len(parts) != 4
+                or parts[0] != "nanofaas-release"
+                or not parts[1]
+                or parts[2] != "benchmarks"
+                or not run_number.isdigit()
+                or int(run_number) < 1
+            ):
+                raise ValueError("remote run directory must be an absolute run-N child")
+        summary_path = output_dir / "k6-summary.json"
     else:
         product_root = tool_root or discover_tool_root()
         script_path = product_root / "assets" / "k6" / script_name
@@ -364,6 +386,16 @@ def build_loadtest_plan(
         )
     )
 
+    prepare_argv = ("mkdir", "-p", str(summary_path.parent))
+    if remote_run_dir is not None:
+        prepare_argv = (
+            "sh",
+            "-c",
+            'set -eu; rm -rf -- "$1"; mkdir -p -- "$1"',
+            "clean-loadtest-run",
+            str(summary_path.parent),
+        )
+
     return build_loadtest_workflow(
         request,
         bindings,
@@ -379,7 +411,7 @@ def build_loadtest_plan(
             ),
             prepare=CommandTask(
                 title="Prepare the run directory",
-                argv=("mkdir", "-p", str(summary_path.parent)),
+                argv=prepare_argv,
                 executor=executor,
                 role=load_role,
             ),

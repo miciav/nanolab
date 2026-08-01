@@ -217,6 +217,33 @@ def test_signing_failure_stops_before_any_verification() -> None:
     assert not any("verify" in " ".join(command) for command in provider.commands)
 
 
+def test_attestation_failure_never_exposes_remote_output() -> None:
+    secret = "fixture-remote-secret-must-not-leak"
+
+    class Provider(_AttestProvider):
+        def exec_argv(self, request, argv, *, env, cwd, dry_run):
+            result = super().exec_argv(
+                request, argv, env=env, cwd=cwd, dry_run=dry_run
+            )
+            if attest.SYFT_IMAGE in argv:
+                result.return_code = 1
+                result.stderr = secret
+            return result
+
+    with pytest.raises(RuntimeError) as error:
+        attest.attest_release_images(
+            Provider(),
+            object(),
+            images=_images(),
+            predicate_remote="/srv/release/predicate.json",
+            sbom_dir_remote="/srv/release/sboms",
+            cosign=_cosign(),
+            docker_config="/tmp/nanofaas-release-credentials.fake01/docker",
+        )
+
+    assert secret not in str(error.value)
+
+
 # --- finalization ----------------------------------------------------------
 
 
@@ -248,6 +275,15 @@ def test_finalize_writes_records_then_appends_the_final_journal_entry(tmp_path: 
     assert "finalize" in phases
     references = {artifact.reference for artifact in evidence}
     assert str(release_file) in references
+
+
+def test_finalize_can_leave_journaling_to_sonata(tmp_path: Path) -> None:
+    docs = tmp_path / "performance"
+
+    evidence = attest.finalize_release(None, record=_record(), performance_root=docs)
+
+    assert evidence
+    assert (docs / "history.md").is_file()
 
 
 def test_history_regeneration_includes_previous_release_records(tmp_path: Path) -> None:

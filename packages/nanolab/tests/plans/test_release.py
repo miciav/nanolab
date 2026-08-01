@@ -1,15 +1,36 @@
 """Smoke tests for the release workflow builder."""
 
+import os
+from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+import yaml
+from sonata_engine import Resource, Selection
+from workflow_tasks.execution.bindings import RoleBindings
+from workflow_tasks.tasks.models import TaskResult
+from workflow_tasks.vm.models import VmInfo
 
 import nanolab.plans.release as release_plan
+import nanolab.release.resources as release_resources
+import nanolab.release.run as release_run
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.images.plan import ImagePlan
 from nanolab.plans.release import ReleaseRequest, build_release_workflow
-from nanolab.release.run import GitState, ReleaseSettings
+from nanolab.release.run import CredentialFiles, GitState, ReleaseSettings
+from nanolab.release.state import digest_path
+from nanolab.release.state import ArtifactEvidence
+from nanolab.release.tasks import ReleasePhaseTask
+from nanolab.release.versioning import read_project_version
+
+from ..conftest import RejectingProvider
+
+
+NANOFAAS_ROOT = Path(os.environ["NANOFAAS_ROOT"]).resolve()
+NANOLAB_ROOT = Path(__file__).resolve().parents[2]
+CURRENT_VERSION = read_project_version(NANOFAAS_ROOT)
 
 
 _AZURE_ENV = EnvironmentConfig.model_validate(
@@ -32,6 +53,14 @@ _AZURE_ENV = EnvironmentConfig.model_validate(
         },
     }
 )
+
+
+def test_release_journal_is_scoped_to_the_versioned_run(tmp_path: Path) -> None:
+    request = type("Request", (), {"run_dir": tmp_path, "version": "v1.2.3"})()
+
+    assert release_plan.release_journal_config(request).path == (
+        tmp_path / "releases" / "1.2.3" / "sonata.jsonl"
+    )
 
 
 def test_release_request_rejects_non_azure_environment():
@@ -129,3 +158,694 @@ def test_build_release_workflow_compiles_to_a_workflow():
     """Minimal smoke: the builder produces a Workflow without crashing."""
     # ponytail: integration test skipped — needs real Azure credentials
     pass
+
+
+class _ArmWorkflowExecutor:
+    def __init__(self) -> None:
+        self.commands = []
+
+    def run(self, task, *, dry_run=False):
+        del dry_run
+        self.commands.append(task)
+        if task.argv[:3] == ("docker", "buildx", "inspect"):
+            if "--bootstrap" in task.argv:
+                return TaskResult(
+                    task_id="",
+                    status="passed",
+                    return_code=0,
+                    stdout="Platforms: linux/amd64, linux/arm64\n",
+                )
+            return TaskResult(task_id="", status="passed", return_code=1)
+        return TaskResult(task_id="", status="passed", return_code=0)
+
+
+class _ArmWorkflowProvider:
+    def __init__(self, failure: str) -> None:
+        self.failure = failure
+        self.commands: list[tuple[str, ...]] = []
+        self.transfers: list[str] = []
+        self.remote_digests: dict[str, str] = {}
+        self.registry_digests: dict[str, str] = {}
+
+    def connection_host(self, _request) -> str:
+        return "10.0.0.10"
+
+    def transfer_to(self, _request, *, source: Path, destination: str):
+        self.transfers.append(destination)
+        if self.failure == "source-transfer" and destination.endswith("/source.tar"):
+            return SimpleNamespace(return_code=1, stdout="", stderr="source transfer failed")
+        self.remote_digests[destination] = digest_path(source)
+        return SimpleNamespace(return_code=0, stdout="", stderr="")
+
+    def exec_argv(self, _request, argv, *, env=None, cwd=None, dry_run=False):
+        del env, cwd, dry_run
+        self.commands.append(argv)
+        rendered = " ".join(argv)
+        if argv[0] == "sha256sum":
+            digest = self.remote_digests[argv[1]].removeprefix("sha256:")
+            return SimpleNamespace(return_code=0, stdout=f"{digest}  {argv[1]}\n", stderr="")
+        if self.failure == "build" and "./gradlew" in rendered and "Image=" in rendered:
+            return SimpleNamespace(return_code=1, stdout="", stderr="individual build failed")
+        if self.failure == "push" and "docker push" in rendered:
+            return SimpleNamespace(return_code=1, stdout="", stderr="push failed")
+        if argv[:3] == ("docker", "image", "inspect"):
+            if argv[3] == "--format={{.Architecture}}":
+                return SimpleNamespace(return_code=0, stdout="arm64\n", stderr="")
+            return SimpleNamespace(return_code=0, stdout="sha256:" + "a" * 64, stderr="")
+        if "docker push" in rendered:
+            image = rendered.split("docker push ", 1)[1].split()[0]
+            self.registry_digests[image] = "sha256:" + "b" * 64
+        if argv[:2] == ("skopeo", "inspect"):
+            image = argv[-1].removeprefix("docker://")
+            digest = self.registry_digests.get(image, "sha256:" + "b" * 64)
+            if self.failure == "digest":
+                digest = "malformed"
+            return SimpleNamespace(return_code=0, stdout=digest + "\n", stderr="")
+        if argv[:2] == ("docker", "port"):
+            return SimpleNamespace(return_code=0, stdout="127.0.0.1:32768\n", stderr="")
+        if self.failure == "smoke" and argv and argv[0] == "curl":
+            return SimpleNamespace(return_code=1, stdout="", stderr="smoke failed")
+        if argv[:2] == ("docker", "run") and "WATCHDOG_CMD" in rendered:
+            return SimpleNamespace(
+                return_code=1,
+                stdout="",
+                stderr="Failed to spawn runtime: No such file or directory (os error 2)",
+            )
+        return SimpleNamespace(return_code=0, stdout="", stderr="")
+
+
+def _arm_failure_workflow(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    failure: str,
+    scenario_path: Path,
+    environment_path: Path,
+):
+    provider = _ArmWorkflowProvider(failure)
+    executor = _ArmWorkflowExecutor()
+    monkeypatch.setattr(
+        release_plan, "git_state", lambda _root: GitState(commit="a" * 40, clean=True)
+    )
+    monkeypatch.setattr(
+        release_run, "git_state", lambda _root: GitState(commit="a" * 40, clean=True)
+    )
+    monkeypatch.setattr(
+        release_plan,
+        "build_role_bindings",
+        lambda *_args, **_kwargs: (
+            RoleBindings(
+                host=executor,
+                stack=executor,
+                loadgen=executor,
+                cloud=executor,
+                arm_builder=executor,
+            ),
+            None,
+        ),
+    )
+
+    def infrastructure(_environment, _root, _provider, *, requires=()):
+        def vm(title: str, name: str) -> Resource[VmInfo]:
+            return Resource(
+                title=title,
+                acquire=lambda _inputs: VmInfo(
+                    name=name, host="10.0.0.1", user="azureuser", home="/home/azureuser"
+                ),
+                release=lambda _inputs, _value: None,
+                infrastructure=True,
+                requires=requires,
+            )
+
+        stack = vm("Acquire release stack VM", "release-stack")
+        loadgen = vm("Acquire release loadgen VM", "release-loadgen")
+        arm_builder = vm("Acquire release ARM builder VM", "release-arm")
+        endpoints = Resource(
+            title="Acquire release endpoints",
+            acquire=lambda _inputs: release_resources.ReleaseEndpoints(
+                "http://stack", "http://prom"
+            ),
+            release=lambda _inputs, _value: None,
+            requires=(stack, loadgen),
+        )
+        return release_resources.ReleaseResources(stack, loadgen, arm_builder, endpoints)
+
+    monkeypatch.setattr(release_plan, "build_release_resources", infrastructure)
+
+    def create_archive(_root: Path, _commit: str, destination: Path) -> ArtifactEvidence:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(b"immutable source")
+        return ArtifactEvidence("local", str(destination), digest_path(destination))
+
+    monkeypatch.setattr(release_resources, "create_source_archive", create_archive)
+    request = release_plan.build_release_request(
+        repo_root=NANOLAB_ROOT,
+        nanofaas_root=NANOFAAS_ROOT,
+        scenario_path=scenario_path,
+        environment_path=environment_path,
+        release_config_path=None,
+        run_dir=tmp_path / "run",
+        performance_root=tmp_path / "performance",
+    )
+    secret_paths = tuple(tmp_path / name for name in ("ghcr", "cosign.key", "cosign.password"))
+    for path in secret_paths:
+        path.write_text(path.name, encoding="utf-8")
+        path.chmod(0o600)
+    request = replace(
+        request,
+        credentials=CredentialFiles(
+            ghcr_token=secret_paths[0],
+            cosign_key=secret_paths[1],
+            cosign_password=secret_paths[2],
+        ),
+    )
+    workflow = build_release_workflow(request, provider=provider)
+    phases = {
+        compiled.task.title: compiled.task
+        for compiled in workflow.compile().tasks
+        if isinstance(compiled.task, ReleasePhaseTask)
+    }
+    arm_build = phases["Build ARM64 images"]
+    for receipt in arm_build.prerequisites:
+        receipt.parent.mkdir(parents=True, exist_ok=True)
+        receipt.write_text("{}\n", encoding="utf-8")
+    return workflow, provider, executor, phases
+
+
+@pytest.mark.parametrize(
+    ("failure", "error"),
+    (
+        ("build", "individual build failed"),
+        ("push", "push failed"),
+        ("digest", "invalid registry digest"),
+        ("smoke", "smoke failed"),
+    ),
+)
+def test_new_arm_workflow_failures_cleanup_and_never_publish(
+    failure: str,
+    error: str,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    canonical_release_configs: tuple[Path, Path],
+) -> None:
+    workflow, provider, executor, phases = _arm_failure_workflow(
+        monkeypatch, tmp_path, failure, *canonical_release_configs
+    )
+
+    with pytest.raises(RuntimeError, match=error):
+        workflow.run(select=Selection(start="build-arm64-images"))
+
+    provider_rendered = [" ".join(argv) for argv in provider.commands]
+    executor_rendered = [" ".join(task.argv) for task in executor.commands]
+    assert not any("skopeo copy" in command for command in executor_rendered)
+    assert not any("imagetools create" in command for command in executor_rendered)
+    assert any(
+        command[:4] == ("docker", "buildx", "rm", "--force")
+        for command in (task.argv for task in executor.commands)
+    )
+    assert (
+        sum("systemctl stop nanofaas-registry-tunnel" in command for command in provider_rendered)
+        >= 2
+    )
+    assert any("rm -rf --" in command and "/source" in command for command in provider_rendered)
+    assert phases["Build ARM64 images"].receipt.exists() is (failure == "smoke")
+    assert not phases["Test ARM64 images"].receipt.exists()
+
+
+def test_new_arm_source_transfer_failure_compensates_all_acquired_resources(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    canonical_release_configs: tuple[Path, Path],
+) -> None:
+    workflow, provider, executor, phases = _arm_failure_workflow(
+        monkeypatch, tmp_path, "source-transfer", *canonical_release_configs
+    )
+
+    with pytest.raises(RuntimeError, match="source transfer failed"):
+        workflow.run(select=Selection(start="build-arm64-images"))
+
+    rendered = [" ".join(argv) for argv in provider.commands]
+    assert any("rm -rf --" in command and "source.tar" in command for command in rendered)
+    assert sum("systemctl stop nanofaas-registry-tunnel" in command for command in rendered) >= 2
+    assert any(task.argv[:4] == ("docker", "buildx", "rm", "--force") for task in executor.commands)
+    assert not any("skopeo copy" in " ".join(task.argv) for task in executor.commands)
+    assert not phases["Build ARM64 images"].receipt.exists()
+
+
+def test_build_release_workflow_compiles_without_cloud_discovery(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    canonical_release_configs: tuple[Path, Path],
+) -> None:
+    scenario_path, environment_path = canonical_release_configs
+    monkeypatch.setattr(
+        release_plan,
+        "git_state",
+        lambda _root: GitState(commit="a" * 40, clean=True),
+    )
+    request = release_plan.build_release_request(
+        repo_root=NANOLAB_ROOT,
+        nanofaas_root=NANOFAAS_ROOT,
+        scenario_path=scenario_path,
+        environment_path=environment_path,
+        release_config_path=None,
+        run_dir=tmp_path / "run",
+        performance_root=tmp_path / "performance",
+    )
+
+    workflow = build_release_workflow(request, provider=RejectingProvider())
+    compiled = workflow.compile()
+
+    release_phases = {
+        task.task.title: task.task
+        for task in compiled.tasks
+        if isinstance(task.task, ReleasePhaseTask)
+    }
+    assert set(release_phases) == {
+        "Run source tests",
+        "Build AMD64 images",
+        "Push AMD64 images to local registry",
+        "Run release benchmark 1",
+        "Run release benchmark 2",
+        "Run release benchmark 3",
+        "Aggregate benchmarks",
+        "Evaluate regression gate",
+        "Build ARM64 images",
+        "Test ARM64 images",
+        "Publish architecture images",
+        "Publish image manifests",
+        "Publish image aliases",
+        "Attest published images",
+        "Finalize release documentation",
+    }
+    assert all(
+        task.receipt.parent == tmp_path / "run" / "releases" / CURRENT_VERSION
+        for task in release_phases.values()
+    )
+    benchmarks = tuple(release_phases[f"Run release benchmark {index}"] for index in range(1, 4))
+    push = release_phases["Push AMD64 images to local registry"]
+    aggregate = release_phases["Aggregate benchmarks"]
+    gate = release_phases["Evaluate regression gate"]
+    arm_build = release_phases["Build ARM64 images"]
+    arm_smoke = release_phases["Test ARM64 images"]
+    publish_architectures = release_phases["Publish architecture images"]
+    publish_manifests = release_phases["Publish image manifests"]
+    publish_aliases = release_phases["Publish image aliases"]
+    attestation = release_phases["Attest published images"]
+    finalize = release_phases["Finalize release documentation"]
+    assert all(task.prerequisites == (push.receipt,) for task in benchmarks)
+    assert aggregate.prerequisites == tuple(task.receipt for task in benchmarks)
+    assert gate.prerequisites == (aggregate.receipt,)
+    assert arm_build.prerequisites == (gate.receipt, release_phases["Run source tests"].receipt)
+    assert arm_smoke.prerequisites == (arm_build.receipt,)
+    assert publish_architectures.prerequisites == (
+        gate.receipt,
+        arm_smoke.receipt,
+        push.receipt,
+        arm_build.receipt,
+    )
+    assert publish_manifests.prerequisites == (publish_architectures.receipt,)
+    assert publish_aliases.prerequisites == (publish_manifests.receipt,)
+    assert attestation.prerequisites == (
+        publish_architectures.receipt,
+        publish_manifests.receipt,
+        publish_aliases.receipt,
+        aggregate.receipt,
+    )
+    assert finalize.prerequisites[0] == attestation.receipt
+
+    benchmark_slice = workflow.compile(select=Selection(only="run-release-benchmark-1"))
+    benchmark_titles = [task.task.title for task in benchmark_slice.tasks]
+    assert "Acquire release stack VM" in benchmark_titles
+    assert "Acquire release loadgen VM" in benchmark_titles
+    assert "Acquire release endpoints" in benchmark_titles
+    assert "Acquire release ARM builder VM" not in benchmark_titles
+
+    titles = [task.task.title for task in compiled.tasks]
+    assert (
+        titles.index("Acquire release stack VM")
+        < titles.index("Acquire release loadgen VM")
+        < titles.index("Acquire release ARM builder VM")
+    )
+    infrastructure_titles = {
+        task.resource.title
+        for task in compiled.tasks
+        if task.kind == "acquire" and task.resource is not None and task.resource.infrastructure
+    }
+    assert infrastructure_titles == {
+        "Acquire release stack VM",
+        "Acquire release loadgen VM",
+        "Acquire release ARM builder VM",
+    }
+
+    stack_slice = workflow.compile(select=Selection(only="build-amd64-images"))
+    assert [task.task.title for task in stack_slice.tasks] == [
+        "Acquire validated release execution credentials",
+        "Acquire release stack VM",
+        "Acquire immutable release source archive",
+        "Acquire verified source on nanofaas-azure-release",
+        f"Acquire release-amd64-v{CURRENT_VERSION} buildx builder",
+        "Build AMD64 images",
+        f"Release release-amd64-v{CURRENT_VERSION} buildx builder",
+        "Release verified source on nanofaas-azure-release",
+        "Release immutable release source archive",
+        "Release release stack VM",
+        "Release validated release execution credentials",
+    ]
+
+    arm_slice = workflow.compile(select=Selection(only="build-arm64-images"))
+    arm_titles = [task.task.title for task in arm_slice.tasks]
+    assert arm_titles[:8] == [
+        "Acquire validated release execution credentials",
+        "Acquire release stack VM",
+        "Acquire release ARM builder VM",
+        "Acquire registry tunnel to <release-stack>:5000",
+        "Acquire ARM64 Bake and BuildKit inputs",
+        f"Acquire release-arm64-v{CURRENT_VERSION} buildx builder",
+        "Acquire immutable release source archive",
+        "Acquire verified source on nanofaas-azure-release-arm",
+    ]
+    assert arm_titles[-8:] == [
+        "Release verified source on nanofaas-azure-release-arm",
+        "Release immutable release source archive",
+        f"Release release-arm64-v{CURRENT_VERSION} buildx builder",
+        "Release ARM64 Bake and BuildKit inputs",
+        "Release registry tunnel to <release-stack>:5000",
+        "Release release ARM builder VM",
+        "Release release stack VM",
+        "Release validated release execution credentials",
+    ]
+
+    arm_suffix = workflow.compile(select=Selection(start="build-arm64-images"))
+    suffix_titles = [task.task.title for task in arm_suffix.tasks]
+    assert "Acquire release stack VM" in suffix_titles
+    assert "Acquire release ARM builder VM" in suffix_titles
+    assert "Acquire release loadgen VM" not in suffix_titles
+    assert "Release release ARM builder VM" in suffix_titles
+    assert "Release release stack VM" in suffix_titles
+
+
+@pytest.mark.parametrize(
+    "selection",
+    (
+        None,
+        Selection(only="build-arm64-images"),
+        Selection(only="publish-architecture-images"),
+    ),
+)
+def test_missing_execution_credentials_fail_before_any_provider_call(
+    selection: Selection | None,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    canonical_release_configs: tuple[Path, Path],
+) -> None:
+    scenario_path, environment_path = canonical_release_configs
+    provider = RejectingProvider()
+
+    monkeypatch.setattr(
+        release_plan, "git_state", lambda _root: GitState(commit="a" * 40, clean=True)
+    )
+    request = release_plan.build_release_request(
+        repo_root=NANOLAB_ROOT,
+        nanofaas_root=NANOFAAS_ROOT,
+        scenario_path=scenario_path,
+        environment_path=environment_path,
+        release_config_path=None,
+        run_dir=tmp_path / "run",
+        performance_root=tmp_path / "performance",
+    )
+    workflow = build_release_workflow(request, provider=provider)
+
+    with pytest.raises(ValueError, match="credential config is required"):
+        workflow.run(select=selection)
+    assert provider.calls == []
+
+
+def test_release_scenario_matches_comparable_history() -> None:
+    scenario = ScenarioConfig.model_validate(
+        yaml.safe_load((NANOLAB_ROOT / "scenarios-v2/release.yaml").read_text(encoding="utf-8"))
+    )
+
+    assert scenario.release is not None
+    assert scenario.release.profile == "azure-d8s-v5+d2s-v5-amd64-native-loadtest-v1"
+    assert scenario.release.benchmark_scenario == "loadtest.yaml"
+    assert scenario.release.throughput_max_loss_percent == 10
+    assert scenario.release.p95_max_increase_percent == 15
+    assert scenario.release.error_rate_max == 0.30
+
+
+def test_build_release_request_is_offline_and_builds_current_matrix(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    canonical_release_configs: tuple[Path, Path],
+) -> None:
+    scenario_path, environment_path = canonical_release_configs
+    home = tmp_path / "home"
+    secrets = home / "secrets"
+    secrets.mkdir(parents=True)
+    secret_values = []
+    for name in ("ghcr", "cosign.key", "cosign.password"):
+        secret = secrets / name
+        value = f"fixture-{name}-must-not-leak"
+        secret_values.append(value)
+        secret.write_text(value, encoding="utf-8")
+        secret.chmod(0o600)
+    credential_path = tmp_path / "credentials.yaml"
+    credential_path.write_text(
+        yaml.safe_dump(
+            {
+                "ghcr_token_file": "~/secrets/ghcr",
+                "cosign_key_file": "~/secrets/cosign.key",
+                "cosign_password_file": "~/secrets/cosign.password",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setattr(
+        release_plan,
+        "vm_provider_for_environment",
+        lambda *_args, **_kwargs: pytest.fail("preflight constructed a cloud client"),
+    )
+    monkeypatch.setattr(
+        release_plan,
+        "git_state",
+        lambda _root: GitState(commit="a" * 40, clean=True),
+    )
+
+    request = release_plan.build_release_request(
+        repo_root=NANOLAB_ROOT,
+        nanofaas_root=NANOFAAS_ROOT,
+        scenario_path=scenario_path,
+        environment_path=environment_path,
+        release_config_path=credential_path,
+        run_dir=tmp_path / "run",
+        performance_root=tmp_path / "performance",
+        executable=True,
+    )
+
+    assert request.identity.source_commit == "a" * 40
+    assert request.identity.release_config_digest == digest_path(scenario_path)
+    assert request.identity.environment_digest == digest_path(environment_path)
+    assert request.image_plan.cells
+    assert len(request.image_plan.cells) == len(request.image_plan.targets) + sum(
+        len(target.flavors) - 1 for target in request.image_plan.targets
+    )
+    assert request.credentials is not None
+    assert request.credentials.ghcr_token == secrets / "ghcr"
+
+    workflow = build_release_workflow(request, provider=SimpleNamespace())
+    assert all(value not in repr(workflow.compile()) for value in secret_values)
+    publish_titles = [
+        item.task.title
+        for item in workflow.compile(select=Selection(only="publish-architecture-images")).tasks
+    ]
+    assert "Acquire staged GHCR credentials" in publish_titles
+    assert "Acquire staged Cosign credentials" not in publish_titles
+    attest_titles = [
+        item.task.title
+        for item in workflow.compile(select=Selection(only="attest-published-images")).tasks
+    ]
+    assert "Acquire staged GHCR credentials" in attest_titles
+    assert "Acquire staged Cosign credentials" in attest_titles
+    finalize_titles = [
+        item.task.title
+        for item in workflow.compile(select=Selection(only="finalize-release-documentation")).tasks
+    ]
+    assert not any("credentials" in title.lower() for title in finalize_titles)
+
+
+def test_build_release_request_requires_credentials_for_execution(tmp_path: Path, canonical_release_configs: tuple[Path, Path]) -> None:
+    scenario_path, environment_path = canonical_release_configs
+    with pytest.raises(ValueError, match="credential config is required"):
+        release_plan.build_release_request(
+            repo_root=NANOLAB_ROOT,
+            nanofaas_root=NANOFAAS_ROOT,
+            scenario_path=scenario_path,
+            environment_path=environment_path,
+            release_config_path=None,
+            run_dir=tmp_path / "run",
+            performance_root=tmp_path / "performance",
+            executable=True,
+        )
+
+
+def test_build_release_request_rejects_missing_benchmark_scenario(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    canonical_release_configs: tuple[Path, Path],
+) -> None:
+    scenario_path, environment_path = canonical_release_configs
+    (tmp_path / "loadtest.yaml").unlink()
+    monkeypatch.setattr(
+        release_plan,
+        "git_state",
+        lambda _root: GitState(commit="a" * 40, clean=True),
+    )
+
+    with pytest.raises(ValueError, match="benchmark scenario must be a file"):
+        release_plan.build_release_request(
+            repo_root=NANOLAB_ROOT,
+            nanofaas_root=NANOFAAS_ROOT,
+            scenario_path=scenario_path,
+            environment_path=environment_path,
+            release_config_path=None,
+            run_dir=tmp_path / "run",
+            performance_root=tmp_path / "performance",
+        )
+
+
+def test_build_release_request_rejects_symlink_credential(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    canonical_release_configs: tuple[Path, Path],
+) -> None:
+    scenario_path, environment_path = canonical_release_configs
+    secrets = tmp_path / "secrets"
+    secrets.mkdir()
+    target = secrets / "real-token"
+    target.write_text("token", encoding="utf-8")
+    target.chmod(0o600)
+    token = secrets / "ghcr-token"
+    token.symlink_to(target)
+    key = secrets / "cosign.key"
+    password = secrets / "cosign.password"
+    for path in (key, password):
+        path.write_text(path.name, encoding="utf-8")
+        path.chmod(0o600)
+    credential_path = tmp_path / "credentials.yaml"
+    credential_path.write_text(
+        yaml.safe_dump(
+            {
+                "ghcr_token_file": str(token),
+                "cosign_key_file": str(key),
+                "cosign_password_file": str(password),
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        release_plan,
+        "git_state",
+        lambda _root: GitState(commit="a" * 40, clean=True),
+    )
+
+    with pytest.raises(ValueError, match="regular file"):
+        release_plan.build_release_request(
+            repo_root=NANOLAB_ROOT,
+            nanofaas_root=NANOFAAS_ROOT,
+            scenario_path=scenario_path,
+            environment_path=environment_path,
+            release_config_path=credential_path,
+            run_dir=tmp_path / "run",
+            performance_root=tmp_path / "performance",
+            executable=True,
+        )
+
+
+def test_build_release_request_rejects_noncanonical_policy(tmp_path: Path, canonical_release_configs: tuple[Path, Path]) -> None:
+    scenario_path, environment_path = canonical_release_configs
+    scenario = yaml.safe_load(scenario_path.read_text(encoding="utf-8"))
+    scenario["release"]["profile"] = "different-profile"
+    scenario_path.write_text(yaml.safe_dump(scenario), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="canonical Azure performance policy"):
+        release_plan.build_release_request(
+            repo_root=NANOLAB_ROOT,
+            nanofaas_root=NANOFAAS_ROOT,
+            scenario_path=scenario_path,
+            environment_path=environment_path,
+            release_config_path=None,
+            run_dir=tmp_path / "run",
+            performance_root=tmp_path / "performance",
+        )
+
+
+@pytest.mark.parametrize("repository", ("nanolab", "nanofaas"))
+def test_build_release_request_rejects_credentials_inside_either_repository(
+    repository: str,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    canonical_release_configs: tuple[Path, Path],
+) -> None:
+    scenario_path, environment_path = canonical_release_configs
+    tool_root = tmp_path / "nanolab"
+    source_root = tmp_path / "nanofaas"
+    tool_root.mkdir()
+    source_root.mkdir()
+    secret_root = tool_root if repository == "nanolab" else source_root
+    credential_paths = []
+    for index, name in enumerate(("ghcr", "cosign.key", "cosign.password")):
+        path = (secret_root if index == 0 else tmp_path) / name
+        path.write_text(name, encoding="utf-8")
+        path.chmod(0o600)
+        credential_paths.append(path)
+    credential_path = tmp_path / "credentials.yaml"
+    credential_path.write_text(
+        yaml.safe_dump(
+            dict(
+                zip(
+                    ("ghcr_token_file", "cosign_key_file", "cosign_password_file"),
+                    map(str, credential_paths),
+                    strict=True,
+                )
+            )
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(release_plan, "_release_source_commit", lambda *_args: "a" * 40)
+    monkeypatch.setattr(release_plan, "validate_release_environment", lambda *_args: None)
+
+    with pytest.raises(ValueError, match="outside the repository"):
+        release_plan.build_release_request(
+            repo_root=tool_root,
+            nanofaas_root=source_root,
+            scenario_path=scenario_path,
+            environment_path=environment_path,
+            release_config_path=credential_path,
+            run_dir=tmp_path / "run",
+            performance_root=tmp_path / "performance",
+            executable=True,
+        )
+
+
+def test_build_release_request_rejects_dirty_source(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    canonical_release_configs: tuple[Path, Path],
+) -> None:
+    scenario_path, environment_path = canonical_release_configs
+    monkeypatch.setattr(
+        release_plan,
+        "git_state",
+        lambda _root: GitState(commit="a" * 40, clean=False),
+    )
+
+    with pytest.raises(ValueError, match="clean nanoFaaS Git tree"):
+        release_plan.build_release_request(
+            repo_root=NANOLAB_ROOT,
+            nanofaas_root=NANOFAAS_ROOT,
+            scenario_path=scenario_path,
+            environment_path=environment_path,
+            release_config_path=None,
+            run_dir=tmp_path / "run",
+            performance_root=tmp_path / "performance",
+        )

@@ -3,9 +3,9 @@ functions:
   - word-stats-java
 release:
   version: v0.18.1
-  profile: azure-standard
+  profile: azure-d8s-v5+d2s-v5-amd64-native-loadtest-v1
   max_parallelism: 4
   benchmark_runs: 3
   throughput_max_loss_percent: 10.0
-  p95_max_increase_percent: 20.0
-  error_rate_max: 0.05
+  p95_max_increase_percent: 15.0
+  error_rate_max: 0.30

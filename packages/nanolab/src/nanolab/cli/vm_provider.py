@@ -70,8 +70,14 @@ def vm_request_for_role(
                 azure.arm_image_urn if role == "arm-builder" else azure.image_urn
             ),
             azure_ssh_key_path=azure.ssh_key_path,
+            # An environment that declares an operator CIDR gets its NodePort
+            # ingress from secure_release_endpoints, bounded to that CIDR plus the
+            # load generator. Opening the ports at VM creation would publish them
+            # to 0.0.0.0/0 first, so it must not happen here.
             azure_open_ports=(
-                (30080, 30081, 30090) if loadtest and role == "stack" else None
+                (30080, 30081, 30090)
+                if loadtest and role == "stack" and azure.operator_source_cidr is None
+                else None
             ),
         )
     if provider == "proxmox":

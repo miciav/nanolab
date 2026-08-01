@@ -126,6 +126,50 @@ def test_run_renders_normalized_task_progress(monkeypatch) -> None:
     assert "[001.test-task] passed" in result.stdout
 
 
+def test_generic_release_run_requires_an_environment_and_never_provisions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provision = MagicMock(side_effect=AssertionError("must not provision"))
+    build = MagicMock(side_effect=AssertionError("must not build workflow"))
+    monkeypatch.setattr(product_module, "provision_environment", provision)
+    monkeypatch.setattr(product_module, "build_release_workflow", build)
+
+    result = CliRunner().invoke(
+        app,
+        ["run", "scenarios-v2/release.yaml", "--provision"],
+    )
+
+    assert result.exit_code != 0
+    assert "release workflow requires --environment" in result.output
+    assert "Traceback" not in result.output
+    provision.assert_not_called()
+    build.assert_not_called()
+
+
+def test_generic_run_help_exposes_resume() -> None:
+    result = CliRunner().invoke(app, ["run", "--help"])
+
+    assert result.exit_code == 0, result.output
+    assert "--resume" in result.output
+
+
+def test_generic_run_rejects_resume_for_non_release_workflows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    build = MagicMock()
+    monkeypatch.setattr(product_module, "_workflow", build)
+
+    result = CliRunner().invoke(
+        app,
+        ["run", "scenarios-v2/loadtest.yaml", "--resume"],
+    )
+
+    assert result.exit_code != 0
+    assert "--resume is only supported for release workflows" in result.output
+    assert "Traceback" not in result.output
+    build.assert_not_called()
+
+
 def test_run_requires_an_explicit_url_for_k8s_cli(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -282,6 +326,22 @@ def test_run_provisioned_k8s_cli_skips_the_legacy_provisioning_context(
     workflow.run.assert_called_once_with(
         select=Selection(only=None, start=None, until=None)
     )
+
+
+def test_release_provisioning_is_owned_by_sonata() -> None:
+    scenario = MagicMock(workflow="release")
+
+    assert product_module._uses_legacy_provisioning(
+        scenario, provision=True, cli_provisioned=False
+    ) is False
+
+
+def test_non_release_provisioning_still_uses_the_legacy_context() -> None:
+    scenario = MagicMock(workflow="loadtest")
+
+    assert product_module._uses_legacy_provisioning(
+        scenario, provision=True, cli_provisioned=False
+    ) is True
 
 
 def test_plan_provisioned_k8s_cli_shows_the_twelve_task_workflow() -> None:

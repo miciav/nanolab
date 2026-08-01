@@ -5,7 +5,9 @@ import os
 from pathlib import Path
 
 import pytest
+import yaml
 
+from nanolab.release.versioning import read_project_version
 from workflow_tasks.workflow.events import WorkflowEvent
 
 # Typer force-enables Rich terminal rendering (ANSI highlighting of option-like
@@ -38,6 +40,77 @@ class FakeSink:
 @pytest.fixture
 def fake_sink() -> FakeSink:
     return FakeSink()
+
+
+@pytest.fixture
+def canonical_release_configs(tmp_path: Path, nanofaas_root: Path) -> tuple[Path, Path]:
+    """The (scenario, environment) pair the release preflight accepts, in tmp_path.
+
+    Every value here is pinned by `validate_release_environment` and by the
+    canonical policy check in `build_release_request`, so it lives in one place.
+    """
+    scenario = tmp_path / "release.yaml"
+    scenario.write_text(
+        yaml.safe_dump(
+            {
+                "workflow": "release",
+                "functions": ["word-stats-java"],
+                "release": {
+                    "version": f"v{read_project_version(nanofaas_root)}",
+                    "profile": "azure-d8s-v5+d2s-v5-amd64-native-loadtest-v1",
+                    "max_parallelism": 4,
+                    "benchmark_runs": 3,
+                    "benchmark_scenario": "loadtest.yaml",
+                    "throughput_max_loss_percent": 10,
+                    "p95_max_increase_percent": 15,
+                    "error_rate_max": 0.30,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "loadtest.yaml").write_text(
+        "workflow: loadtest\nfunctions: [word-stats-java]\n", encoding="utf-8"
+    )
+    environment = tmp_path / "environment.yaml"
+    environment.write_text(
+        yaml.safe_dump(
+            {
+                "provider": "azure",
+                "roles": {
+                    "stack": {"name": "nanofaas-azure-release", "disk": "128G"},
+                    "loadgen": {"name": "nanofaas-azure-release-loadgen", "disk": "30G"},
+                    "arm-builder": {"name": "nanofaas-azure-release-arm", "disk": "64G"},
+                },
+                "azure": {
+                    "resource_group": "nanofaas-rg",
+                    "location": "westeurope",
+                    "vm_size": "Standard_D8s_v5",
+                    "loadgen_vm_size": "Standard_D2s_v5",
+                    "arm_vm_size": "Standard_D8ps_v5",
+                    "image_urn": "Canonical:ubuntu-24_04-lts:server:24.04.202607140",
+                    "arm_image_urn": "Canonical:ubuntu-24_04-lts:server-arm64:24.04.202607140",
+                    "operator_source_cidr": "8.8.8.8/32",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    return scenario, environment
+
+
+class RejectingProvider:
+    """A VM provider whose every method fails: proves a path stayed offline."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def __getattr__(self, name: str):
+        def reject(*_args, **_kwargs):
+            self.calls.append(name)
+            raise AssertionError(f"cloud provider called: {name}")
+
+        return reject
 
 
 @pytest.fixture(scope="session")

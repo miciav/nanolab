@@ -2,12 +2,21 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
+import fcntl
+import hashlib
 import ipaddress
+import json
+import os
 import re
 from pathlib import Path
+import tempfile
 
 from nanolab.config import EnvironmentConfig
+from nanolab.config.environment import ExecutionRole
 from nanolab.release.versioning import normalize_version, verify_version_consistency
+from workflow_tasks.vm.models import VmRequest
 
 
 _STACK_VM_SIZE = "Standard_D8s_v5"
@@ -21,6 +30,45 @@ _STACK_NAME = "nanofaas-azure-release"
 _LOADGEN_NAME = "nanofaas-azure-release-loadgen"
 _ARM_NAME = "nanofaas-azure-release-arm"
 _URN_COMPONENT = re.compile(r"[A-Za-z0-9._-]+")
+
+
+class ReleaseRunInProgressError(RuntimeError):
+    """Another coordinator already holds the lock for these Azure release VMs."""
+
+
+def release_lock_path(environment: EnvironmentConfig) -> Path:
+    """One lock per Azure VM identity, independent of version and run directory."""
+    azure = environment.azure
+    assert azure is not None
+    identity = json.dumps(
+        (
+            azure.resource_group.casefold(),
+            (environment.target("stack").name or "").casefold(),
+            (environment.target("loadgen").name or "").casefold(),
+        ),
+        separators=(",", ":"),
+    )
+    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+    return Path(tempfile.gettempdir()) / f"nanofaas-release-locks-{os.getuid()}" / f"{digest}.lock"
+
+
+@contextmanager
+def release_run_lock(lock_path: Path) -> Iterator[None]:
+    lock_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    descriptor = os.open(
+        lock_path,
+        os.O_CREAT | os.O_RDWR | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+        0o600,
+    )
+    try:
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise ReleaseRunInProgressError("release run is already in progress") from error
+        yield
+    finally:
+        fcntl.flock(descriptor, fcntl.LOCK_UN)
+        os.close(descriptor)
 
 
 def validate_release_environment(
@@ -88,5 +136,60 @@ def _validate_operator_source(source: str | None) -> None:
         network = ipaddress.ip_network(source, strict=True) if source is not None else None
     except ValueError:
         network = None
-    if network is None or network.prefixlen == 0:
+    if network is None or network.prefixlen == 0 or not network.is_global:
         raise ValueError("Azure operator source CIDR must be a restricted network")
+
+
+def verify_release_vm_facts(
+    environment: EnvironmentConfig,
+    provider: object,
+    role: ExecutionRole,
+    request: VmRequest,
+) -> None:
+    azure = environment.azure
+    assert azure is not None
+    facts = provider.release_vm_facts(request)  # type: ignore[attr-defined]
+    target = environment.target(role)
+    expected_size = (
+        azure.loadgen_vm_size
+        if role == "loadgen"
+        else azure.arm_vm_size
+        if role == "arm-builder"
+        else azure.vm_size
+    )
+    expected = {
+        "location": azure.location,
+        "vm_size": expected_size,
+        "disk_size_gb": int(target.disk.removesuffix("G")),
+        "image_urn": azure.arm_image_urn if role == "arm-builder" else azure.image_urn,
+    }
+    mismatches = tuple(
+        name for name, value in expected.items() if getattr(facts, name, None) != value
+    )
+    if mismatches:
+        raise RuntimeError(f"Azure release VM facts mismatch for {role}: {', '.join(mismatches)}")
+
+
+def secure_release_endpoints(
+    environment: EnvironmentConfig,
+    provider: object,
+    stack_request: VmRequest,
+    loadgen_request: VmRequest | None,
+) -> tuple[str, str]:
+    azure = environment.azure
+    assert azure is not None and azure.operator_source_cidr is not None
+    stack_host = provider.connection_host(stack_request)  # type: ignore[attr-defined]
+    sources = (azure.operator_source_cidr,)
+    if loadgen_request is not None:
+        loadgen_address = ipaddress.ip_address(
+            provider.connection_host(loadgen_request)  # type: ignore[attr-defined]
+        )
+        sources = tuple(
+            dict.fromkeys((f"{loadgen_address}/{loadgen_address.max_prefixlen}", *sources))
+        )
+    provider.restrict_inbound_sources(  # type: ignore[attr-defined]
+        stack_request,
+        ports=(30080, 30081, 30090),
+        source_cidrs=sources,
+    )
+    return f"http://{stack_host}:30080", f"http://{stack_host}:30090"
