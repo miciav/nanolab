@@ -126,6 +126,56 @@ def test_run_renders_normalized_task_progress(monkeypatch) -> None:
     assert "[001.test-task] passed" in result.stdout
 
 
+def test_generic_release_run_fails_closed_before_provisioning_or_workflow(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provision = MagicMock(side_effect=AssertionError("must not provision"))
+    build = MagicMock(side_effect=AssertionError("must not build workflow"))
+    monkeypatch.setattr(product_module, "provision_environment", provision)
+    monkeypatch.setattr(product_module, "_workflow", build)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "run",
+            "scenarios-v2/release.yaml",
+            "--environment",
+            "environments/azure.yaml.example",
+            "--provision",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "Sonata release migration is incomplete" in result.output
+    assert "Traceback" not in result.output
+    provision.assert_not_called()
+    build.assert_not_called()
+
+
+def test_generic_run_help_exposes_resume() -> None:
+    result = CliRunner().invoke(app, ["run", "--help"])
+
+    assert result.exit_code == 0, result.output
+    assert "--resume" in result.output
+
+
+def test_generic_run_rejects_resume_for_non_release_workflows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    build = MagicMock()
+    monkeypatch.setattr(product_module, "_workflow", build)
+
+    result = CliRunner().invoke(
+        app,
+        ["run", "scenarios-v2/loadtest.yaml", "--resume"],
+    )
+
+    assert result.exit_code != 0
+    assert "--resume is only supported for release workflows" in result.output
+    assert "Traceback" not in result.output
+    build.assert_not_called()
+
+
 def test_run_requires_an_explicit_url_for_k8s_cli(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

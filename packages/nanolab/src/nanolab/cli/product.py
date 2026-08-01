@@ -305,6 +305,7 @@ def install_product_commands(app: typer.Typer) -> None:
         environment: Path | None = typer.Option(None, "--environment", exists=True),
         provision: bool = typer.Option(False, "--provision"),
         keep: bool = typer.Option(False, "--keep"),
+        resume: bool = typer.Option(False, "--resume"),
         only: str | None = typer.Option(
             None,
             "--only",
@@ -330,6 +331,10 @@ def install_product_commands(app: typer.Typer) -> None:
     ) -> None:
         scenario_config = _scenario(scenario)
         environment_config = _environment(environment)
+        if scenario_config.workflow == "release":
+            raise typer.BadParameter("Sonata release migration is incomplete")
+        if resume:
+            raise typer.BadParameter("--resume is only supported for release workflows")
         if provision and environment_config.provider == "local":
             raise typer.BadParameter("--provision requires a non-local environment")
         _validate_cli_container_options(
