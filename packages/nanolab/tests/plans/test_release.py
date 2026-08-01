@@ -83,6 +83,7 @@ def test_release_request_rejects_non_azure_environment():
         ),
         run_dir=Path("/tmp/runs"),
         performance_root=Path("/tmp/perf"),
+        source_tree=Path("/tmp"),
     )
     with pytest.raises(ValueError, match="Azure"):
         build_release_workflow(req)
@@ -107,6 +108,7 @@ def test_release_request_is_frozen():
         ),
         run_dir=Path("/tmp/runs"),
         performance_root=Path("/tmp/perf"),
+        source_tree=Path("/tmp"),
     )
     with pytest.raises(Exception):
         req.version = "2.0.0"  # type: ignore[misc]
@@ -251,6 +253,11 @@ def _arm_failure_workflow(
     )
     monkeypatch.setattr(
         release_plan,
+        "extract_commit_tree",
+        lambda _repo_root, _commit, _destination: NANOFAAS_ROOT,
+    )
+    monkeypatch.setattr(
+        release_plan,
         "build_role_bindings",
         lambda *_args, **_kwargs: (
             RoleBindings(
@@ -305,6 +312,7 @@ def _arm_failure_workflow(
         release_config_path=None,
         run_dir=tmp_path / "run",
         performance_root=tmp_path / "performance",
+        source_tree=tmp_path / "tree",
     )
     secret_paths = tuple(tmp_path / name for name in ("ghcr", "cosign.key", "cosign.password"))
     for path in secret_paths:
@@ -401,6 +409,11 @@ def test_build_release_workflow_compiles_without_cloud_discovery(
         "git_state",
         lambda _root: GitState(commit="a" * 40, clean=True),
     )
+    monkeypatch.setattr(
+        release_plan,
+        "extract_commit_tree",
+        lambda _repo_root, _commit, _destination: NANOFAAS_ROOT,
+    )
     request = release_plan.build_release_request(
         repo_root=NANOLAB_ROOT,
         nanofaas_root=NANOFAAS_ROOT,
@@ -409,6 +422,7 @@ def test_build_release_workflow_compiles_without_cloud_discovery(
         release_config_path=None,
         run_dir=tmp_path / "run",
         performance_root=tmp_path / "performance",
+        source_tree=tmp_path / "tree",
     )
 
     workflow = build_release_workflow(request, provider=RejectingProvider())
@@ -563,6 +577,11 @@ def test_missing_execution_credentials_fail_before_any_provider_call(
     monkeypatch.setattr(
         release_plan, "git_state", lambda _root: GitState(commit="a" * 40, clean=True)
     )
+    monkeypatch.setattr(
+        release_plan,
+        "extract_commit_tree",
+        lambda _repo_root, _commit, _destination: NANOFAAS_ROOT,
+    )
     request = release_plan.build_release_request(
         repo_root=NANOLAB_ROOT,
         nanofaas_root=NANOFAAS_ROOT,
@@ -571,6 +590,7 @@ def test_missing_execution_credentials_fail_before_any_provider_call(
         release_config_path=None,
         run_dir=tmp_path / "run",
         performance_root=tmp_path / "performance",
+        source_tree=tmp_path / "tree",
     )
     workflow = build_release_workflow(request, provider=provider)
 
@@ -630,6 +650,11 @@ def test_build_release_request_is_offline_and_builds_current_matrix(
         "git_state",
         lambda _root: GitState(commit="a" * 40, clean=True),
     )
+    monkeypatch.setattr(
+        release_plan,
+        "extract_commit_tree",
+        lambda _repo_root, _commit, _destination: NANOFAAS_ROOT,
+    )
 
     request = release_plan.build_release_request(
         repo_root=NANOLAB_ROOT,
@@ -639,6 +664,7 @@ def test_build_release_request_is_offline_and_builds_current_matrix(
         release_config_path=credential_path,
         run_dir=tmp_path / "run",
         performance_root=tmp_path / "performance",
+        source_tree=tmp_path / "tree",
         executable=True,
     )
 
@@ -684,6 +710,7 @@ def test_build_release_request_requires_credentials_for_execution(tmp_path: Path
             release_config_path=None,
             run_dir=tmp_path / "run",
             performance_root=tmp_path / "performance",
+            source_tree=tmp_path / "tree",
             executable=True,
         )
 
@@ -710,6 +737,7 @@ def test_build_release_request_rejects_missing_benchmark_scenario(
             release_config_path=None,
             run_dir=tmp_path / "run",
             performance_root=tmp_path / "performance",
+            source_tree=tmp_path / "tree",
         )
 
 
@@ -747,6 +775,11 @@ def test_build_release_request_rejects_symlink_credential(
         "git_state",
         lambda _root: GitState(commit="a" * 40, clean=True),
     )
+    monkeypatch.setattr(
+        release_plan,
+        "extract_commit_tree",
+        lambda _repo_root, _commit, _destination: NANOFAAS_ROOT,
+    )
 
     with pytest.raises(ValueError, match="regular file"):
         release_plan.build_release_request(
@@ -757,6 +790,7 @@ def test_build_release_request_rejects_symlink_credential(
             release_config_path=credential_path,
             run_dir=tmp_path / "run",
             performance_root=tmp_path / "performance",
+            source_tree=tmp_path / "tree",
             executable=True,
         )
 
@@ -776,6 +810,7 @@ def test_build_release_request_rejects_noncanonical_policy(tmp_path: Path, canon
             release_config_path=None,
             run_dir=tmp_path / "run",
             performance_root=tmp_path / "performance",
+            source_tree=tmp_path / "tree",
         )
 
 
@@ -813,6 +848,11 @@ def test_build_release_request_rejects_credentials_inside_either_repository(
     )
     monkeypatch.setattr(release_plan, "_release_source_commit", lambda *_args: "a" * 40)
     monkeypatch.setattr(release_plan, "validate_release_environment", lambda *_args: None)
+    monkeypatch.setattr(
+        release_plan,
+        "extract_commit_tree",
+        lambda _repo_root, _commit, _destination: source_root,
+    )
 
     with pytest.raises(ValueError, match="outside the repository"):
         release_plan.build_release_request(
@@ -823,6 +863,7 @@ def test_build_release_request_rejects_credentials_inside_either_repository(
             release_config_path=credential_path,
             run_dir=tmp_path / "run",
             performance_root=tmp_path / "performance",
+            source_tree=tmp_path / "tree",
             executable=True,
         )
 
@@ -848,4 +889,40 @@ def test_build_release_request_rejects_dirty_source(
             release_config_path=None,
             run_dir=tmp_path / "run",
             performance_root=tmp_path / "performance",
+            source_tree=tmp_path / "tree",
         )
+
+
+def test_build_release_request_plans_from_the_commit_not_the_worktree(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    canonical_release_configs: tuple[Path, Path],
+) -> None:
+    """Gitignored leftovers in the checkout must not reach the image matrix."""
+    scenario_path, environment_path = canonical_release_configs
+    monkeypatch.setattr(
+        release_plan, "git_state", lambda _root: GitState(commit="a" * 40, clean=True)
+    )
+    extracted: list[tuple[Path, str, Path]] = []
+
+    def fake_extract(repo_root: Path, commit: str, destination: Path) -> Path:
+        extracted.append((repo_root, commit, destination))
+        return NANOFAAS_ROOT
+
+    monkeypatch.setattr(release_plan, "extract_commit_tree", fake_extract)
+    source_tree = tmp_path / "tree"
+
+    request = release_plan.build_release_request(
+        repo_root=NANOLAB_ROOT,
+        nanofaas_root=NANOFAAS_ROOT,
+        scenario_path=scenario_path,
+        environment_path=environment_path,
+        release_config_path=None,
+        run_dir=tmp_path / "run",
+        performance_root=tmp_path / "performance",
+        source_tree=source_tree,
+    )
+
+    assert extracted == [(NANOFAAS_ROOT, "a" * 40, source_tree)]
+    assert request.source_tree == NANOFAAS_ROOT
+    assert request.image_plan.cells

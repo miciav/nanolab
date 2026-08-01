@@ -33,6 +33,7 @@ from nanolab.images.plan import DEFAULT_REGISTRY, ImagePlan, build_image_plan
 from nanolab.release.arm import build_arm64_image_plan
 from nanolab.release import arm as release_arm
 from nanolab.release import build as release_build
+from nanolab.release.build import extract_commit_tree
 from nanolab.release.environment import validate_release_environment
 from nanolab.release.evidence import release_evidence_verifiers
 from nanolab.release.benchmark import (
@@ -109,6 +110,7 @@ class ReleaseRequest:
     settings: ReleaseSettings
     run_dir: Path
     performance_root: Path
+    source_tree: Path
     credentials: CredentialFiles | None = None
     nanofaas_root: Path | None = None  # defaults to repo_root
     identity: ReleaseIdentity | None = None
@@ -143,6 +145,7 @@ def build_release_request(
     release_config_path: Path | None,
     run_dir: Path,
     performance_root: Path,
+    source_tree: Path,
     executable: bool = False,
 ) -> ReleaseRequest:
     """Validate local release inputs without constructing cloud infrastructure."""
@@ -177,6 +180,9 @@ def build_release_request(
     environment = EnvironmentConfig.model_validate(_read_yaml(environment_file))
     plain_version, version_tag = normalize_version(release.version)
     source_commit = _release_source_commit(source_root, plain_version)
+    # Plan from the commit, never from the checkout: ignored build output and
+    # untracked files must not be able to add cells the archive cannot build.
+    planning_root = extract_commit_tree(source_root, source_commit, Path(source_tree))
     validate_release_environment(environment, source_root, plain_version)
 
     credentials = None
@@ -197,7 +203,7 @@ def build_release_request(
         raise ValueError("release credential config is required for execution")
 
     image_plan = build_image_plan(
-        source_root,
+        planning_root,
         version_tag,
         registry=DEFAULT_REGISTRY,
         architectures=("amd64",),
@@ -225,6 +231,7 @@ def build_release_request(
         settings=settings,
         run_dir=Path(run_dir).expanduser().resolve(),
         performance_root=Path(performance_root).expanduser().resolve(),
+        source_tree=planning_root,
         credentials=credentials,
         identity=ReleaseIdentity(
             source_commit=source_commit,
@@ -444,7 +451,7 @@ def build_release_workflow(
 
     # --- Phase 9: ARM64 Build ---
     arm_plan = build_arm64_image_plan(
-        nanofaas,
+        request.source_tree,
         request.version,
         registry=request.image_plan.registry,
     )
@@ -536,7 +543,7 @@ def build_release_workflow(
 
     # --- Publish, attest, and finalize ---
     pub_plan = release_publish.build_publish_plan(
-        nanofaas,
+        request.source_tree,
         request.version,
         local_registry=request.image_plan.registry,
     )

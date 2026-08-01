@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import shlex
 import subprocess
+import tarfile
 import tempfile
 import textwrap
 from typing import TYPE_CHECKING, Any
@@ -354,6 +355,35 @@ def amd64_build_commands(
         for cell in plan.image_plan.gradle_cells
     )
     return tuple(commands)
+
+
+def extract_commit_tree(repo_root: Path, commit: str, destination: Path) -> Path:
+    """Materialize one commit as a plain tree, free of worktree state.
+
+    Planning reads this instead of the checkout, so ignored build output and
+    untracked files cannot add phantom targets to the image matrix.
+    """
+    output = Path(destination)
+    output.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(prefix=".commit-tree.", suffix=".tar")
+    os.close(descriptor)
+    archive = Path(temporary_name)
+    try:
+        subprocess.run(
+            ("git", "archive", "--format=tar", f"--output={archive}", commit),
+            cwd=Path(repo_root),
+            check=True,
+        )
+        with tarfile.open(archive) as bundle:
+            bundle.extractall(output, filter="data")
+    except (subprocess.CalledProcessError, tarfile.TarError, OSError) as error:
+        # The CLI turns ValueError from the preflight into a clean BadParameter;
+        # git and tarfile raise neither, so normalize here rather than leaking a
+        # traceback out of an offline preflight.
+        raise ValueError(f"could not extract release source for {commit}") from error
+    finally:
+        archive.unlink(missing_ok=True)
+    return output
 
 
 def create_source_archive(

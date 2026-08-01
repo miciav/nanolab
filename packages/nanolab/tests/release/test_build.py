@@ -732,3 +732,30 @@ def test_resume_on_recreated_vm_restages_verified_source_before_rebuilding(
     ]
     invalidation = next(payload for payload in payloads if payload["kind"] == "invalidation")
     assert invalidation["invalidateFrom"] == "amd64-build"
+
+
+def test_extract_commit_tree_ignores_worktree_only_paths(tmp_path: Path) -> None:
+    """The extraction is the commit, so ignored and untracked junk cannot leak."""
+    from nanolab.release.build import extract_commit_tree
+
+    repo = tmp_path / "repo"
+    (repo / "functions/python/solo").mkdir(parents=True)
+    (repo / "functions/python/solo/function.yaml").write_text("name: solo\n", encoding="utf-8")
+    (repo / ".gitignore").write_text("build/\n", encoding="utf-8")
+    for argv in (
+        ("git", "init", "-q"),
+        ("git", "add", "-A"),
+        ("git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init"),
+    ):
+        subprocess.run(argv, cwd=repo, check=True)
+    commit = subprocess.run(
+        ("git", "rev-parse", "HEAD"), cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    # Leftovers of the shape that broke the release: gitignored, so the tree stays clean.
+    (repo / "functions/java/figlet/build").mkdir(parents=True)
+    (repo / "functions/java/figlet/payloads").mkdir(parents=True)
+
+    destination = extract_commit_tree(repo, commit, tmp_path / "tree")
+
+    assert (destination / "functions/python/solo/function.yaml").is_file()
+    assert not (destination / "functions/java/figlet").exists()
