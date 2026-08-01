@@ -10,7 +10,10 @@ from nanolab.release import tasks as release_tasks
 from nanolab.release.state import ReleaseIdentity, digest_path
 from nanolab.release.tasks import (
     amd64_build_task,
+    arm64_build_task,
+    arm64_smoke_task,
     registry_push_task,
+    registry_artifacts_from_receipt,
     run_image_steps,
     source_test_task,
 )
@@ -263,6 +266,101 @@ def test_benchmark_gate_tasks_form_a_digest_prerequisite_chain(tmp_path: Path) -
     assert aggregate.prerequisites == tuple(task.receipt for task in runs)
     assert gate.prerequisites == (aggregate.receipt,)
     assert len({task.reuse_key for task in (*runs, aggregate, gate)}) == 5
+
+
+def test_arm_tasks_form_gate_build_smoke_digest_chain(tmp_path: Path) -> None:
+    digest = "sha256:" + "d" * 64
+    gate = tmp_path / "regression-gate.json"
+    build = arm64_build_task(
+        identity=_identity(),
+        run_dir=tmp_path,
+        phase_inputs={"images": ["image:v1-arm64"]},
+        prerequisites=(gate,),
+        expected_images=("image:v1-arm64",),
+        work=lambda _inputs: (
+            Evidence("local-registry-digest", "docker://image:v1-arm64", digest),
+        ),
+    )
+    gate.write_text("passed", encoding="utf-8")
+    build.run(TaskInputs.empty())
+    smoke = arm64_smoke_task(
+        identity=_identity(),
+        run_dir=tmp_path,
+        phase_inputs={"images": ["image:v1-arm64"]},
+        prerequisites=(build.receipt,),
+        expected_images=("image:v1-arm64",),
+        work=lambda _inputs: (
+            Evidence("local-registry-digest", "docker://image:v1-arm64", digest),
+        ),
+    )
+
+    smoke.run(TaskInputs.empty())
+
+    assert build.phase == "arm64-build"
+    assert smoke.phase == "arm64-smoke"
+    assert build.prerequisites == (gate,)
+    assert smoke.prerequisites == (build.receipt,)
+
+
+def test_arm_work_never_starts_without_its_prerequisite(tmp_path: Path) -> None:
+    called = False
+
+    def work(_inputs: TaskInputs):
+        nonlocal called
+        called = True
+        return ()
+
+    task = arm64_build_task(
+        identity=_identity(),
+        run_dir=tmp_path,
+        phase_inputs={},
+        prerequisites=(tmp_path / "missing-gate.json",),
+        work=work,
+    )
+
+    with pytest.raises(FileNotFoundError):
+        task.run(TaskInputs.empty())
+
+    assert called is False
+
+
+@pytest.mark.parametrize(
+    "payload",
+    (
+        [],
+        {"phase": "wrong", "evidence": []},
+        {"phase": "arm64-build", "evidence": {}},
+        {"phase": "arm64-build", "evidence": ["bad"]},
+        {
+            "phase": "arm64-build",
+            "evidence": [
+                {
+                    "kind": "unexpected",
+                    "reference": "docker://image:v1",
+                    "digest": "sha256:" + "a" * 64,
+                }
+            ],
+        },
+        {
+            "phase": "arm64-build",
+            "evidence": [
+                {"kind": "local-registry-digest", "reference": 1, "digest": "sha256:" + "a" * 64}
+            ],
+        },
+        {
+            "phase": "arm64-build",
+            "evidence": [
+                {"kind": "local-registry-digest", "reference": "docker://image:v1", "digest": None}
+            ],
+        },
+    ),
+)
+def test_arm_receipt_parser_rejects_malformed_schema(payload, tmp_path: Path) -> None:
+    receipt = tmp_path / "arm64-build.json"
+    receipt.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="invalid arm64-build receipt"):
+        registry_artifacts_from_receipt(receipt, ("image:v1",))
 
 
 def test_image_steps_capture_every_current_registry_digest() -> None:

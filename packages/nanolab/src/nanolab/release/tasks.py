@@ -16,8 +16,9 @@ from sonata_engine import Evidence, ReusableTask, Task, TaskInputs, TaskOutcome
 from workflow_tasks.execution.bindings import CommandTaskExecutor
 from workflow_tasks.tasks.models import CommandTaskSpec
 
-from nanolab.release.evidence import is_sha256_digest
+from nanolab.release.evidence import is_sha256_digest, receipt_artifacts
 from nanolab.release.state import ReleaseIdentity, digest_path
+from nanolab.release.state import ArtifactEvidence
 
 
 PhaseWork = Callable[[TaskInputs], Iterable[Evidence]]
@@ -76,6 +77,9 @@ class ReleasePhaseTask(ReusableTask):
         return f"release:{self.phase}:sha256:{hashlib.sha256(encoded.encode()).hexdigest()}"
 
     def run(self, inputs: TaskInputs) -> TaskOutcome[None]:
+        prerequisite_evidence = tuple(
+            Evidence("file-digest", str(path), digest_path(path)) for path in self.prerequisites
+        )
         produced = tuple(self.work(inputs))
         if self.expected_images:
             registry_evidence = tuple(
@@ -89,9 +93,6 @@ class ReleasePhaseTask(ReusableTask):
             ):
                 raise RuntimeError("local-registry-push evidence does not cover the image matrix")
 
-        prerequisite_evidence = tuple(
-            Evidence("file-digest", str(path), digest_path(path)) for path in self.prerequisites
-        )
         _write_receipt(self.receipt, self.phase, produced)
         receipt = Evidence("file-digest", str(self.receipt), digest_path(self.receipt))
         return TaskOutcome(evidence=prerequisite_evidence + produced + (receipt,))
@@ -122,9 +123,36 @@ def aggregate_benchmarks_task(**kwargs: Any) -> ReleasePhaseTask:
 
 
 def regression_gate_task(**kwargs: Any) -> ReleasePhaseTask:
-    return ReleasePhaseTask(
-        phase="regression-gate", title="Evaluate regression gate", **kwargs
+    return ReleasePhaseTask(phase="regression-gate", title="Evaluate regression gate", **kwargs)
+
+
+def arm64_build_task(**kwargs: Any) -> ReleasePhaseTask:
+    return ReleasePhaseTask(phase="arm64-build", title="Build ARM64 images", **kwargs)
+
+
+def arm64_smoke_task(**kwargs: Any) -> ReleasePhaseTask:
+    return ReleasePhaseTask(phase="arm64-smoke", title="Test ARM64 images", **kwargs)
+
+
+def registry_evidence(artifacts: Iterable[ArtifactEvidence]) -> tuple[Evidence, ...]:
+    return tuple(
+        Evidence("local-registry-digest", artifact.reference, artifact.digest)
+        for artifact in artifacts
     )
+
+
+def registry_artifacts_from_receipt(
+    receipt: Path, images: tuple[str, ...]
+) -> tuple[ArtifactEvidence, ...]:
+    evidence = receipt_artifacts(receipt, "arm64-build", "local-registry-digest")
+    expected = {f"docker://{image}" for image in images}
+    if (
+        len(evidence) != len(expected)
+        or {item.reference for item in evidence} != expected
+        or any(not is_sha256_digest(item.digest) for item in evidence)
+    ):
+        raise RuntimeError("ARM64 build receipt does not cover the image matrix")
+    return evidence
 
 
 def run_source_steps(steps: Task[Any], inputs: TaskInputs) -> tuple[Evidence, ...]:

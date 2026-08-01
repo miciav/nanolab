@@ -265,8 +265,8 @@ def arm64_build_composite(
 ) -> Steps:
     """Build ARM64 images on a remote buildx builder.
 
-    Sets up a registry tunnel, creates and bootstraps a buildx
-    builder, runs the bake, then builds each Gradle native image.
+    Uses the builder and registry tunnel owned by workflow resources, then runs
+    the bake and each Gradle native build.
     Uses the remote VM's toolchain via the given execution role.
 
     Parameters
@@ -292,36 +292,6 @@ def arm64_build_composite(
     # not available here yet; the current shape runs the full bake +
     # all gradle builds as a single batch step.
     steps: list[Any] = []
-
-    # ponytail: registry tunnel is handled by registry_tunnel_resource in the
-    # parent workflow DAG — the composite assumes it is already running.
-    steps.append(
-        CommandTask(
-            title="Create ARM64 buildx builder",
-            argv=(
-                "docker",
-                "buildx",
-                "create",
-                "--name",
-                builder_name,
-                "--driver",
-                "docker-container",
-                "--use",
-            ),
-            executor=executor,
-            role=role,
-            cwd=Path(remote_source_dir) if remote_source_dir else None,
-        )
-    )
-    steps.append(
-        CommandTask(
-            title="Bootstrap ARM64 buildx builder",
-            argv=("docker", "buildx", "inspect", builder_name, "--bootstrap"),
-            executor=executor,
-            role=role,
-            cwd=Path(remote_source_dir) if remote_source_dir else None,
-        )
-    )
 
     arm64_cells = [c for c in plan.cells if c.architecture == "arm64"]
     arm64_bake_cells = [c for c in arm64_cells if c.build_kind == "bake"]

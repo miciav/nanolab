@@ -13,13 +13,10 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from sonata_engine import JournalConfig, Workflow
-from sonata_tasks.archive import source_archive_resource
+from sonata_engine import Evidence, JournalConfig, Workflow
 from sonata_tasks.buildx import buildx_builder_resource
 from sonata_tasks.release_composites import (
     amd64_build_composite,
-    arm64_build_composite,
-    arm64_smoke_composite,
     attest_composite,
     publish_aliases_composite,
     publish_architectures_composite,
@@ -37,6 +34,8 @@ from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.images.plan import DEFAULT_REGISTRY, ImagePlan, build_image_plan
 from nanolab.release.arm import build_arm64_image_plan
+from nanolab.release import arm as release_arm
+from nanolab.release import build as release_build
 from nanolab.release.environment import validate_release_environment
 from nanolab.release.benchmark import (
     performance_profile,
@@ -46,17 +45,32 @@ from nanolab.release.benchmark import (
     run_sonata_regression_gate,
 )
 from nanolab.release.publish import build_publish_plan
-from nanolab.release.resources import build_release_resources
-from nanolab.release.run import CredentialFiles, ReleaseSettings, git_state, source_test_commands
+from nanolab.release.resources import (
+    arm_build_inputs_resource,
+    build_release_resources,
+    build_release_source_resources,
+)
+from nanolab.release.run import (
+    Amd64ReleasePlan,
+    BuilderConfiguration,
+    CredentialFiles,
+    ReleaseSettings,
+    git_state,
+    source_test_commands,
+)
 from nanolab.release.state import ReleaseIdentity, digest_path
 from nanolab.release.tasks import (
     aggregate_benchmarks_task,
     amd64_build_task,
+    arm64_build_task,
+    arm64_smoke_task,
     benchmark_task,
     registry_push_task,
     regression_gate_task,
     run_image_steps,
     run_source_steps,
+    registry_artifacts_from_receipt,
+    registry_evidence,
     source_test_task,
     versioned_release_run_dir,
 )
@@ -231,23 +245,25 @@ def build_release_workflow(
     arm_req = vm_request_for_role(env, "arm-builder")
     bindings, fetcher = build_role_bindings(env, vm_provider=provider, repo_root=nanofaas)
     executor = RoleBoundCommandTaskExecutor(bindings)
-    stack_host = "<release-stack>"
-
     remote_root = f"/home/azureuser/nanofaas-release/{request.version}"
     source_dir = f"{remote_root}/source"
+    release_dir = versioned_release_run_dir(request.run_dir, identity.prepared_version)
 
     wf = Workflow(workflow_id=f"release-{request.version}")
 
     # --- Phase 1: Source Tests ---
-    archive = source_archive_resource(
+    sources = build_release_source_resources(
         repo_root=nanofaas,
         commit=source_commit,
+        run_dir=release_dir,
         remote_source_dir=source_dir,
         remote_archive=f"{remote_root}/source.tar",
         provider=provider,
-        request=stack_req,
+        stack_request=stack_req,
+        arm_request=arm_req,
+        stack_requires=(infrastructure.stack,),
+        arm_requires=(infrastructure.arm_builder,),
     )
-    archive = replace(archive, requires=(infrastructure.stack,))
     source_commands = source_test_commands(Path(source_dir))
     source_steps = source_tests_composite(source_commands, executor=executor)
     source_tests = source_test_task(
@@ -397,8 +413,22 @@ def build_release_workflow(
     )
 
     # --- Phase 9: ARM64 Build ---
+    arm_plan = build_arm64_image_plan(
+        nanofaas,
+        request.version,
+        registry=request.image_plan.registry,
+    )
+    arm_inputs = arm_build_inputs_resource(
+        image_plan=arm_plan,
+        max_parallelism=request.settings.max_parallelism,
+        run_dir=release_dir,
+        remote_root=remote_root,
+        provider=provider,
+        request=arm_req,
+        requires=(infrastructure.arm_builder,),
+    )
     tunnel = registry_tunnel_resource(
-        registry_upstream=stack_host,
+        registry_upstream=lambda: provider.connection_host(stack_req),
         provider=provider,
         request=arm_req,
         requires=(infrastructure.stack, infrastructure.arm_builder),
@@ -407,28 +437,71 @@ def build_release_workflow(
         name=f"release-arm64-{request.version}",
         executor=executor,
         role="arm-builder",
-        requires=(infrastructure.arm_builder,),
+        requires=(infrastructure.arm_builder, arm_inputs),
+        buildkitd_config=f"{remote_root}/buildkitd.toml",
+        validate=release_arm.require_arm64_builder,
+        replace_existing=True,
     )
-    arm_plan = build_arm64_image_plan(
-        nanofaas,
-        request.version,
-        registry=request.image_plan.registry,
+    arm_runtime_plan = Amd64ReleasePlan(
+        repo_root=nanofaas,
+        run_dir=release_dir / "domain",
+        version=identity.prepared_version,
+        identity=identity,
+        environment=env,
+        scenario=request.scenario,
+        settings=request.settings,
+        image_plan=request.image_plan,
+        builder=BuilderConfiguration(
+            name=f"release-arm64-{request.version}",
+            max_parallelism=request.settings.max_parallelism,
+        ),
+        bake_file=release_dir / "docker-bake-arm64.json",
+        buildkit_config=release_dir / "buildkitd.toml",
+        performance_root=request.performance_root,
+        credentials=request.credentials,
     )
-    arm64_build = arm64_build_composite(
-        arm_plan,
-        executor=executor,
-        role="arm-builder",
-        builder_name=f"release-arm64-{request.version}",
-        remote_bake_file=f"{remote_root}/docker-bake-arm64.json",
-        remote_source_dir=source_dir,
-        registry_upstream=stack_host,
+    arm_images = tuple(cell.image for cell in arm_plan.cells)
+    arm64_build = arm64_build_task(
+        identity=identity,
+        run_dir=request.run_dir,
+        phase_inputs={"images": arm_images, "source": identity.source_commit},
+        prerequisites=(reg_gate.receipt, source_tests.receipt),
+        expected_images=arm_images,
+        work=lambda _inputs: registry_evidence(
+            release_build._build_arm64_images(  # noqa: SLF001
+                arm_runtime_plan,
+                arm_plan,
+                arm_runtime_plan.bake_file,
+                provider,
+                arm_req,
+                f"{remote_root}/docker-bake-arm64.json",
+                f"{remote_root}/buildkitd.toml",
+                source_dir,
+                registry_upstream="",
+                stage_inputs=False,
+                manage_resources=False,
+            )
+        ),
     )
 
     # --- Phase 10: ARM64 Smoke ---
-    arm64_smoke = arm64_smoke_composite(
-        arm_plan,
-        executor=executor,
-        role="arm-builder",
+    arm64_smoke = arm64_smoke_task(
+        identity=identity,
+        run_dir=request.run_dir,
+        phase_inputs={"images": arm_images},
+        prerequisites=(arm64_build.receipt,),
+        work=lambda _inputs: tuple(
+            Evidence("file-digest", artifact.reference, artifact.digest)
+            for artifact in release_build._smoke_arm64_images(  # noqa: SLF001
+                arm_runtime_plan,
+                arm_plan,
+                provider,
+                arm_req,
+                registry_artifacts_from_receipt(arm64_build.receipt, arm_images),
+                registry_upstream="",
+                ensure_tunnel=False,
+            )
+        ),
     )
 
     # --- Phase 11: Publish ---
@@ -477,9 +550,13 @@ def build_release_workflow(
     # --- Wire the DAG ---
     # Order of wf.add() defines execution order. requires only lists Resource
     # objects that need acquire/release spliced around their consumers.
-    wf.add(source_tests, requires=(infrastructure.stack, archive))  # pyright: ignore[reportArgumentType]
     wf.add(  # pyright: ignore[reportArgumentType]
-        amd64_build, requires=(infrastructure.stack, amd64_builder)
+        source_tests,
+        requires=(infrastructure.stack, sources.stack),
+    )
+    wf.add(  # pyright: ignore[reportArgumentType]
+        amd64_build,
+        requires=(infrastructure.stack, sources.stack, amd64_builder),
     )
     wf.add(registry_push, requires=(infrastructure.stack,))  # pyright: ignore[reportArgumentType]
     for benchmark in benchmark_runs:
@@ -500,10 +577,14 @@ def build_release_workflow(
             infrastructure.arm_builder,
             tunnel,
             arm64_builder,
-            archive,
+            sources.arm,
+            arm_inputs,
         ),
     )
-    wf.add(arm64_smoke, requires=(infrastructure.arm_builder,))  # pyright: ignore[reportArgumentType]
+    wf.add(  # pyright: ignore[reportArgumentType]
+        arm64_smoke,
+        requires=(infrastructure.stack, infrastructure.arm_builder, tunnel),
+    )
     wf.add(pub_arch, requires=(infrastructure.stack,))  # pyright: ignore[reportArgumentType]
     wf.add(pub_manifests, requires=(infrastructure.stack,))  # pyright: ignore[reportArgumentType]
     wf.add(pub_aliases, requires=(infrastructure.stack,))  # pyright: ignore[reportArgumentType]

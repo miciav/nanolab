@@ -500,29 +500,45 @@ def _build_arm64_images(
     remote_source_dir: str,
     *,
     registry_upstream: str,
+    stage_inputs: bool = True,
+    manage_resources: bool = True,
 ) -> tuple[ArtifactEvidence, ...]:
-    bake_file.write_text(render_bake_json(image_plan), encoding="utf-8")
-    _provider_exec(provider, request, ("mkdir", "-p", str(Path(remote_bake).parent)))
-    for source, destination in (
-        (bake_file, remote_bake),
-        (plan.buildkit_config, remote_buildkit),
-    ):
-        _provider_transfer_to(
-            provider,
-            request,
-            source=source,
-            destination=destination,
-            action=f"transfer {source.name}",
-        )
-    _reset_named_builder(plan, provider, request)
-    for command in arm.arm64_build_commands(
+    if stage_inputs:
+        bake_file.write_text(render_bake_json(image_plan), encoding="utf-8")
+        _provider_exec(provider, request, ("mkdir", "-p", str(Path(remote_bake).parent)))
+        for source, destination in (
+            (bake_file, remote_bake),
+            (plan.buildkit_config, remote_buildkit),
+        ):
+            _provider_transfer_to(
+                provider,
+                request,
+                source=source,
+                destination=destination,
+                action=f"transfer {source.name}",
+            )
+    if manage_resources:
+        _reset_named_builder(plan, provider, request)
+    commands = arm.arm64_build_commands(
         image_plan,
         builder_name=plan.builder.name,
         remote_bake_file=remote_bake,
         remote_buildkit_config=remote_buildkit,
         remote_source_dir=remote_source_dir,
         registry_upstream=registry_upstream,
-    ):
+    )
+    if not manage_resources:
+        commands = tuple(
+            command
+            for command in commands
+            if command.task_id
+            not in {
+                "release.arm64.registry-tunnel",
+                "release.arm64.builder-create",
+                "release.arm64.builder",
+            }
+        )
+    for command in commands:
         result = _provider_exec(
             provider,
             request,
@@ -559,9 +575,11 @@ def _smoke_arm64_images(
     expected_build_evidence: Iterable[ArtifactEvidence],
     *,
     registry_upstream: str,
+    ensure_tunnel: bool = True,
 ) -> tuple[ArtifactEvidence, ...]:
     _assert_guarded_source(plan)
-    _provider_exec(provider, request, arm.registry_tunnel_command(registry_upstream))
+    if ensure_tunnel:
+        _provider_exec(provider, request, arm.registry_tunnel_command(registry_upstream))
     expected = tuple(expected_build_evidence)
     arm.require_complete_arm64_evidence(image_plan, expected)
     current = tuple(

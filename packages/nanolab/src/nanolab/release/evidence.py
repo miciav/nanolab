@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+import json
 from pathlib import Path
 import re
 
 from sonata_engine import Evidence, Verifier
 
 from nanolab.release.build import _remote_image_digest
-from nanolab.release.state import digest_path
+from nanolab.release.state import ArtifactEvidence, digest_path
 
 
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
@@ -18,6 +19,34 @@ DigestReader = Callable[[str], str | None]
 
 def is_sha256_digest(value: str | None) -> bool:
     return isinstance(value, str) and _DIGEST.fullmatch(value) is not None
+
+
+def receipt_artifacts(path: Path, phase: str, expected_kind: str) -> tuple[ArtifactEvidence, ...]:
+    """Parse one release receipt with a single fail-closed schema."""
+    try:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError(f"invalid {phase} receipt") from error
+    if (
+        not isinstance(payload, Mapping)
+        or set(payload) - {"phase", "execution", "evidence"}
+        or payload.get("phase") != phase
+        or ("execution" in payload and not isinstance(payload["execution"], str))
+        or not isinstance(payload.get("evidence"), list)
+    ):
+        raise ValueError(f"invalid {phase} receipt")
+    evidence = payload["evidence"]
+    if any(
+        not isinstance(item, Mapping)
+        or set(item) != {"kind", "reference", "digest"}
+        or item.get("kind") != expected_kind
+        or not isinstance(item.get("reference"), str)
+        or not isinstance(item.get("digest"), str)
+        for item in evidence
+    ):
+        raise ValueError(f"invalid {phase} receipt")
+    location = "remote" if expected_kind == "local-registry-digest" else "local"
+    return tuple(ArtifactEvidence(location, item["reference"], item["digest"]) for item in evidence)
 
 
 def file_digest_verifier(evidence: Evidence) -> bool:

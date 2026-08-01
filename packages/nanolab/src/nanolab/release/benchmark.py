@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 from sonata_engine import Evidence
 
 from nanolab.functions.catalog import resolve_function_definition
+from nanolab.release.evidence import receipt_artifacts as _receipt_artifacts
 from nanolab.release.metrics import (
     aggregate_runs,
     PerformanceAggregate,
@@ -262,30 +263,6 @@ performance_profile = _performance_profile
 regression_policy = _regression_policy
 
 
-def _receipt_artifacts(
-    path: Path, phase: str, expected_kind: str
-) -> tuple[ArtifactEvidence, ...]:
-    payload = _read_json_file(path)
-    evidence = payload.get("evidence")
-    if (
-        payload.get("phase") != phase
-        or not isinstance(evidence, list)
-        or any(
-            not isinstance(item, Mapping) or item.get("kind") != expected_kind
-            for item in evidence
-        )
-    ):
-        raise ValueError(f"invalid {phase} receipt")
-    return tuple(
-        ArtifactEvidence(
-            "remote" if expected_kind == "local-registry-digest" else "local",
-            str(item["reference"]),
-            str(item["digest"]),
-        )
-        for item in evidence
-    )
-
-
 def _file_evidence(artifact: ArtifactEvidence) -> Evidence:
     return Evidence("file-digest", artifact.reference, artifact.digest)
 
@@ -304,25 +281,15 @@ def run_sonata_benchmark(
 
     digests = _registry_digest_map(
         plan,
-        _receipt_artifacts(
-            registry_receipt, "local-registry-push", "local-registry-digest"
-        ),
+        _receipt_artifacts(registry_receipt, "local-registry-push", "local-registry-digest"),
     )
     if index < 1:
         raise ValueError("benchmark index must be positive")
     run_dir = _clean_local_run_dir(Path(plan.run_dir), index)
     summary = run_dir / "summary.json"
-    role = plan.environment.target(
-        "loadgen" if "loadgen" in plan.environment.roles else "stack"
-    )
+    role = plan.environment.target("loadgen" if "loadgen" in plan.environment.roles else "stack")
     home = role.home or ("/root" if role.user == "root" else f"/home/{role.user}")
-    remote_run_dir = (
-        Path(home)
-        / "nanofaas-release"
-        / plan.version
-        / "benchmarks"
-        / f"run-{index}"
-    )
+    remote_run_dir = Path(home) / "nanofaas-release" / plan.version / "benchmarks" / f"run-{index}"
     workflow = loadtest_builder(
         plan.scenario,
         plan.environment,
@@ -421,8 +388,7 @@ def run_sonata_regression_gate(
         tuple(
             item
             for item in _release_records(plan.performance_root / "releases")
-            if str(item.get("version")).removeprefix("v")
-            != plan.version.removeprefix("v")
+            if str(item.get("version")).removeprefix("v") != plan.version.removeprefix("v")
         ),
         aggregate.profile,
     )

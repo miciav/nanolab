@@ -10,6 +10,7 @@ from sonata_tasks.registry_tunnel import registry_tunnel_resource
 
 import nanolab.release.resources as release_resources
 from nanolab.config.environment import EnvironmentConfig
+from nanolab.release.state import ArtifactEvidence
 
 
 def _environment() -> EnvironmentConfig:
@@ -227,3 +228,209 @@ def test_keep_does_not_retain_the_registry_tunnel() -> None:
     )
 
     assert tunnel.infrastructure is False
+
+
+def test_source_archive_is_created_once_and_checksum_verified_on_stack_and_arm(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    staged: list[tuple[object, str]] = []
+    digest = "sha256:" + "d" * 64
+
+    def create(_root: Path, _commit: str, destination: Path) -> ArtifactEvidence:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(b"archive")
+        return ArtifactEvidence("local", str(destination), digest)
+
+    def stage(_provider, request, **kwargs) -> None:
+        assert kwargs["expected_digest"] == digest
+        staged.append((request, kwargs["remote_source_dir"]))
+
+    monkeypatch.setattr(release_resources, "create_source_archive", create)
+    monkeypatch.setattr(release_resources, "stage_source_archive", stage)
+    stack, arm = object(), object()
+    resources = release_resources.build_release_source_resources(
+        repo_root=tmp_path,
+        commit="a" * 40,
+        run_dir=tmp_path / "run",
+        remote_source_dir="/home/user/nanofaas-release/v1/source",
+        remote_archive="/home/user/nanofaas-release/v1/source.tar",
+        provider=SimpleNamespace(exec_argv=lambda *_args, **_kwargs: None),
+        stack_request=stack,
+        arm_request=arm,
+    )
+    # Acquire/release directly keeps the contract test independent of a dummy task.
+    local = resources.local.acquire(TaskInputs.empty())
+    inputs = TaskInputs._for_resources({resources.local: local}, {resources.local})
+    resources.stack.acquire(inputs)
+    resources.arm.acquire(inputs)
+
+    assert staged == [
+        (stack, "/home/user/nanofaas-release/v1/source"),
+        (arm, "/home/user/nanofaas-release/v1/source"),
+    ]
+
+
+def test_arm_build_inputs_transfer_bake_and_buildkit_and_cleanup_on_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(release_resources, "render_bake_json", lambda _plan: "{}\n")
+
+    class Provider:
+        def __init__(self) -> None:
+            self.transfers: list[tuple[str, str]] = []
+            self.commands: list[tuple[str, ...]] = []
+
+        def transfer_to(self, _request, *, source: Path, destination: str):
+            self.transfers.append((source.name, destination))
+            return SimpleNamespace(return_code=1 if len(self.transfers) == 2 else 0, stderr="boom")
+
+        def exec_argv(self, _request, argv):
+            self.commands.append(argv)
+            return SimpleNamespace(return_code=0)
+
+    provider = Provider()
+    resource = release_resources.arm_build_inputs_resource(
+        image_plan=SimpleNamespace(cells=()),
+        max_parallelism=3,
+        run_dir=tmp_path,
+        remote_root="/home/user/nanofaas-release/v1",
+        provider=provider,
+        request=object(),
+    )
+
+    with pytest.raises(RuntimeError, match="buildkitd.toml"):
+        resource.acquire(TaskInputs.empty())
+
+    assert provider.transfers == [
+        (
+            "docker-bake-arm64.json",
+            "/home/user/nanofaas-release/v1/docker-bake-arm64.json",
+        ),
+        ("buildkitd.toml", "/home/user/nanofaas-release/v1/buildkitd.toml"),
+    ]
+    assert provider.commands[-1] == (
+        "rm",
+        "-f",
+        "--",
+        "/home/user/nanofaas-release/v1/docker-bake-arm64.json",
+        "/home/user/nanofaas-release/v1/buildkitd.toml",
+    )
+    assert not (tmp_path / "docker-bake-arm64.json").exists()
+    assert not (tmp_path / "buildkitd.toml").exists()
+
+
+@pytest.mark.parametrize(
+    ("source", "archive"),
+    (
+        ("relative/source", "relative/source.tar"),
+        ("/", "/source.tar"),
+        ("/home/user/nanofaas-release/v1/../source", "/home/user/nanofaas-release/v1/source.tar"),
+        ("/tmp/source", "/tmp/source.tar"),
+        ("/home/user/nanofaas-release/v1/source", "/home/user/nanofaas-release/v2/source.tar"),
+        ("/home/user/nanofaas-release/v1/source.tar", "/home/user/nanofaas-release/v1/source"),
+    ),
+)
+def test_release_source_resources_reject_unsafe_remote_paths(
+    source: str, archive: str, tmp_path: Path
+) -> None:
+    with pytest.raises(ValueError, match="release remote"):
+        release_resources.build_release_source_resources(
+            repo_root=tmp_path,
+            commit="a" * 40,
+            run_dir=tmp_path,
+            remote_source_dir=source,
+            remote_archive=archive,
+            provider=object(),
+            stack_request=object(),
+            arm_request=object(),
+        )
+
+
+@pytest.mark.parametrize(
+    "remote_root",
+    ("relative", "/", "/tmp/release", "/home/user/nanofaas-release/v1/.."),
+)
+def test_arm_inputs_reject_unsafe_remote_root(remote_root: str, tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="release remote"):
+        release_resources.arm_build_inputs_resource(
+            image_plan=SimpleNamespace(cells=()),
+            max_parallelism=1,
+            run_dir=tmp_path,
+            remote_root=remote_root,
+            provider=object(),
+            request=object(),
+        )
+
+
+def test_source_resource_normal_release_propagates_remote_cleanup_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    archive = tmp_path / "run" / "source.tar"
+    digest = "sha256:" + "a" * 64
+    monkeypatch.setattr(
+        release_resources,
+        "create_source_archive",
+        lambda _root, _commit, destination: (
+            destination.parent.mkdir(parents=True, exist_ok=True),
+            destination.write_bytes(b"source"),
+            ArtifactEvidence("local", str(destination), digest),
+        )[-1],
+    )
+    monkeypatch.setattr(release_resources, "stage_source_archive", lambda *_args, **_kwargs: None)
+
+    class Provider:
+        def exec_argv(self, _request, _argv):
+            return SimpleNamespace(return_code=1, stderr="cleanup failed")
+
+    resources = release_resources.build_release_source_resources(
+        repo_root=tmp_path,
+        commit="a" * 40,
+        run_dir=archive.parent,
+        remote_source_dir="/home/user/nanofaas-release/v1/source",
+        remote_archive="/home/user/nanofaas-release/v1/source.tar",
+        provider=Provider(),
+        stack_request=object(),
+        arm_request=object(),
+    )
+    local = resources.local.acquire(TaskInputs.empty())
+    inputs = TaskInputs._for_resources({resources.local: local}, {resources.local})
+    state = resources.stack.acquire(inputs)
+
+    with pytest.raises(RuntimeError, match="cleanup failed"):
+        resources.stack.release(inputs, state)
+
+
+def test_arm_inputs_normal_release_propagates_cleanup_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(release_resources, "render_bake_json", lambda _plan: "{}\n")
+
+    class Provider:
+        failing = False
+
+        def transfer_to(self, _request, *, source, destination):
+            return SimpleNamespace(return_code=0)
+
+        def exec_argv(self, _request, _argv):
+            return SimpleNamespace(
+                return_code=1 if self.failing else 0,
+                stderr="cleanup failed" if self.failing else "",
+            )
+
+    provider = Provider()
+    resource = release_resources.arm_build_inputs_resource(
+        image_plan=SimpleNamespace(cells=()),
+        max_parallelism=1,
+        run_dir=tmp_path,
+        remote_root="/home/user/nanofaas-release/v1",
+        provider=provider,
+        request=object(),
+    )
+    state = resource.acquire(TaskInputs.empty())
+    provider.failing = True
+
+    with pytest.raises(RuntimeError, match="cleanup failed"):
+        resource.release(TaskInputs.empty(), state)
+
+    assert not (tmp_path / "docker-bake-arm64.json").exists()
+    assert not (tmp_path / "buildkitd.toml").exists()

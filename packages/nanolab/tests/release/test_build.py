@@ -93,6 +93,36 @@ def test_amd64_build_commands_bind_every_bake_to_the_named_builder(
     assert all("ghcr.io" not in " ".join(command.argv) for command in commands)
 
 
+def test_sonata_owned_arm_resources_are_not_recreated_and_every_image_is_pushed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    plan = _plan(tmp_path, monkeypatch)
+    arm_plan = arm.build_arm64_image_plan(
+        plan.repo_root, plan.version, registry=plan.image_plan.registry
+    )
+    events: list[str] = []
+    provider = _ReleaseProvider(events)
+
+    evidence = release_build._build_arm64_images(
+        plan,
+        arm_plan,
+        tmp_path / "docker-bake-arm64.json",
+        provider,
+        object(),
+        "/release/docker-bake-arm64.json",
+        "/release/buildkitd.toml",
+        "/release/source",
+        registry_upstream="",
+        stage_inputs=False,
+        manage_resources=False,
+    )
+
+    assert len(evidence) == len(arm_plan.cells)
+    assert sum(event.startswith("exec:docker push") for event in events) == len(arm_plan.cells)
+    assert not any("buildx create" in event for event in events)
+    assert not any("nanofaas-registry-tunnel" in event for event in events)
+
+
 def test_source_archive_contains_only_the_exact_guarded_commit(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
