@@ -187,6 +187,15 @@ def _cli_provisioned(scenario: ScenarioConfig, *, provision: bool) -> bool:
     return provision and scenario.workflow == "cli" and scenario.backend == "k8s"
 
 
+def _uses_legacy_provisioning(
+    scenario: ScenarioConfig,
+    *,
+    provision: bool,
+    cli_provisioned: bool,
+) -> bool:
+    return provision and scenario.workflow != "release" and not cli_provisioned
+
+
 def _validate_cli_container_options(
     scenario: ScenarioConfig,
     environment: EnvironmentConfig,
@@ -369,7 +378,11 @@ def install_product_commands(app: typer.Typer) -> None:
                         repo_root=paths.nanofaas_root,
                         keep=keep,
                     )
-                    if provision and not cli_provisioned
+                    if _uses_legacy_provisioning(
+                        scenario_config,
+                        provision=provision,
+                        cli_provisioned=cli_provisioned,
+                    )
                     else nullcontext()
                 )
                 if scenario_config.workflow == "release" and scenario_config.release is not None:

@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from sonata_engine import Selection
 
 import nanolab.plans.release as release_plan
 from nanolab.config.environment import EnvironmentConfig
@@ -200,6 +201,87 @@ def _canonical_scenario(path: Path) -> Path:
         encoding="utf-8",
     )
     return path
+
+
+def test_build_release_workflow_compiles_without_cloud_discovery(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    class OfflineProvider:
+        def __getattr__(self, name: str):
+            def reject(*_args, **_kwargs):
+                raise AssertionError(f"cloud method called while compiling: {name}")
+
+            return reject
+
+    monkeypatch.setattr(
+        release_plan,
+        "git_state",
+        lambda _root: GitState(commit="a" * 40, clean=True),
+    )
+    request = release_plan.build_release_request(
+        repo_root=NANOLAB_ROOT,
+        nanofaas_root=NANOFAAS_ROOT,
+        scenario_path=_canonical_scenario(tmp_path / "release.yaml"),
+        environment_path=_canonical_environment(tmp_path / "environment.yaml"),
+        release_config_path=None,
+        run_dir=tmp_path / "run",
+        performance_root=tmp_path / "performance",
+    )
+
+    workflow = build_release_workflow(request, provider=OfflineProvider())
+    compiled = workflow.compile()
+
+    titles = [task.task.title for task in compiled.tasks]
+    assert titles.index("Acquire release stack VM") < titles.index(
+        "Acquire release loadgen VM"
+    ) < titles.index("Acquire release ARM builder VM")
+    infrastructure_titles = {
+        task.resource.title
+        for task in compiled.tasks
+        if task.kind == "acquire"
+        and task.resource is not None
+        and task.resource.infrastructure
+    }
+    assert infrastructure_titles == {
+        "Acquire release stack VM",
+        "Acquire release loadgen VM",
+        "Acquire release ARM builder VM",
+    }
+
+    stack_slice = workflow.compile(select=Selection(only="build-amd64-images"))
+    assert [task.task.title for task in stack_slice.tasks] == [
+        "Acquire release stack VM",
+        f"Acquire release-amd64-v{CURRENT_VERSION} buildx builder",
+        "Build AMD64 images",
+        f"Release release-amd64-v{CURRENT_VERSION} buildx builder",
+        "Release release stack VM",
+    ]
+
+    arm_slice = workflow.compile(select=Selection(only="build-arm64-images"))
+    arm_titles = [task.task.title for task in arm_slice.tasks]
+    assert arm_titles[:5] == [
+        "Acquire release stack VM",
+        "Acquire release ARM builder VM",
+        "Acquire registry tunnel to <release-stack>:5000",
+        f"Acquire release-arm64-v{CURRENT_VERSION} buildx builder",
+        f"Acquire source archive at /home/azureuser/nanofaas-release/v{CURRENT_VERSION}/source",
+    ]
+    assert arm_titles[-5:] == [
+        f"Release source archive at /home/azureuser/nanofaas-release/v{CURRENT_VERSION}/source",
+        f"Release release-arm64-v{CURRENT_VERSION} buildx builder",
+        "Release registry tunnel to <release-stack>:5000",
+        "Release release ARM builder VM",
+        "Release release stack VM",
+    ]
+
+    arm_suffix = workflow.compile(select=Selection(start="build-arm64-images"))
+    suffix_titles = [task.task.title for task in arm_suffix.tasks]
+    assert "Acquire release stack VM" in suffix_titles
+    assert "Acquire release ARM builder VM" in suffix_titles
+    assert "Acquire release loadgen VM" not in suffix_titles
+    assert "Release release ARM builder VM" in suffix_titles
+    assert "Release release stack VM" in suffix_titles
 
 
 def test_release_scenario_matches_comparable_history() -> None:

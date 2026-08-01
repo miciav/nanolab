@@ -334,6 +334,22 @@ def test_run_provisioned_k8s_cli_skips_the_legacy_provisioning_context(
     )
 
 
+def test_release_provisioning_is_owned_by_sonata() -> None:
+    scenario = MagicMock(workflow="release")
+
+    assert product_module._uses_legacy_provisioning(
+        scenario, provision=True, cli_provisioned=False
+    ) is False
+
+
+def test_non_release_provisioning_still_uses_the_legacy_context() -> None:
+    scenario = MagicMock(workflow="loadtest")
+
+    assert product_module._uses_legacy_provisioning(
+        scenario, provision=True, cli_provisioned=False
+    ) is True
+
+
 def test_plan_provisioned_k8s_cli_shows_the_twelve_task_workflow() -> None:
     result = CliRunner().invoke(
         app,

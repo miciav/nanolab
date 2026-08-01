@@ -10,6 +10,7 @@ def registry_tunnel_resource(
     registry_upstream: str,
     provider: Any,
     request: Any,
+    requires: tuple[Resource[Any], ...] = (),
 ) -> Resource[None]:
     """A socat tunnel on the ARM builder VM for accessing the stack registry.
 
@@ -59,5 +60,5 @@ def registry_tunnel_resource(
         title=f"Acquire registry tunnel to {registry_upstream}:5000",
         acquire=acquire,
         release=release,
-        infrastructure=True,
+        requires=requires,
     )

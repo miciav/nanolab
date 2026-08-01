@@ -63,5 +63,4 @@ def buildx_builder_resource(
         acquire=acquire,
         release=release,
         requires=requires,
-        infrastructure=True,
     )

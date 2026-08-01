@@ -7,7 +7,9 @@ import re
 from pathlib import Path
 
 from nanolab.config import EnvironmentConfig
+from nanolab.config.environment import ExecutionRole
 from nanolab.release.versioning import normalize_version, verify_version_consistency
+from workflow_tasks.vm.models import VmRequest
 
 
 _STACK_VM_SIZE = "Standard_D8s_v5"
@@ -90,3 +92,58 @@ def _validate_operator_source(source: str | None) -> None:
         network = None
     if network is None or network.prefixlen == 0 or not network.is_global:
         raise ValueError("Azure operator source CIDR must be a restricted network")
+
+
+def verify_release_vm_facts(
+    environment: EnvironmentConfig,
+    provider: object,
+    role: ExecutionRole,
+    request: VmRequest,
+) -> None:
+    azure = environment.azure
+    assert azure is not None
+    facts = provider.release_vm_facts(request)  # type: ignore[attr-defined]
+    target = environment.target(role)
+    expected_size = (
+        azure.loadgen_vm_size
+        if role == "loadgen"
+        else azure.arm_vm_size
+        if role == "arm-builder"
+        else azure.vm_size
+    )
+    expected = {
+        "location": azure.location,
+        "vm_size": expected_size,
+        "disk_size_gb": int(target.disk.removesuffix("G")),
+        "image_urn": azure.arm_image_urn if role == "arm-builder" else azure.image_urn,
+    }
+    mismatches = tuple(
+        name for name, value in expected.items() if getattr(facts, name, None) != value
+    )
+    if mismatches:
+        raise RuntimeError(f"Azure release VM facts mismatch for {role}: {', '.join(mismatches)}")
+
+
+def secure_release_endpoints(
+    environment: EnvironmentConfig,
+    provider: object,
+    stack_request: VmRequest,
+    loadgen_request: VmRequest | None,
+) -> tuple[str, str]:
+    azure = environment.azure
+    assert azure is not None and azure.operator_source_cidr is not None
+    stack_host = provider.connection_host(stack_request)  # type: ignore[attr-defined]
+    sources = (azure.operator_source_cidr,)
+    if loadgen_request is not None:
+        loadgen_address = ipaddress.ip_address(  # type: ignore[attr-defined]
+            provider.connection_host(loadgen_request)
+        )
+        sources = tuple(
+            dict.fromkeys((f"{loadgen_address}/{loadgen_address.max_prefixlen}", *sources))
+        )
+    provider.restrict_inbound_sources(  # type: ignore[attr-defined]
+        stack_request,
+        ports=(30080, 30081, 30090),
+        source_cidrs=sources,
+    )
+    return f"http://{stack_host}:30080", f"http://{stack_host}:30090"

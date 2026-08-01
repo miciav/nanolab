@@ -7,7 +7,6 @@ from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass, field
 import fcntl
 import hashlib
-import ipaddress
 import json
 import math
 import os
@@ -72,7 +71,11 @@ from nanolab.release.benchmark import (  # noqa: F401 - compatibility re-exports
     _run_benchmark,
     _write_aggregate,
 )
-from nanolab.release.environment import validate_release_environment
+from nanolab.release.environment import (
+    secure_release_endpoints,
+    validate_release_environment,
+    verify_release_vm_facts,
+)
 from nanolab.release.metrics import (
     RegressionDecision,
     build_release_record,
@@ -891,29 +894,7 @@ def _verify_release_vm_facts(
         role: ExecutionRole,
         request: VmRequest,
 ) -> None:
-    azure = plan.environment.azure
-    assert azure is not None
-    facts = provider.release_vm_facts(request)  # type: ignore[attr-defined]
-    target = plan.environment.target(role)
-    if role == "loadgen":
-        expected_size = azure.loadgen_vm_size
-    elif role == "arm-builder":
-        expected_size = azure.arm_vm_size
-    else:
-        expected_size = azure.vm_size
-    expected = {
-        "location": azure.location,
-        "vm_size": expected_size,
-        "disk_size_gb": int(target.disk.removesuffix("G")),
-        "image_urn": azure.arm_image_urn if role == "arm-builder" else azure.image_urn,
-    }
-    mismatches = tuple(
-        name for name, value in expected.items() if getattr(facts, name, None) != value
-    )
-    if mismatches:
-        raise RuntimeError(
-            f"Azure release VM facts mismatch for {role}: {', '.join(mismatches)}"
-        )
+    verify_release_vm_facts(plan.environment, provider, role, request)
 
 
 def _secure_release_endpoints(
@@ -922,21 +903,9 @@ def _secure_release_endpoints(
         stack_request: VmRequest,
         loadgen_request: VmRequest | None,
 ) -> tuple[str, str]:
-    azure = plan.environment.azure
-    assert azure is not None and azure.operator_source_cidr is not None
-    stack_host = provider.connection_host(stack_request)  # type: ignore[attr-defined]
-    sources = (azure.operator_source_cidr,)
-    if loadgen_request is not None:
-        loadgen_host = provider.connection_host(loadgen_request)  # type: ignore[attr-defined]
-        loadgen_address = ipaddress.ip_address(loadgen_host)
-        loadgen_cidr = f"{loadgen_address}/{loadgen_address.max_prefixlen}"
-        sources = tuple(dict.fromkeys((loadgen_cidr, *sources)))
-    provider.restrict_inbound_sources(  # type: ignore[attr-defined]
-        stack_request,
-        ports=(30080, 30081, 30090),
-        source_cidrs=sources,
+    return secure_release_endpoints(
+        plan.environment, provider, stack_request, loadgen_request
     )
-    return f"http://{stack_host}:30080", f"http://{stack_host}:30090"
 
 
 _RUN_STARTED: float | None = None

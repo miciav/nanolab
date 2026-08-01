@@ -8,7 +8,7 @@ workflow surface is always 12 top-level entries.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -46,6 +46,7 @@ from nanolab.release.metrics import (
     newest_comparable_record,
 )
 from nanolab.release.publish import build_publish_plan
+from nanolab.release.resources import build_release_resources
 from nanolab.release.run import CredentialFiles, ReleaseSettings, git_state, source_test_commands
 from nanolab.release.state import ReleaseIdentity, digest_path
 from nanolab.release.versioning import normalize_version, verify_version_consistency
@@ -202,12 +203,16 @@ def build_release_workflow(
 
     if provider is None:
         provider = vm_provider_for_environment(env, request.repo_root)
+    infrastructure = build_release_resources(env, nanofaas, provider)
     stack_req = vm_request_for_role(env, "stack", loadtest=True)
     _ = vm_request_for_role(env, "loadgen", loadtest=True)  # captured by build_role_bindings
     arm_req = vm_request_for_role(env, "arm-builder")
     bindings, fetcher = build_role_bindings(env, vm_provider=provider, repo_root=nanofaas)
     executor = RoleBoundCommandTaskExecutor(bindings)
-    stack_host = getattr(provider, "connection_host")(stack_req)
+    # Runtime consumers resolve the real addresses from `infrastructure.endpoints`.
+    # Phase tasks still accept strings today; their migration consumes that value
+    # directly in the benchmark task added later in this plan.
+    stack_host = "<release-stack>"
 
     remote_root = f"/home/azureuser/nanofaas-release/{request.version}"
     source_dir = f"{remote_root}/source"
@@ -225,6 +230,7 @@ def build_release_workflow(
         provider=provider,
         request=stack_req,
     )
+    archive = replace(archive, requires=(infrastructure.stack,))
     source_tests = source_tests_composite(
         source_test_commands(Path(source_dir)),
         executor=executor,
@@ -235,6 +241,7 @@ def build_release_workflow(
         name=f"release-amd64-{request.version}",
         executor=executor,
         role="stack",
+        requires=(infrastructure.stack,),
     )
     amd64_build = amd64_build_composite(
         request.image_plan,
@@ -304,11 +311,13 @@ def build_release_workflow(
         registry_upstream=stack_host,
         provider=provider,
         request=arm_req,
+        requires=(infrastructure.stack, infrastructure.arm_builder),
     )
     arm64_builder = buildx_builder_resource(
         name=f"release-arm64-{request.version}",
         executor=executor,
         role="arm-builder",
+        requires=(infrastructure.arm_builder,),
     )
     arm_plan = build_arm64_image_plan(
         nanofaas,
@@ -378,19 +387,37 @@ def build_release_workflow(
     # --- Wire the DAG ---
     # Order of wf.add() defines execution order. requires only lists Resource
     # objects that need acquire/release spliced around their consumers.
-    wf.add(source_tests, requires=(archive,))  # pyright: ignore[reportArgumentType]
-    wf.add(amd64_build, requires=(amd64_builder,))  # pyright: ignore[reportArgumentType]
-    wf.add(registry_push)  # pyright: ignore[reportArgumentType]
+    wf.add(source_tests, requires=(infrastructure.stack, archive))  # pyright: ignore[reportArgumentType]
+    wf.add(  # pyright: ignore[reportArgumentType]
+        amd64_build, requires=(infrastructure.stack, amd64_builder)
+    )
+    wf.add(registry_push, requires=(infrastructure.stack,))  # pyright: ignore[reportArgumentType]
     for _i, bw in enumerate(benchmark_runs):
-        wf.add(_SubWorkflowTask(bw))  # pyright: ignore[reportArgumentType]
+        wf.add(  # pyright: ignore[reportArgumentType]
+            _SubWorkflowTask(bw),
+            requires=(
+                infrastructure.stack,
+                infrastructure.loadgen,
+                infrastructure.endpoints,
+            ),
+        )
     wf.add(aggregate)  # pyright: ignore[reportArgumentType]
     wf.add(reg_gate)  # pyright: ignore[reportArgumentType]
-    wf.add(arm64_build, requires=(tunnel, arm64_builder, archive))  # pyright: ignore[reportArgumentType]
-    wf.add(arm64_smoke)  # pyright: ignore[reportArgumentType]
-    wf.add(pub_arch)  # pyright: ignore[reportArgumentType]
-    wf.add(pub_manifests)  # pyright: ignore[reportArgumentType]
-    wf.add(pub_aliases)  # pyright: ignore[reportArgumentType]
-    wf.add(attest)  # pyright: ignore[reportArgumentType]
+    wf.add(  # pyright: ignore[reportArgumentType]
+        arm64_build,
+        requires=(
+            infrastructure.stack,
+            infrastructure.arm_builder,
+            tunnel,
+            arm64_builder,
+            archive,
+        ),
+    )
+    wf.add(arm64_smoke, requires=(infrastructure.arm_builder,))  # pyright: ignore[reportArgumentType]
+    wf.add(pub_arch, requires=(infrastructure.stack,))  # pyright: ignore[reportArgumentType]
+    wf.add(pub_manifests, requires=(infrastructure.stack,))  # pyright: ignore[reportArgumentType]
+    wf.add(pub_aliases, requires=(infrastructure.stack,))  # pyright: ignore[reportArgumentType]
+    wf.add(attest, requires=(infrastructure.stack,))  # pyright: ignore[reportArgumentType]
 
     return wf
 
