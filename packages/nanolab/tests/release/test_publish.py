@@ -52,6 +52,10 @@ class _PublishProvider:
     retag_corruptions: set[str] = field(default_factory=set)
     fail_on_prefix: tuple[str, ...] | None = None
     inspect_platform_overrides: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    # Source digests naming a multi-instance index, mapped to the digest of the
+    # instance matching the copying host. Buildx attaches a provenance manifest
+    # by default, so every built tag is such an index.
+    index_instances: dict[str, str] = field(default_factory=dict)
 
     def exec_argv(
         self,
@@ -74,6 +78,11 @@ class _PublishProvider:
                 if "@sha256:" in source
                 else _source_digest(source)
             )
+            if "--multi-arch=all" not in argv:
+                # skopeo selects the instance matching the host platform and
+                # copies only that; --preserve-digests then preserves the
+                # instance digest, not the index's.
+                digest = self.index_instances.get(digest, digest)
             if destination in self.copy_corruptions:
                 digest = "sha256:" + "f" * 64
             self.ghcr_digests[destination] = digest
@@ -209,6 +218,32 @@ def test_publication_requires_digest_evidence_for_all_52_cells() -> None:
 
 
 # --- architecture copies ---------------------------------------------------
+
+
+def test_architecture_upload_copies_the_whole_index_not_one_instance() -> None:
+    """Every built tag is an index: the image plus buildx's provenance manifest.
+
+    Copying without ``--multi-arch=all`` narrows it to the instance matching the
+    copying host, so GHCR receives a digest the release never measured.
+    """
+    plan = _plan()
+    digests = publish.require_publication_evidence(plan, _evidence(plan))
+    provider = _PublishProvider(
+        index_instances={
+            digest: "sha256:" + hashlib.sha256(f"instance:{digest}".encode()).hexdigest()
+            for digest in digests.values()
+        }
+    )
+
+    evidence = publish.publish_architecture_images(
+        provider,
+        object(),
+        plan,
+        digests,
+        authfile="/tmp/creds/docker/config.json",
+    )
+
+    assert [item.digest for item in evidence] == [digests[copy.source] for copy in plan.copies]
 
 
 def test_architecture_copies_preserve_digests_and_use_the_authfile() -> None:
