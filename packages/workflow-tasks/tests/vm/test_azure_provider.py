@@ -123,8 +123,9 @@ def test_connection_host(mock_client_cls) -> None:
     assert host == "10.0.0.1"
 
 
+@patch("workflow_tasks.vm.azure.AzureVmProvider._exists_in_azure", return_value=False)
 @patch("workflow_tasks.vm.azure.AzureClient")
-def test_teardown_success(mock_client_cls) -> None:
+def test_teardown_success(mock_client_cls, _gone) -> None:
     client_mock, vm_mock = _make_azure_client_mock()
     mock_client_cls.return_value = client_mock
     provider = _make_provider()
@@ -134,8 +135,9 @@ def test_teardown_success(mock_client_cls) -> None:
     assert result.return_code == 0
 
 
+@patch("workflow_tasks.vm.azure.AzureVmProvider._exists_in_azure", return_value=False)
 @patch("workflow_tasks.vm.azure.AzureClient")
-def test_teardown_vm_not_found_is_ignored(mock_client_cls) -> None:
+def test_teardown_vm_not_found_is_ignored(mock_client_cls, _gone) -> None:
     from azure_vm.exceptions import VmNotFoundError
     client_mock, vm_mock = _make_azure_client_mock()
     vm_mock.delete.side_effect = VmNotFoundError("gone")
@@ -378,3 +380,37 @@ def test_ensure_running_keeps_the_fast_path_for_a_live_vm(mock_client_cls, mock_
 
     client_mock.ensure_running.assert_called_once()
     client_mock.launch.assert_not_called()
+
+
+@patch("workflow_tasks.vm.azure.AzureVmProvider._exists_in_azure", return_value=True)
+@patch("workflow_tasks.vm.azure.AzureClient")
+def test_teardown_fails_when_the_vm_survives_in_azure(mock_client_cls, _alive) -> None:
+    """`AzureClient.get_vm` raises VmNotFoundError from a check of the LOCAL
+    ~/.azure-vm-sdk workspace, never of Azure. Swallowing it reported success
+    while the VM kept billing -- on any machine or CI runner without that
+    workspace. Azure is the authority."""
+    from azure_vm.exceptions import VmNotFoundError
+
+    client_mock, vm_mock = _make_azure_client_mock()
+    vm_mock.delete.side_effect = VmNotFoundError("no local workspace")
+    mock_client_cls.return_value = client_mock
+
+    result = _make_provider().teardown(_make_request(name="stack-vm"))
+
+    assert result.return_code != 0
+    assert "stack-vm" in result.stderr
+    assert "rg-test" in result.stderr
+
+
+@patch("workflow_tasks.vm.azure.AzureVmProvider._exists_in_azure", return_value=True)
+@patch("workflow_tasks.vm.azure.AzureClient")
+def test_teardown_fails_when_tofu_destroy_left_the_vm_behind(mock_client_cls, _alive) -> None:
+    """Not only the missing-workspace path: a `tofu destroy` that exits clean but
+    leaves the VM must fail too."""
+    client_mock, vm_mock = _make_azure_client_mock()
+    mock_client_cls.return_value = client_mock
+
+    result = _make_provider().teardown(_make_request(name="stack-vm"))
+
+    vm_mock.delete.assert_called_once()
+    assert result.return_code != 0

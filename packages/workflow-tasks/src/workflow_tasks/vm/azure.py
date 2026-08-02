@@ -71,8 +71,26 @@ class AzureVmProvider:
         try:
             self._client(request).get_vm(name).delete()
         except VmNotFoundError:
+            # `get_vm` raises this from the LOCAL ~/.azure-vm-sdk/<name> workspace,
+            # never from Azure. The SDK can only destroy what it recorded, so a
+            # missing workspace means "cannot", not "already gone".
             pass
-        return _ok(["azure", "delete", name])
+        if not self._exists_in_azure(request):
+            return _ok(["azure", "delete", name])
+        group = request.azure_resource_group or ""
+        return ShellExecutionResult(
+            command=["azure", "delete", name],
+            return_code=1,
+            stdout="",
+            stderr=(
+                f"{name} still exists in Azure (resource group {group}) after teardown, "
+                f"so it is still billing. The local tofu workspace "
+                f"~/.azure-vm-sdk/{name} is missing or incomplete, and `tofu destroy` "
+                f"cannot delete what it did not record. List what is left with: "
+                f"az resource list -g {group} "
+                f"--query \"[?starts_with(name,'{name}')].id\" -o tsv"
+            ),
+        )
 
     def _exists_in_azure(self, request: VmRequest) -> bool:
         process = subprocess.run(
