@@ -11,8 +11,9 @@ from typing import cast
 
 import typer
 import yaml
-from sonata_engine import CompiledWorkflow, Selection, SelectionError
+from sonata_engine import CompiledWorkflow, Selection, SelectionError, release_retained
 from sonata_engine import Workflow as SonataWorkflow
+from sonata_engine.journal import JournalConfig
 from sonata_engine.workflow.context import bind_workflow_sink as bind_sonata_sink
 from workflow_tasks.loadtest.adapters import HttpPrometheusClient
 from workflow_tasks.workflow.context import bind_workflow_sink
@@ -34,6 +35,9 @@ from nanolab.plans.release import (
     release_journal_config,
     release_verifiers,
 )
+from nanolab.release.resources import build_release_resources
+from nanolab.release.tasks import versioned_release_run_dir
+from nanolab.release.versioning import normalize_version
 from nanolab.release.environment import (
     ReleaseRunInProgressError,
     release_lock_path,
@@ -124,6 +128,43 @@ def _workflow(
         repo_root=paths.nanofaas_root,
         tool_root=paths.tool_root,
     )
+
+
+def _teardown_release(
+    scenario_config: ScenarioConfig,
+    environment_config: EnvironmentConfig,
+    run_dir: Path | None,
+) -> None:
+    """Give back what a `--keep` run held on to, without re-running anything.
+
+    Deliberately skips `build_release_request`: that preflight wants a clean
+    nanoFaaS tree, a matching prepared version, credential files and a non-empty
+    image matrix. After a failed release the operator has usually dirtied the
+    tree or moved the version on -- and the VMs still need closing. The journal
+    already records what was retained and the values their releases need, so the
+    version in the scenario is enough to find it.
+    """
+    if scenario_config.release is None:
+        raise typer.BadParameter("--teardown requires a release scenario")
+    paths = default_tool_paths()
+    version = normalize_version(scenario_config.release.version)[0]
+    journal = JournalConfig(
+        versioned_release_run_dir(run_dir or paths.runs_dir / "release", version)
+        / "sonata.jsonl"
+    )
+    if not journal.path.is_file():
+        typer.echo(f"nothing to tear down: no release journal at {journal.path}")
+        return
+
+    provider = vm_provider_for_environment(environment_config, paths.tool_root)
+    resources = build_release_resources(environment_config, paths.nanofaas_root, provider)
+    by_title = {resource.title: resource for resource in (*resources.vms, resources.endpoints)}
+    with release_run_lock(release_lock_path(environment_config)):
+        released = release_retained(by_title, journal)
+    for title in released:
+        typer.echo(f"released: {title}")
+    if not released:
+        typer.echo("nothing to tear down: the journal records nothing still held")
 
 
 def _supersede_release_run(release_dir: Path) -> Path | None:
@@ -330,6 +371,11 @@ def install_product_commands(app: typer.Typer) -> None:
         environment: Path | None = typer.Option(None, "--environment", exists=True),
         provision: bool = typer.Option(False, "--provision"),
         keep: bool = typer.Option(False, "--keep"),
+        teardown: bool = typer.Option(
+            False,
+            "--teardown",
+            help="Release what a --keep run held on to, then exit. Runs no workflow.",
+        ),
         resume: bool = typer.Option(False, "--resume"),
         only: str | None = typer.Option(
             None,
@@ -366,6 +412,20 @@ def install_product_commands(app: typer.Typer) -> None:
         release = scenario_config.workflow == "release"
         if release and environment is None:
             raise typer.BadParameter("release workflow requires --environment")
+        if teardown:
+            if provision or resume or keep or only or start or until:
+                raise typer.BadParameter(
+                    "--teardown releases what a kept run held and runs nothing else; it "
+                    "cannot be combined with --provision, --resume, --keep, --only, "
+                    "--from or --until"
+                )
+            if release_config is not None:
+                typer.echo("--teardown ignores --release-config; it releases resources only")
+            try:
+                _teardown_release(scenario_config, environment_config, run_dir)
+            except ReleaseRunInProgressError as error:
+                raise typer.BadParameter(str(error)) from None
+            return
         if resume and not release:
             raise typer.BadParameter("--resume is only supported for release workflows")
         if release and not (provision or resume):

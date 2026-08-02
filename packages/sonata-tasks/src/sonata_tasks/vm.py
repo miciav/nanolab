@@ -51,4 +51,8 @@ def vm_resource(
         acquire=acquire,
         compensate=compensate,
         release=release,
+        # The journal can only hold JSON, so a run that kept this VM recorded its
+        # info as a dict. A later teardown needs the dataclass back, because that
+        # is what destroy() reads a name off.
+        revive=lambda raw: VmInfo(**raw),
     )

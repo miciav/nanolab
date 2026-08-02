@@ -21,6 +21,7 @@ from nanolab.release.metrics import RegressionDecision
 from nanolab.release.run import GitState
 from nanolab.release.versioning import read_project_version
 from nanolab.workspace.paths import ToolPaths
+from workflow_tasks.vm.models import VmInfo
 
 from ..conftest import RejectingProvider
 
@@ -363,7 +364,13 @@ def release_cli_harness(
         workflow = _SpyWorkflow(workflow_id="release-test")
         resource = Resource(
             title="Acquire release stack VM",
-            acquire=lambda _inputs: state.events.append("acquire") or "vm",
+            acquire=lambda _inputs: state.events.append("acquire")
+            or VmInfo(
+                name="nanofaas-azure-release",
+                host="10.0.0.1",
+                user="azureuser",
+                home="/home/azureuser",
+            ),
             release=lambda _inputs, _value: state.events.append("release"),
                     )
         workflow.add(_Phase(state.events, state.failure), requires=(resource,))
@@ -637,3 +644,86 @@ def test_generic_release_plan_stays_offline(release_cli_harness) -> None:
     assert result.exit_code == 0, result.output
     assert "run-source-tests" in result.output
     assert release_cli_harness.events == []
+
+
+def _teardown_harness(release_cli_harness, destroyed: list[str]):
+    """Point the CLI at a provider that records what it tore down."""
+
+    class _Recorder:
+        def teardown(self, request):
+            destroyed.append(getattr(request, "name", "?"))
+            return SimpleNamespace(return_code=0, stdout="", stderr="")
+
+        def __getattr__(self, name):
+            def reject(*_args, **_kwargs):
+                raise AssertionError(f"teardown reached the cloud: {name}")
+
+            return reject
+
+    release_cli_harness.monkeypatch.setattr(
+        product_module, "vm_provider_for_environment", lambda *_a, **_k: _Recorder()
+    )
+
+
+def test_teardown_releases_what_a_kept_run_left_behind(release_cli_harness) -> None:
+    """--keep's counterpart: the resources the journal still records as held."""
+    assert release_cli_harness.invoke("--provision", "--keep").exit_code == 0
+    destroyed: list[str] = []
+    _teardown_harness(release_cli_harness, destroyed)
+
+    result = release_cli_harness.invoke("--teardown")
+
+    assert result.exit_code == 0, result.output
+    assert destroyed == ["nanofaas-azure-release"]
+
+
+def test_teardown_is_idempotent(release_cli_harness) -> None:
+    assert release_cli_harness.invoke("--provision", "--keep").exit_code == 0
+    destroyed: list[str] = []
+    _teardown_harness(release_cli_harness, destroyed)
+
+    assert release_cli_harness.invoke("--teardown").exit_code == 0
+    assert release_cli_harness.invoke("--teardown").exit_code == 0
+
+    assert destroyed == ["nanofaas-azure-release"]
+
+
+def test_teardown_works_after_a_preflight_that_would_reject(release_cli_harness) -> None:
+    """The reason teardown skips build_release_request: after a failed release the
+    tree is usually dirty or the version has moved on, and the VMs still need
+    closing."""
+    assert release_cli_harness.invoke("--provision", "--keep").exit_code == 0
+    destroyed: list[str] = []
+    _teardown_harness(release_cli_harness, destroyed)
+    release_cli_harness.monkeypatch.setattr(
+        release_plan, "git_state", lambda _root: GitState(commit="b" * 40, clean=False)
+    )
+
+    result = release_cli_harness.invoke("--teardown")
+
+    assert result.exit_code == 0, result.output
+    assert destroyed == ["nanofaas-azure-release"]
+
+
+def test_teardown_without_a_journal_says_so_and_touches_nothing(release_cli_harness) -> None:
+    destroyed: list[str] = []
+    _teardown_harness(release_cli_harness, destroyed)
+
+    result = release_cli_harness.invoke("--teardown")
+
+    assert result.exit_code == 0, result.output
+    assert destroyed == []
+    assert "nothing" in result.output.lower()
+
+
+@pytest.mark.parametrize(
+    "flag", ("--provision", "--resume", "--keep", "--only=x", "--from=x", "--until=x")
+)
+def test_teardown_refuses_flags_that_describe_running_a_workflow(
+    flag: str, release_cli_harness
+) -> None:
+    result = release_cli_harness.invoke("--teardown", flag)
+
+    assert result.exit_code != 0
+    assert "--teardown" in result.output
+    assert "Traceback" not in result.output
