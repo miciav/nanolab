@@ -700,12 +700,17 @@ def test_build_release_request_is_offline_and_builds_current_matrix(
     assert not any("credentials" in title.lower() for title in finalize_titles)
 
 
-def test_build_release_request_requires_credentials_for_execution(tmp_path: Path, canonical_release_configs: tuple[Path, Path]) -> None:
+def test_build_release_request_requires_credentials_for_execution(
+    tmp_path: Path,
+    canonical_release_configs: tuple[Path, Path],
+    nanofaas_checkout: Path,
+) -> None:
     scenario_path, environment_path = canonical_release_configs
+    # Reaches git_state for real, so it needs the repository, not the archive.
     with pytest.raises(ValueError, match="credential config is required"):
         release_plan.build_release_request(
             repo_root=NANOLAB_ROOT,
-            nanofaas_root=NANOFAAS_ROOT,
+            nanofaas_root=nanofaas_checkout,
             scenario_path=scenario_path,
             environment_path=environment_path,
             release_config_path=None,

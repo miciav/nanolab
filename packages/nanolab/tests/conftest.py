@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 import os
+import shutil
+import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -113,10 +116,8 @@ class RejectingProvider:
         return reject
 
 
-@pytest.fixture(scope="session")
-def nanofaas_root() -> Path:
-    value = os.environ.get("NANOFAAS_ROOT", "").strip()
-    if not value:
+def _require_checkout(value: str) -> Path:
+    if not value.strip():
         raise RuntimeError("NANOFAAS_ROOT must point to a nanoFaaS checkout")
     root = Path(value).expanduser().resolve()
     missing = [
@@ -129,3 +130,65 @@ def nanofaas_root() -> Path:
             f"NANOFAAS_ROOT is not a nanoFaaS checkout; missing: {', '.join(missing)}"
         )
     return root
+
+
+# The checkout the operator pointed at, and the extraction the suite reads.
+_CHECKOUT: Path | None = None
+_SOURCE: Path | None = None
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Repoint NANOFAAS_ROOT at `git archive` output before any test module loads.
+
+    Release planning derives from the guarded commit, so the suite must exercise
+    the same bytes. Reading the checkout instead made results depend on the
+    developer's working tree: ignored build output left behind by a branch switch
+    invented phantom image targets and failed 134 tests, which is exactly the
+    defect the release preflight now prevents. Test modules capture NANOFAAS_ROOT
+    into constants at import, and pytest_configure runs before collection, so
+    swapping it here fixes every one of them at once.
+
+    `nanofaas_checkout` still hands out the real repository for the few tests that
+    need git itself.
+    """
+    del config
+    from nanolab.release.build import extract_commit_tree
+
+    global _CHECKOUT, _SOURCE
+    _CHECKOUT = _require_checkout(os.environ.get("NANOFAAS_ROOT", ""))
+    head = subprocess.run(
+        ("git", "rev-parse", "HEAD"),
+        cwd=_CHECKOUT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    # .resolve(): mkdtemp hands back /var/... which is a symlink to /private/var,
+    # and the catalog resolves the paths it discovers -- an unresolved root makes
+    # every example_dir comparison fail on macOS.
+    _SOURCE = extract_commit_tree(
+        _CHECKOUT, head, Path(tempfile.mkdtemp(prefix="nanofaas-source-")).resolve() / "tree"
+    )
+    os.environ["NANOFAAS_ROOT"] = str(_SOURCE)
+
+
+def pytest_unconfigure(config: pytest.Config) -> None:
+    del config
+    if _SOURCE is not None:
+        shutil.rmtree(_SOURCE.parent, ignore_errors=True)
+    if _CHECKOUT is not None:
+        os.environ["NANOFAAS_ROOT"] = str(_CHECKOUT)
+
+
+@pytest.fixture(scope="session")
+def nanofaas_root() -> Path:
+    """What the suite plans from: the commit, materialized by `git archive`."""
+    assert _SOURCE is not None
+    return _SOURCE
+
+
+@pytest.fixture(scope="session")
+def nanofaas_checkout() -> Path:
+    """The real git repository, for the few tests that need git itself."""
+    assert _CHECKOUT is not None
+    return _CHECKOUT
