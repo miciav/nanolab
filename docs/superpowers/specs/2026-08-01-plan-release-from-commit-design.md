@@ -140,6 +140,12 @@ preflight failure.
 
 - Making non-release workflows plan from a commit. They operate on the working
   checkout by design.
+- The legacy `nanolab release plan` / `nanolab release run` commands. They still
+  call `build_image_plan(paths.nanofaas_root, ...)` (`release/run.py:251`), so the
+  defect remains expressible through them: the guarantee above holds for the
+  Sonata path only. Those commands are already scheduled for deletion in
+  `docs/plans/2026-08-01-sonata-release-migration.md`, which keeps only
+  `release prepare`. If that cutover slips, this hole stays open.
 - Cloning on the VMs instead of shipping an archive. It would not fix the matrix,
   needs a git token on three VMs, adds a GitHub dependency inside the paid window,
   and loses the checksum-identical-archive property the ARM64 phase asserts.
