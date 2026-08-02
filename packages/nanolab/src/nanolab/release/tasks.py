@@ -60,7 +60,10 @@ class ReleasePhaseTask(ReusableTask):
 
     @property
     def receipt(self) -> Path:
-        return self.run_dir / f"{self.phase}.json"
+        # Own subdirectory, not run_dir itself: several phases write their
+        # artifact to run_dir/<phase>.json, and a receipt sharing that name
+        # replaces the artifact right after its digest is recorded.
+        return self.run_dir / "receipts" / f"{self.phase}.json"
 
     @property
     def reuse_key(self) -> str:

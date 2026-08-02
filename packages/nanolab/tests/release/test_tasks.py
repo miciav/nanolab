@@ -5,7 +5,7 @@ import pytest
 from sonata_engine import Evidence, JournalConfig, TaskInputs, TaskOutcome, Workflow
 from workflow_tasks.tasks.models import TaskResult
 
-from nanolab.release.evidence import file_digest_verifier
+from nanolab.release.evidence import file_digest_verifier, receipt_artifacts
 from nanolab.release import tasks as release_tasks
 from nanolab.release.state import ReleaseIdentity, digest_path
 from nanolab.release.tasks import (
@@ -128,6 +128,46 @@ def test_phase_tasks_write_compact_receipts_and_registry_covers_matrix(tmp_path:
         "docker://image-a:v1",
         "docker://image-b:v1",
     }
+
+
+@pytest.mark.parametrize(
+    ("factory", "phase"),
+    [
+        (release_tasks.aggregate_benchmarks_task, "aggregate"),
+        (release_tasks.source_test_task, "source-tests"),
+        (release_tasks.arm64_smoke_task, "arm64-smoke"),
+    ],
+)
+def test_receipt_never_overwrites_the_artifact_its_own_phase_produced(
+    factory, phase: str, tmp_path: Path
+) -> None:
+    """These three phases write `<phase>.json` into run_dir as their artifact.
+
+    A receipt stored under the same name replaces the artifact after its digest
+    is taken, so every later reader sees the receipt and the digest no longer
+    matches what the receipt claims.
+    """
+    task = factory(
+        identity=_identity(),
+        run_dir=tmp_path,
+        phase_inputs={},
+        work=lambda _inputs: (_write_artifact(task.run_dir / f"{phase}.json"),),
+    )
+
+    task.run(TaskInputs.empty())
+
+    artifact = task.run_dir / f"{phase}.json"
+    assert json.loads(artifact.read_text(encoding="utf-8")) == {"produced": True}
+    recorded = receipt_artifacts(task.receipt, phase, "file-digest")
+    assert [(item.reference, item.digest) for item in recorded] == [
+        (str(artifact), digest_path(artifact))
+    ]
+
+
+def _write_artifact(path: Path) -> Evidence:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"produced": True}), encoding="utf-8")
+    return Evidence("file-digest", str(path), digest_path(path))
 
 
 def test_journal_resume_reruns_only_unsafe_suffix(tmp_path: Path) -> None:

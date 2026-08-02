@@ -451,7 +451,7 @@ def test_build_release_workflow_compiles_without_cloud_discovery(
         "Finalize release documentation",
     }
     assert all(
-        task.receipt.parent == tmp_path / "run" / "releases" / CURRENT_VERSION
+        task.receipt.parent == tmp_path / "run" / "releases" / CURRENT_VERSION / "receipts"
         for task in release_phases.values()
     )
     benchmarks = tuple(release_phases[f"Run release benchmark {index}"] for index in range(1, 4))
