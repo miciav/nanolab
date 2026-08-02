@@ -482,7 +482,7 @@ def install_product_commands(app: typer.Typer) -> None:
                             ),
                         )
                     )
-                    sonata_workflow.keep_infrastructure = keep
+                    sonata_workflow.keep = keep
                     selection = Selection(only=only, start=start, until=until)
                     try:
                         if release_request is not None:

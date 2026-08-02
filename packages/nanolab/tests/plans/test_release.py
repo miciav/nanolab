@@ -280,8 +280,7 @@ def _arm_failure_workflow(
                     name=name, host="10.0.0.1", user="azureuser", home="/home/azureuser"
                 ),
                 release=lambda _inputs, _value: None,
-                infrastructure=True,
-                requires=requires,
+                                requires=requires,
             )
 
         stack = vm("Acquire release stack VM", "release-stack")
@@ -500,16 +499,16 @@ def test_build_release_workflow_compiles_without_cloud_discovery(
         < titles.index("Acquire release loadgen VM")
         < titles.index("Acquire release ARM builder VM")
     )
-    infrastructure_titles = {
+    # Retention is opt-out, so the interesting set is the opposite one: nothing in
+    # the release DAG may ask to always be released except the credential
+    # resources, which this credential-free compile does not build. A tunnel or a
+    # builder marked always_release would show up here.
+    always_released = {
         task.resource.title
         for task in compiled.tasks
-        if task.kind == "acquire" and task.resource is not None and task.resource.infrastructure
+        if task.kind == "acquire" and task.resource is not None and task.resource.always_release
     }
-    assert infrastructure_titles == {
-        "Acquire release stack VM",
-        "Acquire release loadgen VM",
-        "Acquire release ARM builder VM",
-    }
+    assert always_released == set()
 
     stack_slice = workflow.compile(select=Selection(only="build-amd64-images"))
     assert [task.task.title for task in stack_slice.tasks] == [

@@ -104,8 +104,9 @@ def release_execution_guard(
     return Resource(
         title="Acquire validated release execution credentials",
         acquire=acquire,
+        # No always_release: its release does nothing, so retaining it is a no-op.
+        # The declaration belongs to resources that actually stage a secret.
         release=lambda _inputs, _value: None,
-        infrastructure=False,
     )
 
 
@@ -123,7 +124,7 @@ def _credential_resource(
         acquire=acquire,
         release=lambda _inputs, lease: lease.close(),
         requires=requires,
-        infrastructure=False,
+        always_release=True,
     )
 
 

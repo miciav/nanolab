@@ -299,7 +299,7 @@ def test_delete_keeps_real_cli_failures_visible() -> None:
     assert delete_spec.expected_exit_codes == frozenset({0})
 
 
-def test_keep_infrastructure_still_deletes_the_function() -> None:
+def test_keep_still_deletes_the_function() -> None:
     """`--keep` is for the VM and the platform on it, both expensive to rebuild.
     A registration costs a second to redo and, left behind, makes the next run
     fail with 409 — which it did, twice, before this changed."""
@@ -307,7 +307,7 @@ def test_keep_infrastructure_still_deletes_the_function() -> None:
     workflow = build_cli_workflow(
         CliWorkflowRequest(functions=(FUNCTION,)), _bindings(executor)
     )
-    workflow.keep_infrastructure = True
+    workflow.keep = True
 
     workflow.run()
 
@@ -537,8 +537,7 @@ def test_bootstrap_tasks_run_between_build_and_the_first_resource() -> None:
         title="Acquire stack VM",
         acquire=lambda _inputs: events.append("acquire-vm") or "vm-info",
         release=lambda _inputs, _value: events.append("release-vm"),
-        infrastructure=True,
-    )
+            )
     bootstrap = (
         CommandTask(
             title="Provision base VM dependencies",
@@ -653,8 +652,7 @@ def test_function_requires_is_a_real_compiled_edge() -> None:
         title="Acquire Helm release",
         acquire=lambda _inputs: events.append("helm-acquire"),
         release=lambda _inputs, _value: events.append("helm-release"),
-        infrastructure=True,
-    )
+            )
     workflow = build_cli_workflow(
         CliWorkflowRequest(functions=(FUNCTION,)),
         _bindings(ScriptedExecutor()),
@@ -688,8 +686,7 @@ def test_slicing_the_invoke_task_keeps_function_requires_transitively() -> None:
         title="Acquire Helm release",
         acquire=lambda _inputs: events.append("helm-acquire"),
         release=lambda _inputs, _value: events.append("helm-release"),
-        infrastructure=True,
-    )
+            )
     executor = ScriptedExecutor()
     workflow = build_cli_workflow(
         CliWorkflowRequest(functions=(FUNCTION,)),

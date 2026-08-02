@@ -365,8 +365,7 @@ def release_cli_harness(
             title="Acquire release stack VM",
             acquire=lambda _inputs: state.events.append("acquire") or "vm",
             release=lambda _inputs, _value: state.events.append("release"),
-            infrastructure=True,
-        )
+                    )
         workflow.add(_Phase(state.events, state.failure), requires=(resource,))
         state.workflows.append(workflow)
         return workflow
@@ -448,7 +447,7 @@ def test_generic_release_run_forwards_keep_and_selection(release_cli_harness) ->
 
     assert result.exit_code == 0, result.output
     workflow = release_cli_harness.workflows[0]
-    assert workflow.keep_infrastructure is True
+    assert workflow.keep is True
     assert workflow.run_kwargs["select"].until == "run-source-tests"
     # `--keep` retains only infrastructure, so the VM resource is never released.
     assert release_cli_harness.events == ["acquire", "phase"]

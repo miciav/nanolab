@@ -135,9 +135,10 @@ def test_requires_is_carried_onto_the_resource() -> None:
     assert [dependency.title for dependency in resource.requires] == ["Acquire helm release"]
 
 
-def test_a_function_is_not_infrastructure() -> None:
-    """`--keep` is for the VM and the platform on it, both expensive to rebuild.
+def test_a_function_always_releases_itself() -> None:
+    """`keep` is for the VM and the platform on it, both expensive to rebuild.
     A registration costs a second to redo and, left behind, makes the next run
-    fail with 409 — which it did, twice, before this default changed."""
-    assert _resource(ScriptedExecutor()).infrastructure is False
-    assert _resource(ScriptedExecutor(), infrastructure=True).infrastructure is True
+    fail with 409 — which it did, twice. Under opt-out retention a function that
+    did not declare itself would be kept, so it declares itself."""
+    assert _resource(ScriptedExecutor()).always_release is True
+    assert _resource(ScriptedExecutor(), always_release=False).always_release is False

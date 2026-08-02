@@ -475,7 +475,7 @@ class NanofaasTUI:
                         dry_run=False,
                         provision=provision,
                     )
-                    workflow.keep_infrastructure = keep
+                    workflow.keep = keep
                     return workflow.run()
 
             self._controller.run_live_workflow(

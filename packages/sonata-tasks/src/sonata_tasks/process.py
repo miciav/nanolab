@@ -124,7 +124,7 @@ def managed_process_resource(
             best_effort(error, lambda: stop(TaskInputs.empty(), current), what=f"stop for {title}")
             raise
 
-    # infrastructure stays False on purpose: `keep_infrastructure` skips the release
-    # of infrastructure resources, and a spawned child process that outlives the run
-    # is a leak, not something a user asked to keep. A process always gets stopped.
-    return Resource(title=title, acquire=acquire, release=stop)
+    # always_release on purpose: `keep` holds on to everything that did not ask to
+    # be released, and a spawned child process that outlives the run is a leak, not
+    # something a user asked to keep. A process always gets stopped.
+    return Resource(title=title, acquire=acquire, release=stop, always_release=True)

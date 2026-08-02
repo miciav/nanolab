@@ -474,7 +474,7 @@ def test_provisioned_k8s_keep_preserves_the_vm_and_helm_but_not_the_function() -
     plan = _provisioned_plan(
         RoleBindings(host=RecordingExecutor(), stack=stack), orchestrator=orchestrator
     )
-    plan.keep_infrastructure = True
+    plan.keep = True
     plan.run()
 
     summaries = [spec.summary for spec in stack.seen]

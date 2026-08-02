@@ -35,7 +35,7 @@ def compensated_resource(
     compensate: Callable[[TaskInputs], object],
     release: Callable[[TaskInputs, T], object] | None = None,
     requires: tuple[Resource[Any], ...] = (),
-    infrastructure: bool = True,
+    always_release: bool = False,
 ) -> Resource[T]:
     """A resource whose acquire cleans up after itself when it fails.
 
@@ -67,5 +67,5 @@ def compensated_resource(
         acquire=acquire_with_compensation,
         release=undo,
         requires=requires,
-        infrastructure=infrastructure,
+        always_release=always_release,
     )

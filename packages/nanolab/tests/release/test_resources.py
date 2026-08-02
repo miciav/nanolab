@@ -6,11 +6,11 @@ from types import SimpleNamespace
 
 import pytest
 from sonata_engine import Resource, Task, TaskInputs, TaskOutcome, Workflow
-from sonata_tasks.registry_tunnel import registry_tunnel_resource
 
 import nanolab.release.resources as release_resources
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.release.state import ArtifactEvidence
+from nanolab.release.resources import cosign_credentials_resource, ghcr_credentials_resource
 
 
 def _environment() -> EnvironmentConfig:
@@ -52,8 +52,7 @@ def test_execution_guard_validates_metadata_before_cloud_resource(tmp_path: Path
         acquire=lambda _inputs: events.append("cloud"),
         release=lambda _inputs, _value: None,
         requires=(guard,),
-        infrastructure=True,
-    )
+            )
 
     @dataclass
     class Consume(Task[None]):
@@ -232,35 +231,63 @@ def test_post_ensure_fact_failure_stops_before_bootstrap_and_compensates(
     ]
 
 
-def test_keep_retains_only_vm_resources(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_keep_retains_what_did_not_ask_to_be_released(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`keep` holds everything back except resources that declared otherwise.
+
+    The VMs and whatever lives on them are what `--keep` is for -- expensive to
+    rebuild. A resource that must not survive the run says so itself, which is
+    how the credential resources stay safe without anyone classifying them.
+    """
     provider = FakeProvider()
     workflow, resources = _workflow(provider, monkeypatch)
     released: list[str] = []
-    ancillary = Resource(
+    staged = Resource(
+        title="Acquire staged input",
+        acquire=lambda _inputs: "input",
+        release=lambda _inputs, _value: released.append("staged"),
+        requires=(resources.endpoints,),
+    )
+    secret = Resource(
         title="Acquire staged secret",
         acquire=lambda _inputs: "secret",
         release=lambda _inputs, _value: released.append("secret"),
         requires=(resources.endpoints,),
+        always_release=True,
     )
-    workflow.add(ConsumeEndpoints(resources.endpoints), requires=(ancillary, resources.endpoints))
-    workflow.keep_infrastructure = True
+    workflow.add(
+        ConsumeEndpoints(resources.endpoints),
+        requires=(staged, secret, resources.endpoints),
+    )
+    workflow.keep = True
 
     workflow.run()
 
     assert released == ["secret"]
     assert not [event for event in provider.events if event.startswith("destroy:")]
-    assert all(resource.infrastructure for resource in resources.vms)
-    assert resources.endpoints.infrastructure is False
+    assert all(not resource.always_release for resource in resources.vms)
 
 
-def test_keep_does_not_retain_the_registry_tunnel() -> None:
-    tunnel = registry_tunnel_resource(
-        registry_upstream="stack",
+def test_release_credentials_never_survive_a_kept_run() -> None:
+    """The one declaration the whole inversion rests on: a GHCR token or a Cosign
+    signing key left on a retained VM is signing authority handed to whoever gets
+    that VM or a snapshot of its disk."""
+    ghcr = ghcr_credentials_resource(
         provider=object(),
         request=object(),
+        username="user",
+        token_file=Path("/tmp/token"),
+    )
+    cosign = cosign_credentials_resource(
+        provider=object(),
+        request=object(),
+        key_file=Path("/tmp/key"),
+        password_file=Path("/tmp/password"),
     )
 
-    assert tunnel.infrastructure is False
+    assert ghcr.always_release is True
+    assert cosign.always_release is True
 
 
 def test_source_archive_is_created_once_and_checksum_verified_on_stack_and_arm(

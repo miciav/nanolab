@@ -76,7 +76,7 @@ class _BodyFailure(RuntimeError):
     pass
 
 
-def test_ghcr_resource_validates_before_remote_action_and_is_never_infrastructure(
+def test_ghcr_resource_validates_before_remote_action_and_always_releases(
     tmp_path: Path,
 ) -> None:
     token = tmp_path / "ghcr-token"
@@ -90,7 +90,7 @@ def test_ghcr_resource_validates_before_remote_action_and_is_never_infrastructur
         token_file=token,
     )
 
-    assert resource.infrastructure is False
+    assert resource.always_release is True
     with pytest.raises(PermissionError, match="deny group and world"):
         resource.acquire(TaskInputs.empty())
     assert provider.exec_calls == []
@@ -144,7 +144,7 @@ def test_credential_resource_cleans_on_failure_interrupt_and_keep(
             assert inputs.resource(resource).value.docker_config.endswith("/docker")
             raise failure
 
-    workflow = Workflow("credential-cleanup", keep_infrastructure=True)
+    workflow = Workflow("credential-cleanup", keep=True)
     workflow.add(Fail(), requires=(resource,))
     with pytest.raises(type(failure)):
         workflow.run()
@@ -176,7 +176,7 @@ def test_credential_resource_cleans_on_success_with_keep(tmp_path: Path) -> None
             assert inputs.resource(resource).value.docker_config.endswith("/docker")
             return TaskOutcome()
 
-    workflow = Workflow("credential-cleanup", keep_infrastructure=True)
+    workflow = Workflow("credential-cleanup", keep=True)
     workflow.add(Pass(), requires=(resource,))
     workflow.run()
 

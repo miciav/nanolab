@@ -44,7 +44,7 @@ class FakeSonataWorkflow:
         error: Exception | None = None,
         cleanup_tasks: list[Any] | None = None,
     ) -> None:
-        self.keep_infrastructure = False
+        self.keep = False
         self.run_calls = 0
         self._on_run = on_run
         self._error = error
@@ -795,7 +795,7 @@ def test_kubernetes_provisioned_run_skips_provision_menu_forces_provision_and_av
     ]
 
 
-def test_kubernetes_provisioned_keep_sets_keep_infrastructure_without_entering_legacy_provisioning(
+def test_kubernetes_provisioned_keep_sets_keep_without_entering_legacy_provisioning(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     environment_path = _install_paths(monkeypatch, tmp_path)
@@ -825,9 +825,9 @@ def test_kubernetes_provisioned_keep_sets_keep_infrastructure_without_entering_l
     )._workflow_menu("cli-k8s.yaml")
 
     assert provision_calls == []
-    assert preview.keep_infrastructure is False
+    assert preview.keep is False
     assert preview.run_calls == 0
-    assert workflow.keep_infrastructure is True
+    assert workflow.keep is True
     assert workflow.run_calls == 1
     assert controller.calls[0]["summary_lines"] == [
         "Scenario: cli-k8s.yaml",
@@ -1079,9 +1079,9 @@ def test_keep_applies_to_provisioning_and_workflow_cleanup(
     )._workflow_menu("cli-container.yaml")
 
     assert provision_kwargs[0]["keep"] is True
-    assert preview.keep_infrastructure is False
+    assert preview.keep is False
     assert preview.run_calls == 0
-    assert workflow.keep_infrastructure is True
+    assert workflow.keep is True
     assert workflow.run_calls == 1
 
 

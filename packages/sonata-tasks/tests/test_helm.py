@@ -82,13 +82,14 @@ def test_release_uninstalls_the_acquired_release(spec: HelmReleaseSpec) -> None:
     )
 
 
-def test_resource_requires_its_vm_and_is_infrastructure(spec: HelmReleaseSpec) -> None:
+def test_resource_requires_its_vm_and_is_retained(spec: HelmReleaseSpec) -> None:
     vm = Resource(title="Acquire VM", acquire=lambda _inputs: None, release=lambda *_: None)
 
     resource = helm_release_resource(spec, executor=RecordingExecutor(), requires=(vm,))
 
     assert resource.requires == (vm,)
-    assert resource.infrastructure is True
+    # Retained by `keep`: the platform on the VM is what --keep is for.
+    assert resource.always_release is False
 
 
 def test_failed_acquire_best_effort_uninstalls_before_reraising(spec: HelmReleaseSpec) -> None:

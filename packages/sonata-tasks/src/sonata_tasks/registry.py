@@ -120,5 +120,4 @@ def docker_registry_resource(
         acquire=acquire,
         release=release,
         requires=requires,
-        infrastructure=True,
     )

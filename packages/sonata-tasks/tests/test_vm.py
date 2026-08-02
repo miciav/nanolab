@@ -97,5 +97,5 @@ def test_failed_compensation_is_noted_without_masking_acquire_failure() -> None:
     assert "destroy failed" in "\n".join(caught.value.__notes__)
 
 
-def test_resource_is_infrastructure() -> None:
-    assert _resource(FakeLifecycle(_info())).infrastructure is True
+def test_resource_is_retained_by_keep() -> None:
+    assert _resource(FakeLifecycle(_info())).always_release is False
