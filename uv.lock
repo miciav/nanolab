@@ -662,7 +662,7 @@ dependencies = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "sonata-engine", git = "https://github.com/miciav/sonata.git?rev=981ae9edbeae34e8a26ac800ee4f45aa7bed400c" }]
+requires-dist = [{ name = "sonata-engine", git = "https://github.com/miciav/sonata.git?rev=d4d0e93b1cbd194e1982c908cca47b4cb02ee501" }]
 
 [[package]]
 name = "nodejs-wheel-binaries"
@@ -1079,8 +1079,8 @@ wheels = [
 
 [[package]]
 name = "sonata-engine"
-version = "0.4.0"
-source = { git = "https://github.com/miciav/sonata.git?rev=981ae9edbeae34e8a26ac800ee4f45aa7bed400c#981ae9edbeae34e8a26ac800ee4f45aa7bed400c" }
+version = "0.5.0"
+source = { git = "https://github.com/miciav/sonata.git?rev=d4d0e93b1cbd194e1982c908cca47b4cb02ee501#d4d0e93b1cbd194e1982c908cca47b4cb02ee501" }
 
 [[package]]
 name = "sonata-tasks"
@@ -1103,7 +1103,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "sonata-engine", git = "https://github.com/miciav/sonata.git?rev=981ae9edbeae34e8a26ac800ee4f45aa7bed400c" },
+    { name = "sonata-engine", git = "https://github.com/miciav/sonata.git?rev=d4d0e93b1cbd194e1982c908cca47b4cb02ee501" },
     { name = "workflow-tasks", editable = "packages/workflow-tasks" },
 ]
 
