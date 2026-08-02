@@ -407,6 +407,14 @@ Keep only `nanolab release prepare`. Remove `release plan` and `release run`, th
 procedural orchestrator, private release journal, obsolete configuration and tests.
 Update README examples to generic `plan`/`run` plus `--resume`.
 
+Also move the VM providers out of `workflow_tasks/vm/` into `sonata-tasks`, beside the
+`vm_resource` that already wraps them. They are shared today — the import contract
+`packages/sonata-tasks/.importlinter` forbids only `workflow_tasks.core`, `.workflows`
+and `.workflow`, and `sonata_tasks/vm.py` builds on `workflow_tasks.vm.adapters` — so
+the move waits for this step: deleting the procedural runner is what leaves the provider
+with a single consumer. Moving it earlier would mean editing both paths while the
+release path is still unproven.
+
 **Step 6: Prove deletion did not reduce coverage**
 
 Repeat the complete local suite and assert:
