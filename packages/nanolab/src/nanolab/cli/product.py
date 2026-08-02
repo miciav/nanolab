@@ -126,6 +126,28 @@ def _workflow(
     )
 
 
+def _supersede_release_run(release_dir: Path) -> Path | None:
+    """Move a previous run aside so a fresh one starts clean, without erasing it.
+
+    Rotating rather than deleting, because the journal never sits alone: the phase
+    receipts the publication barriers read live beside it. Removing only the
+    journal would leave those unattributed, and removing the directory would
+    destroy the record of a failed release -- past the publish phases, the only
+    local trace of what was pushed. Returns the new location, or None when there
+    was nothing to move.
+    """
+    if not release_dir.is_dir() or not any(release_dir.iterdir()):
+        return None
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    superseded = release_dir.with_name(f"{release_dir.name}.superseded-{stamp}")
+    attempt = 1
+    while superseded.exists():
+        attempt += 1
+        superseded = release_dir.with_name(f"{release_dir.name}.superseded-{stamp}-{attempt}")
+    release_dir.rename(superseded)
+    return superseded
+
+
 def _release_request(
     scenario_path: Path,
     environment_path: Path | None,
@@ -393,15 +415,18 @@ def install_product_commands(app: typer.Typer) -> None:
                     source_tree=source_tree,
                 )
                 release_journal = release_journal_config(release_request)
-                if resume and not release_journal.path.is_file():
-                    raise typer.BadParameter("--resume requires an existing release journal")
-                if not resume and release_journal.path.exists():
-                    raise typer.BadParameter(
-                        "release journal already exists; pass --resume to verify and reuse it"
-                    )
                 # Evidence, receipts and metadata all live beside the journal, one
                 # directory per prepared version -- never a reused `latest`.
                 effective_run_dir = release_journal.path.parent
+                if resume and not release_journal.path.is_file():
+                    # Outside the raised message on purpose: Rich hard-wraps a long
+                    # path inside its error box and splits it across the borders.
+                    typer.echo(f"no release journal at: {release_journal.path}")
+                    raise typer.BadParameter("--resume requires an existing release journal")
+                if not resume:
+                    superseded = _supersede_release_run(effective_run_dir)
+                    if superseded is not None:
+                        typer.echo(f"previous release run moved aside: {superseded}")
             sink = ConsoleProgressSink()
             started_at = datetime.now(UTC)
             provenance = _git_provenance(paths.nanofaas_root)

@@ -463,14 +463,47 @@ def test_generic_release_resume_requires_an_existing_journal(release_cli_harness
     assert release_cli_harness.built == []
 
 
-def test_generic_release_fresh_run_refuses_to_overwrite_a_journal(release_cli_harness) -> None:
+def test_generic_release_fresh_run_supersedes_the_previous_one(release_cli_harness) -> None:
+    """A fresh run starts clean without destroying the last attempt.
+
+    The journal never sits alone: the phase receipts the publication barriers
+    read live beside it. Deleting only the journal would orphan them, and
+    deleting the directory would erase the record of a failed release -- which,
+    past the publish phases, is the only local trace of what was pushed.
+    """
     assert release_cli_harness.invoke("--provision").exit_code == 0
+    receipt = release_cli_harness.release_dir / "source-tests.json"
+    receipt.write_text("previous run receipt", encoding="utf-8")
 
     repeated = release_cli_harness.invoke("--provision")
 
-    assert repeated.exit_code != 0
-    assert "pass --resume" in repeated.output
-    assert "Traceback" not in repeated.output
+    assert repeated.exit_code == 0, repeated.output
+    superseded = list(
+        release_cli_harness.release_dir.parent.glob(
+            f"{release_cli_harness.release_dir.name}.superseded-*"
+        )
+    )
+    assert len(superseded) == 1
+    assert (superseded[0] / "source-tests.json").read_text(encoding="utf-8") == (
+        "previous run receipt"
+    )
+    # The new run got a clean directory, not the old one's leftovers.
+    assert not receipt.exists()
+    assert (release_cli_harness.release_dir / "sonata.jsonl").is_file()
+
+
+def test_generic_release_resume_names_the_journal_it_wanted(release_cli_harness) -> None:
+    """The old message sent operators to --resume as the only way out; after a
+    run without --keep, or a changed DAG, resume fails closed. Name the file."""
+    result = release_cli_harness.invoke("--resume")
+
+    assert result.exit_code != 0
+    # Printed outside the error box, so the path survives intact rather than
+    # being split across Rich's borders as `sonat||a.jsonl`.
+    assert f"no release journal at: {release_cli_harness.release_dir / 'sonata.jsonl'}" in (
+        result.output
+    )
+    assert "Traceback" not in result.output
 
 
 def test_generic_release_resume_reuses_the_verified_journal(release_cli_harness) -> None:
@@ -568,9 +601,11 @@ def test_generic_release_run_removes_the_extracted_tree(release_cli_harness) -> 
 def test_generic_release_preflight_rejection_removes_the_extracted_tree(
     release_cli_harness,
 ) -> None:
-    """A preflight rejection (not just a clean run) must not leak the tree."""
-    assert release_cli_harness.invoke("--provision").exit_code == 0
+    """A preflight rejection (not just a clean run) must not leak the tree.
 
+    `--resume` with no journal is rejected after `_release_request` has already
+    created and filled the temporary tree, so it exercises the guard.
+    """
     trees: list[Path] = []
     original = release_plan.build_release_request
 
@@ -580,10 +615,10 @@ def test_generic_release_preflight_rejection_removes_the_extracted_tree(
 
     release_cli_harness.monkeypatch.setattr(product_module, "build_release_request", record)
 
-    result = release_cli_harness.invoke("--provision")
+    result = release_cli_harness.invoke("--resume")
 
     assert result.exit_code != 0
-    assert "pass --resume" in result.output
+    assert "--resume requires an existing release journal" in result.output
     assert len(trees) == 1
     assert trees[0].is_absolute()
     assert not trees[0].exists()
