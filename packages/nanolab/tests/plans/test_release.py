@@ -1007,3 +1007,44 @@ def test_build_release_workflow_plans_arm64_and_publish_from_the_source_tree(
 
     assert arm_roots == [sentinel_tree]
     assert publish_roots == [sentinel_tree]
+
+
+def test_release_source_outlives_the_benchmarks(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    canonical_release_configs: tuple[Path, Path],
+) -> None:
+    """Benchmarks run their commands inside the staged source on the stack VM.
+
+    `benchmark_plan` sets `repo_root` to the remote source directory, so Sonata
+    must not splice the source resource's release before the last benchmark --
+    it did, and every benchmark died on `cd: .../source: No such file or
+    directory` after a full AMD64 build had already been paid for.
+    """
+    scenario_path, environment_path = canonical_release_configs
+    monkeypatch.setattr(
+        release_plan, "git_state", lambda _root: GitState(commit="a" * 40, clean=True)
+    )
+    monkeypatch.setattr(
+        release_plan,
+        "extract_commit_tree",
+        lambda _repo_root, _commit, _destination: NANOFAAS_ROOT,
+    )
+    request = release_plan.build_release_request(
+        repo_root=NANOLAB_ROOT,
+        nanofaas_root=NANOFAAS_ROOT,
+        scenario_path=scenario_path,
+        environment_path=environment_path,
+        release_config_path=None,
+        run_dir=tmp_path / "run",
+        performance_root=tmp_path / "performance",
+        source_tree=tmp_path / "tree",
+    )
+
+    titles = [
+        task.task.title
+        for task in build_release_workflow(request, provider=RejectingProvider()).compile().tasks
+    ]
+    release_source = titles.index("Release verified source on nanofaas-azure-release")
+
+    assert release_source > titles.index("Run release benchmark 3")

@@ -812,6 +812,11 @@ def build_release_workflow(
                 infrastructure.stack,
                 infrastructure.loadgen,
                 infrastructure.endpoints,
+                # benchmark_plan sets repo_root to the staged source on the stack
+                # VM, so the benchmarks are consumers of it. Without this, Sonata
+                # splices the source's release after the AMD64 build and every
+                # benchmark dies on `cd: .../source: No such file or directory`.
+                sources.stack,
             ),
         )
     wf.add(aggregate)  # pyright: ignore[reportArgumentType]
