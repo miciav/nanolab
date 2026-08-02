@@ -370,14 +370,15 @@ def install_product_commands(app: typer.Typer) -> None:
         release_request: ReleaseRequest | None = None
         release_provider: object | None = None
         release_journal = None
-        # The extracted tree is throwaway and only has to outlive workflow
-        # compilation. A dedicated guard covers the preflight plus the setup
-        # that follows it (sink/started_at/provenance, the latter shelling
-        # out to git): it must not route through the workflow-execution
-        # try/except below, which would write a failure run-metadata file
-        # for a plain preflight rejection. This guard, plus the `finally` on
-        # the workflow-execution try below, together close the stack on
-        # every exit path from here on.
+        # The extracted tree is throwaway, but the `finally` below only closes
+        # it once the whole release run finishes, so it is held (~15 MB) for
+        # the run's entire duration, not just through workflow compilation.
+        # A dedicated guard covers the preflight plus the setup that follows
+        # it (sink/started_at/provenance, the latter shelling out to git): it
+        # must not route through the workflow-execution try/except below,
+        # which would write a failure run-metadata file for a plain preflight
+        # rejection. This guard, plus the `finally` on the workflow-execution
+        # try below, together close the stack on every exit path from here on.
         lifetime = ExitStack()
         try:
             if release:

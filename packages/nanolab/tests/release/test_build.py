@@ -759,3 +759,42 @@ def test_extract_commit_tree_ignores_worktree_only_paths(tmp_path: Path) -> None
 
     assert (destination / "functions/python/solo/function.yaml").is_file()
     assert not (destination / "functions/java/figlet").exists()
+
+
+def test_extract_commit_tree_refuses_a_non_empty_destination(tmp_path: Path) -> None:
+    """A non-empty destination could merge leftovers into the extracted tree."""
+    from nanolab.release.build import extract_commit_tree
+
+    repo = tmp_path / "repo"
+    (repo / "tracked.txt").parent.mkdir(parents=True, exist_ok=True)
+    (repo / "tracked.txt").write_text("tracked\n", encoding="utf-8")
+    for argv in (
+        ("git", "init", "-q"),
+        ("git", "add", "-A"),
+        ("git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init"),
+    ):
+        subprocess.run(argv, cwd=repo, check=True)
+    commit = subprocess.run(
+        ("git", "rev-parse", "HEAD"), cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+    destination = tmp_path / "tree"
+    destination.mkdir()
+    (destination / "functions/java/figlet").mkdir(parents=True)
+
+    with pytest.raises(ValueError, match="not empty"):
+        extract_commit_tree(repo, commit, destination)
+
+    # The pre-existing leftover must survive untouched, not get merged over.
+    assert (destination / "functions/java/figlet").is_dir()
+
+
+def test_extract_commit_tree_normalizes_git_failures_to_value_error(tmp_path: Path) -> None:
+    from nanolab.release.build import extract_commit_tree
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(("git", "init", "-q"), cwd=repo, check=True)
+
+    with pytest.raises(ValueError, match="could not extract release source"):
+        extract_commit_tree(repo, "not-a-real-commit", tmp_path / "tree")

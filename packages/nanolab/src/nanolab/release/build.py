@@ -367,6 +367,8 @@ def extract_commit_tree(repo_root: Path, commit: str, destination: Path) -> Path
     archive: Path | None = None
     try:
         output.mkdir(parents=True, exist_ok=True)
+        if any(output.iterdir()):
+            raise ValueError(f"extraction destination is not empty: {output}")
         descriptor, temporary_name = tempfile.mkstemp(prefix=".commit-tree.", suffix=".tar")
         os.close(descriptor)
         archive = Path(temporary_name)
@@ -374,6 +376,7 @@ def extract_commit_tree(repo_root: Path, commit: str, destination: Path) -> Path
             ("git", "archive", "--format=tar", f"--output={archive}", commit),
             cwd=Path(repo_root),
             check=True,
+            capture_output=True,
         )
         with tarfile.open(archive) as bundle:
             bundle.extractall(output, filter="data")
