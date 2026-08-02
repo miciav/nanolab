@@ -487,6 +487,14 @@ def test_generic_release_failure_releases_resources_and_records_metadata(
     release_cli_harness,
 ) -> None:
     release_cli_harness.failure = RuntimeError("source tests failed")
+    trees: list[Path] = []
+    original = release_plan.build_release_request
+
+    def record(**kwargs):
+        trees.append(Path(kwargs["source_tree"]))
+        return original(**kwargs)
+
+    release_cli_harness.monkeypatch.setattr(product_module, "build_release_request", record)
 
     result = release_cli_harness.invoke("--provision")
 
@@ -497,6 +505,13 @@ def test_generic_release_failure_releases_resources_and_records_metadata(
     )
     assert metadata["status"] == "failed"
     assert "source tests failed" in metadata["error"]
+    # A workflow failure keeps CliRunner's Result holding the exception and its
+    # traceback alive, which keeps the frame (and `lifetime`) alive too -- unlike
+    # a clean return, refcounting alone won't tear the tempdir down here. This is
+    # what actually pins the `finally: lifetime.close()` on the workflow-execution
+    # try/except.
+    assert len(trees) == 1
+    assert not trees[0].exists()
 
 
 def test_generic_release_interrupt_still_releases_infrastructure(release_cli_harness) -> None:
@@ -521,7 +536,18 @@ def test_generic_release_run_rejects_a_concurrent_coordinator(release_cli_harnes
 
 
 def test_generic_release_run_removes_the_extracted_tree(release_cli_harness) -> None:
-    """The extraction is throwaway: nothing survives the command."""
+    """Pins that `source_tree` is a real absolute path plumbed through to
+    `build_release_request`, and that it's gone after a clean run.
+
+    This does NOT discriminate the cleanup guard on its own: on a clean
+    return with no exception, CPython refcounting tears the `ExitStack` (and
+    its `TemporaryDirectory`) down as soon as `run_command` returns, whether
+    or not `finally: lifetime.close()` exists. See
+    `test_generic_release_failure_releases_resources_and_records_metadata`
+    and `test_generic_release_preflight_rejection_removes_the_extracted_tree`
+    for the failure paths where a live traceback keeps frames (and the
+    guards) alive, and cleanup only happens if the guard is doing its job.
+    """
     trees: list[Path] = []
     original = release_plan.build_release_request
 
