@@ -10,6 +10,7 @@ import pytest
 from sonata_engine import Evidence, Steps, Workflow
 from workflow_tasks.tasks.models import CommandTaskSpec, TaskResult
 
+from sonata_tasks import release_composites
 from sonata_tasks.release_composites import (
     _AttestImageTask,
     arm64_build_composite,
@@ -44,6 +45,8 @@ def _attest(
     sbom_dir_remote: str = "/work/sboms",
     public_key_remote: str = "/work/cosign.pub",
     cosign_key: str = "/secrets/cosign-key",
+    password_file: str = "/secrets/cosign-password",
+    docker_config: str = "/secrets/docker",
     executor: RecordingExecutor | None = None,
     signed: list[Evidence] | None = None,
 ) -> Steps:
@@ -54,8 +57,8 @@ def _attest(
         sbom_dir_remote=sbom_dir_remote,
         public_key_remote=public_key_remote,
         cosign_key=cosign_key,
-        password_file="/secrets/cosign-password",
-        docker_config="/home/azureuser/.docker",
+        password_file=password_file,
+        docker_config=docker_config,
         executor=executor or RecordingExecutor(),
         role="stack",
         signed=signed,
@@ -518,26 +521,64 @@ class TestAttestComposite:
         with pytest.raises(ValueError, match="digest-pinned"):
             _attest(images=("repo/a:v1",))
 
-    def test_attest_group_reuse_key_covers_what_it_signs(self) -> None:
-        """A changed input changes the key -- and the step's journal identity.
+    def test_attest_group_journal_identity_follows_the_reuse_key(self) -> None:
+        """The step's journal identity must be a function of the reuse key.
 
         The engine consults a `reuse_key` only through
         `CompiledWorkflow.fingerprint`, and this composite is built inside a
         release phase at run time, so it never gets compiled. Carrying the key
-        in the title is what keeps a changed input from skipping on a record
-        that describes different work.
+        in the title -- which the journal slugifies into the step id -- is the
+        only thing that makes the key load-bearing. A refactor that changed
+        titles by some other means would disarm the mechanism silently, so
+        assert the coupling itself and not just that titles differ.
         """
+        group = _attest_group(_attest())
+        assert group.reusable, "a group that opts out of reuse can never be skipped"
+        assert group.reuse_key[-8:] in group.title
+
+    def test_attest_group_reuse_key_covers_what_it_signs(self) -> None:
+        """Anything that changes the signature changes the key."""
         base = _attest_group(_attest())
-        assert base.reusable, "a group that opts out of reuse can never be skipped"
 
         for other in (
+            _attest_group(_attest(images=("repo/b@sha256:bb",))),
             _attest_group(_attest(predicate_remote="/work/other.json")),
             _attest_group(_attest(sbom_dir_remote="/work/other-sboms")),
             _attest_group(_attest(public_key_remote="/work/other.pub")),
-            _attest_group(_attest(cosign_key="/secrets/other-key")),
         ):
             assert other.reuse_key != base.reuse_key, other.title
             assert other.title != base.title, other.reuse_key
+
+    def test_attest_group_reuse_key_ignores_per_run_credential_paths(self) -> None:
+        """The staged credential paths must NOT reach the key.
+
+        `cosign_key`, `password_file` and `docker_config` are all staged into a
+        fresh `mktemp -d` on every process (`nanolab.release.secrets`), and the
+        directory is `rm -rf`'d on release. Folding one into the key gives every
+        run a journal step id it has never recorded, so `decide_task` answers
+        "run" and the group re-signs -- the skip never fires in production even
+        though every test of it passes.
+        """
+        base = _attest_group(_attest())
+
+        for other in (
+            _attest_group(_attest(cosign_key="/tmp/nanofaas-release-credentials.b/cosign-key")),
+            _attest_group(_attest(password_file="/tmp/nanofaas-release-credentials.b/pw")),
+            _attest_group(_attest(docker_config="/tmp/nanofaas-release-credentials.b/docker")),
+        ):
+            assert other.reuse_key == base.reuse_key, other.title
+            assert other.title == base.title, other.reuse_key
+
+    def test_attest_group_reuse_key_covers_the_tool_pins(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Bumping cosign or syft must not resume onto the old tool's work."""
+        base = _attest_group(_attest())
+
+        for pin in ("COSIGN_IMAGE", "SYFT_IMAGE"):
+            monkeypatch.setattr(release_composites, pin, f"example/{pin}@sha256:ff")
+            assert _attest_group(_attest()).reuse_key != base.reuse_key, pin
+            monkeypatch.undo()
 
     def test_attest_group_emits_the_signature_it_produced(self) -> None:
         """`signed` collects one entry per group that ran, not per image asked."""

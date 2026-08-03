@@ -774,46 +774,48 @@ def build_release_workflow(
         # the signing key -- `cosign verify` rejects the encrypted private key.
         # None of it is per-image, so none of it belongs in the composite.
         # ponytail: re-runs on resume; four cheap calls against six per digest.
-        run_steps(
-            Steps(
-                title="Stage attestation inputs",
-                steps=(
-                    CommandTask(
-                        title="Create remote SBOM directory",
-                        argv=("mkdir", "-p", remote_sboms),
-                        executor=executor,
-                        role="stack",
-                    ),
-                    FileTransferTask(
-                        provider=provider,
-                        request=stack_req,
-                        source=predicate_file,
-                        destination=remote_predicate,
-                        title="Transfer release predicate",
-                    ),
-                    CosignTask(
-                        operation="public-key",
-                        image="",
-                        key_file=credentials.key_file,
-                        password_file=str(credentials.password_file),
-                        docker_config=docker_config,
-                        output_file=remote_public_key,
-                        executor=executor,
-                        role="stack",
-                    ),
-                    # cosign public-key redirects to a file, so a failure that
-                    # still exits 0 leaves an empty key that makes every later
-                    # `verify` fail for the wrong reason. Check what landed.
-                    CommandTask(
-                        title="Verify derived cosign public key",
-                        argv=("grep", "-q", "PUBLIC KEY", remote_public_key),
-                        executor=executor,
-                        role="stack",
-                    ),
-                ),
+        prelude = (
+            CommandTask(
+                title="Create remote SBOM directory",
+                argv=("mkdir", "-p", remote_sboms),
+                executor=executor,
+                role="stack",
             ),
-            inputs,
+            FileTransferTask(
+                provider=provider,
+                request=stack_req,
+                source=predicate_file,
+                destination=remote_predicate,
+                title="Transfer release predicate",
+            ),
+            CosignTask(
+                operation="public-key",
+                image="",
+                key_file=credentials.key_file,
+                password_file=str(credentials.password_file),
+                docker_config=docker_config,
+                output_file=remote_public_key,
+                executor=executor,
+                role="stack",
+            ),
+            # cosign public-key redirects to a file, so a failure that
+            # still exits 0 leaves an empty key that makes every later
+            # `verify` fail for the wrong reason. Check what landed.
+            CommandTask(
+                title="Verify derived cosign public key",
+                argv=("grep", "-q", "PUBLIC KEY", remote_public_key),
+                executor=executor,
+                role="stack",
+            ),
         )
+        for step in prelude:
+            # All four overwrite rather than append, so re-entering one is safe
+            # -- and a `failed` record on a non-idempotent step makes the next
+            # `--resume` raise instead of retrying it. The grep guard exists
+            # because `cosign public-key` can fail while exiting 0, so this is
+            # a path with a known failure mode, not a theoretical one.
+            step.idempotent = True
+        run_steps(Steps(title="Stage attestation inputs", steps=prelude), inputs)
 
         pinned = _pinned(images)
         signed: list[Evidence] = []

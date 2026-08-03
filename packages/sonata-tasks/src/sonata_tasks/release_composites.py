@@ -33,12 +33,12 @@ from workflow_tasks.execution.roles import ExecutionRole
 from workflow_tasks.tasks.models import CommandTaskSpec
 
 from sonata_tasks.command import CommandTask
-from sonata_tasks.cosign import CosignTask
+from sonata_tasks.cosign import COSIGN_IMAGE, CosignTask
 from sonata_tasks.docker import DockerBuildTask, DockerPushTask
 from sonata_tasks.gradle import GradleTask
 from sonata_tasks.imagetools import ImagetoolsCreateTask
 from sonata_tasks.skopeo import SkopeoCopyTask, SkopeoInspectTask
-from sonata_tasks.syft import SyftTask
+from sonata_tasks.syft import SYFT_IMAGE, SyftTask
 
 __all__ = [
     "command_specs_composite",
@@ -708,8 +708,15 @@ def attest_composite(
             _AttestImageTask(
                 image=image,
                 steps=operations,
+                # Only inputs that are stable across processes belong here: the
+                # key rides in the journal step id, so folding in a path that
+                # changes every run means nothing is ever skipped. `cosign_key`,
+                # `password_file` and `docker_config` are all staged into a
+                # fresh `mktemp -d` per process and are deliberately absent --
+                # the same key staged elsewhere produces the same signature.
+                # What is left lives under the release's own remote root.
                 identity={
-                    "schema": 1,
+                    "schema": 2,
                     "image": image,
                     # Titles carry the operation and the reference, so a
                     # dropped, renamed or reordered operation changes the key.
@@ -717,8 +724,10 @@ def attest_composite(
                     "predicate": predicate_remote,
                     "sbom": sbom_path,
                     "publicKey": public_key_remote,
-                    "key": cosign_key,
-                    "dockerConfig": docker_config,
+                    # The tools that make the signature: resuming across a
+                    # cosign or syft bump must not skip on the old one's work.
+                    "cosignImage": COSIGN_IMAGE,
+                    "syftImage": SYFT_IMAGE,
                 },
                 signed=collected,
             )

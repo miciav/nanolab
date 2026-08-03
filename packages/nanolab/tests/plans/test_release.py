@@ -262,6 +262,7 @@ class _ArmWorkflowProvider:
         self.failure = failure
         self.commands: list[tuple[str, ...]] = []
         self.transfers: list[str] = []
+        self.staged = 0
         self.remote_digests: dict[str, str] = {}
         self.registry_digests: dict[str, str] = {}
 
@@ -280,9 +281,14 @@ class _ArmWorkflowProvider:
         self.commands.append(argv)
         rendered = " ".join(argv)
         if argv[:2] == ("mktemp", "-d"):
-            # the shape stage_cosign_credentials insists on before it stages
+            # A fresh directory per call, as the real mktemp gives: every
+            # credential path a run sees is unique to that run, so anything
+            # that folds one into a resume identity stops resuming.
+            self.staged += 1
             return SimpleNamespace(
-                return_code=0, stdout="/tmp/nanofaas-release-credentials.aB3xY9\n", stderr=""
+                return_code=0,
+                stdout=f"/tmp/nanofaas-release-credentials.aB3xY{self.staged}\n",
+                stderr="",
             )
         if argv[0] == "sha256sum":
             digest = self.remote_digests[argv[1]].removeprefix("sha256:")
@@ -698,6 +704,42 @@ def test_resumed_attest_skips_the_digests_it_already_signed(
 
     rerun = executor.commands[mark:]
     assert _touched(rerun, pinned) == {stale}
+
+
+def test_resumed_attest_retries_a_failed_prelude_step(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    canonical_release_configs: tuple[Path, Path],
+) -> None:
+    """A prelude failure must be retryable, not fatal to the next resume.
+
+    The four prelude steps are plain tasks, and `decide_resume` refuses to
+    resume a `failed` non-idempotent task at all -- it raises rather than
+    re-running it. The public-key guard exists because `cosign public-key` can
+    fail while exiting 0, so this is a path with a known failure mode.
+    """
+    workflow, _provider, executor, phases = _arm_failure_workflow(
+        monkeypatch, tmp_path, "none", *canonical_release_configs
+    )
+    _stage_attest_inputs(phases)
+    journal = JournalConfig(tmp_path / "release.jsonl")
+    only_attest = Selection(only="attest-published-images")
+    guard = ("grep", "-q", "PUBLIC KEY")
+
+    executor.fail_when = lambda spec: spec.argv[:3] == guard
+    with pytest.raises(RuntimeError, match="Verify derived cosign public key"):
+        workflow.run(select=only_attest, journal=journal)
+
+    executor.fail_when = None
+    mark = len(executor.commands)
+    workflow.run(
+        select=only_attest,
+        journal=journal,
+        resume=True,
+        verifiers={"cosign-attestation": signature_evidence_verifier},
+    )
+
+    assert any(spec.argv[:3] == guard for spec in executor.commands[mark:])
 
 
 def test_build_release_workflow_compiles_without_cloud_discovery(
