@@ -9,7 +9,6 @@ from sonata_engine import Workflow
 from workflow_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 from sonata_tasks.release_composites import (
-    amd64_build_composite,
     arm64_build_composite,
     attest_composite,
     command_specs_composite,
@@ -214,71 +213,6 @@ class TestSourceTestsComposite:
 
         with pytest.raises(ValueError, match="at least one step"):
             command_specs_composite([], executor, title="Run source tests")
-
-
-class TestAmd64BuildComposite:
-    def test_builds_only_amd64_cells(self) -> None:
-        executor = RecordingExecutor()
-        plan = _plan_with_cells(
-            _bake_cell("control-plane", "reg/ctrl:1-a-jvm", arch="amd64"),
-            _bake_cell("control-plane", "reg/ctrl:1-arm64-jvm", arch="arm64"),
-            _bake_cell("watchdog", "reg/watch:1-amd64", arch="amd64", flavor="default"),
-        )
-
-        composite = amd64_build_composite(plan, executor, "host")
-        workflow = Workflow("amd64-build")
-        workflow.add(composite)
-        workflow.run()
-
-        # Only amd64 cells should produce build tasks
-        build_images = [
-            spec.argv[spec.argv.index("-t") + 1] for spec in executor.seen if "build" in spec.argv
-        ]
-        assert build_images == ["reg/ctrl:1-a-jvm", "reg/watch:1-amd64"]
-
-    def test_uses_docker_build_task_for_bake_cells(self) -> None:
-        executor = RecordingExecutor()
-        plan = _plan_with_cells(
-            _bake_cell("ctrl", "reg/ctrl:1-a-jvm", arch="amd64"),
-        )
-
-        composite = amd64_build_composite(plan, executor, "host")
-        workflow = Workflow("amd64-build")
-        workflow.add(composite)
-        workflow.run()
-
-        assert len(executor.seen) == 1
-        spec = executor.seen[0]
-        assert spec.argv[0] == "docker"
-        assert spec.argv[1] == "build"
-
-    def test_uses_gradle_task_for_gradle_cells(self) -> None:
-        executor = RecordingExecutor()
-        plan = _plan_with_cells(
-            _gradle_cell("ctrl", "reg/ctrl:1-a-native", arch="amd64"),
-        )
-
-        composite = amd64_build_composite(plan, executor, "host")
-        workflow = Workflow("amd64-build")
-        workflow.add(composite)
-        workflow.run()
-
-        assert len(executor.seen) == 1
-        spec = executor.seen[0]
-        assert spec.argv[0] == "./gradlew"
-
-    def test_passes_working_directory(self) -> None:
-        executor = RecordingExecutor()
-        plan = _plan_with_cells(
-            _bake_cell("ctrl", "reg/ctrl:1-a-jvm", arch="amd64"),
-        )
-
-        composite = amd64_build_composite(plan, executor, "host", cwd=Path("/project"))
-        workflow = Workflow("amd64-build")
-        workflow.add(composite)
-        workflow.run()
-
-        assert executor.seen[0].cwd == Path("/project")
 
 
 class TestRegistryPushComposite:
@@ -525,21 +459,6 @@ class TestCompositeCompilation:
         # Steps is one compiled unit at the workflow level
         assert len(compiled.tasks) == 1
         assert compiled.tasks[0].task_id == "001.run-source-tests"
-
-    def test_amd64_build_compiles(self) -> None:
-        executor = RecordingExecutor()
-        plan = _plan_with_cells(
-            _bake_cell("ctrl", "reg/ctrl:v1-amd64", arch="amd64"),
-            _bake_cell("watchdog", "reg/watch:v1-amd64", arch="amd64", flavor="default"),
-        )
-
-        composite = amd64_build_composite(plan, executor, "host")
-        workflow = Workflow("amd64-build")
-        workflow.add(composite)
-        compiled = workflow.compile()
-
-        assert len(compiled.tasks) == 1
-        assert compiled.tasks[0].task_id == "001.build-amd64-images"
 
     def test_registry_push_compiles(self) -> None:
         executor = RecordingExecutor()

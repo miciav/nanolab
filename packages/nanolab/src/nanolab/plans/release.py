@@ -17,7 +17,6 @@ import yaml
 from sonata_engine import Evidence, JournalConfig, Verifier, Workflow
 from sonata_tasks.buildx import buildx_builder_resource
 from sonata_tasks.release_composites import (
-    amd64_build_composite,
     command_specs_composite,
     registry_push_composite,
 )
@@ -33,7 +32,7 @@ from nanolab.images.plan import DEFAULT_REGISTRY, ImagePlan, build_image_plan
 from nanolab.release.arm import build_arm64_image_plan
 from nanolab.release import arm as release_arm
 from nanolab.release import build as release_build
-from nanolab.release.build import extract_commit_tree
+from nanolab.release.build import amd64_build_commands, extract_commit_tree
 from nanolab.release.environment import validate_release_environment
 from nanolab.release.evidence import release_evidence_verifiers
 from nanolab.release.benchmark import (
@@ -48,7 +47,7 @@ from nanolab.release import attest as release_attest
 from nanolab.release import publish as release_publish
 from nanolab.release.metrics import build_release_record
 from nanolab.release.resources import (
-    arm_build_inputs_resource,
+    build_inputs_resource,
     build_release_resources,
     build_release_source_resources,
     cosign_credentials_resource,
@@ -324,43 +323,52 @@ def build_release_workflow(
     )
 
     # --- Phase 2: AMD64 Build ---
-    amd64_builder = buildx_builder_resource(
-        name=f"release-amd64-{request.version}",
-        executor=executor,
-        role="stack",
+    amd64_inputs = build_inputs_resource(
+        image_plan=request.image_plan,
+        max_parallelism=request.settings.max_parallelism,
+        run_dir=release_dir,
+        remote_root=remote_root,
+        provider=provider,
+        request=stack_req,
+        architecture="amd64",
         requires=(infrastructure.stack,),
     )
-    amd64_steps = amd64_build_composite(
-        request.image_plan,
+    amd64_builder_name = f"release-amd64-{request.version}"
+    amd64_builder = buildx_builder_resource(
+        name=amd64_builder_name,
         executor=executor,
         role="stack",
-        cwd=Path(source_dir),
+        requires=(infrastructure.stack, amd64_inputs),
+        buildkitd_config=f"{remote_root}/buildkitd-amd64.toml",
     )
+    amd64_commands = amd64_build_commands(
+        request.image_plan,
+        builder_name=amd64_builder_name,
+        remote_bake_file=f"{remote_root}/docker-bake-amd64.json",
+        remote_source_dir=source_dir,
+    )
+    amd64_steps = command_specs_composite(
+        amd64_commands, executor=executor, title="Build AMD64 images"
+    )
+    release_images = tuple(cell.image for cell in request.image_plan.cells)
     amd64_build = amd64_build_task(
         identity=identity,
         run_dir=request.run_dir,
         phase_inputs={
-            "cells": tuple(
-                (
-                    cell.image,
-                    cell.architecture,
-                    cell.flavor,
-                    cell.build_kind,
-                    str(cell.target.dockerfile),
-                    str(cell.target.context),
-                    cell.gradle_command,
-                )
-                for cell in request.image_plan.cells
+            "commands": tuple(
+                (command.argv, command.role, str(command.remote_dir))
+                for command in amd64_commands
             ),
             "maxParallelism": request.settings.max_parallelism,
             "sourceDir": source_dir,
         },
         prerequisites=(source_tests.receipt,),
+        expected_images=release_images,
         work=lambda inputs: run_image_steps(
             amd64_steps,
             inputs,
             executor,
-            tuple(cell.image for cell in request.image_plan.cells),
+            release_images,
             registry=False,
         ),
     )
@@ -372,7 +380,6 @@ def build_release_workflow(
         role="stack",
         tls_verify=False,
     )
-    release_images = tuple(cell.image for cell in request.image_plan.cells)
     registry_push = registry_push_task(
         identity=identity,
         run_dir=request.run_dir,
@@ -457,13 +464,14 @@ def build_release_workflow(
         request.version,
         registry=request.image_plan.registry,
     )
-    arm_inputs = arm_build_inputs_resource(
+    arm_inputs = build_inputs_resource(
         image_plan=arm_plan,
         max_parallelism=request.settings.max_parallelism,
         run_dir=release_dir,
         remote_root=remote_root,
         provider=provider,
         request=arm_req,
+        architecture="arm64",
         requires=(infrastructure.arm_builder,),
     )
     tunnel = registry_tunnel_resource(
@@ -477,7 +485,7 @@ def build_release_workflow(
         executor=executor,
         role="arm-builder",
         requires=(infrastructure.arm_builder, arm_inputs),
-        buildkitd_config=f"{remote_root}/buildkitd.toml",
+        buildkitd_config=f"{remote_root}/buildkitd-arm64.toml",
         validate=release_arm.require_arm64_builder,
         replace_existing=True,
     )
@@ -495,7 +503,7 @@ def build_release_workflow(
             max_parallelism=request.settings.max_parallelism,
         ),
         bake_file=release_dir / "docker-bake-arm64.json",
-        buildkit_config=release_dir / "buildkitd.toml",
+        buildkit_config=release_dir / "buildkitd-arm64.toml",
         performance_root=request.performance_root,
         credentials=request.credentials,
     )
@@ -514,7 +522,7 @@ def build_release_workflow(
                 provider,
                 arm_req,
                 f"{remote_root}/docker-bake-arm64.json",
-                f"{remote_root}/buildkitd.toml",
+                f"{remote_root}/buildkitd-arm64.toml",
                 source_dir,
                 registry_upstream="",
                 stage_inputs=False,
@@ -804,7 +812,12 @@ def build_release_workflow(
     )
     wf.add(  # pyright: ignore[reportArgumentType]
         amd64_build,
-        requires=(infrastructure.stack, sources.stack, amd64_builder),
+        requires=(
+            infrastructure.stack,
+            sources.stack,
+            amd64_inputs,
+            amd64_builder,
+        ),
     )
     wf.add(registry_push, requires=(infrastructure.stack,))  # pyright: ignore[reportArgumentType]
     for benchmark in benchmark_runs:

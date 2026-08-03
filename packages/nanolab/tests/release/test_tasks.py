@@ -272,6 +272,50 @@ def test_registry_push_rejects_malformed_matrix_evidence(
         task.run(TaskInputs.empty())
 
 
+def test_expected_images_accepts_daemon_local_digests(tmp_path: Path) -> None:
+    digest = "sha256:" + "c" * 64
+    image = "localhost:5000/nanofaas/server:v1-amd64"
+    task = amd64_build_task(
+        identity=_identity(),
+        run_dir=tmp_path,
+        phase_inputs={"matrix": [image]},
+        expected_images=(image,),
+        work=lambda _inputs: (Evidence("local-image-digest", f"docker-daemon:{image}", digest),),
+    )
+
+    outcome = task.run(TaskInputs.empty())
+
+    assert any(item.kind == "local-image-digest" for item in outcome.evidence)
+
+
+def test_expected_images_still_rejects_an_incomplete_matrix(tmp_path: Path) -> None:
+    task = amd64_build_task(
+        identity=_identity(),
+        run_dir=tmp_path,
+        phase_inputs={"matrix": ["a:v1", "b:v1"]},
+        expected_images=("a:v1", "b:v1"),
+        work=lambda _inputs: (
+            Evidence("local-image-digest", "docker-daemon:a:v1", "sha256:" + "d" * 64),
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="amd64-build evidence does not cover the image matrix"):
+        task.run(TaskInputs.empty())
+
+
+def test_expected_images_rejects_a_daemon_digest_without_its_scheme(tmp_path: Path) -> None:
+    task = amd64_build_task(
+        identity=_identity(),
+        run_dir=tmp_path,
+        phase_inputs={"matrix": ["a:v1"]},
+        expected_images=("a:v1",),
+        work=lambda _inputs: (Evidence("local-image-digest", "a:v1", "sha256:" + "d" * 64),),
+    )
+
+    with pytest.raises(RuntimeError, match="does not cover the image matrix"):
+        task.run(TaskInputs.empty())
+
+
 def test_registry_push_rejects_duplicate_matrix_evidence(tmp_path: Path) -> None:
     item = Evidence("local-registry-digest", "docker://image-a:v1", "sha256:" + "d" * 64)
     task = registry_push_task(

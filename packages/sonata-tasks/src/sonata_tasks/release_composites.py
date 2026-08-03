@@ -39,7 +39,6 @@ from sonata_tasks.syft import SyftTask
 
 __all__ = [
     "command_specs_composite",
-    "amd64_build_composite",
     "registry_push_composite",
     "arm64_build_composite",
     "arm64_smoke_composite",
@@ -113,78 +112,6 @@ def command_specs_composite(
         for i, spec in enumerate(commands)
     )
     return Steps(title=title, steps=steps)
-
-
-# ---------------------------------------------------------------------------
-# 2. amd64_build_composite
-# ---------------------------------------------------------------------------
-
-
-def amd64_build_composite(
-    plan: Any,
-    executor: CommandTaskExecutor,
-    role: ExecutionRole,
-    *,
-    title: str = "Build AMD64 images",
-    cwd: Path | None = None,
-) -> Steps:
-    """Build every AMD64 image cell.
-
-    Iterates ``plan.cells``, selecting those whose architecture is
-    ``"amd64"``.
-
-    * **Bake cells** (``build_kind == "bake"``) — built with
-      ``DockerBuildTask`` using the cell's Dockerfile and context.
-    * **Gradle cells** (``build_kind == "gradle"``) — built with
-      ``GradleTask`` using the cell's native Gradle task and image
-      property.
-
-    Parameters
-    ----------
-    plan :
-        An object whose ``cells`` attribute is a sequence of
-      ``ImageCell``-like objects.
-    executor :
-        Role-bound executor.
-    role :
-        Execution role (typically ``"host"`` for local AMD64).
-    title :
-        Optional override.
-    cwd :
-        Working directory for each build command.
-    """
-    steps: list[Any] = []
-    for cell in plan.cells:
-        if cell.architecture != "amd64":
-            continue
-        if cell.build_kind == "gradle":
-            target = cell.target.native_gradle_task
-            prop = cell.target.native_image_property
-            if target is None or prop is None:
-                raise ValueError(f"missing Gradle metadata for {cell.target.name}")
-            steps.append(
-                GradleTask(
-                    target,
-                    properties={prop: cell.image},
-                    executor=executor,
-                    role=role,
-                    title=f"Build {cell.image}",
-                    cwd=cwd,
-                )
-            )
-        else:
-            steps.append(
-                DockerBuildTask(
-                    image=cell.image,
-                    dockerfile=str(cell.target.dockerfile),
-                    context=str(cell.target.context),
-                    executor=executor,
-                    role=role,
-                    title=f"Build {cell.image}",
-                    cwd=cwd,
-                )
-            )
-    return Steps(title=title, steps=tuple(steps))
 
 
 # ---------------------------------------------------------------------------

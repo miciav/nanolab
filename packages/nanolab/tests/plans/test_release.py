@@ -56,6 +56,70 @@ _AZURE_ENV = EnvironmentConfig.model_validate(
 )
 
 
+@pytest.fixture
+def release_request(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    canonical_release_configs: tuple[Path, Path],
+) -> ReleaseRequest:
+    """The canonical offline release request every workflow test compiles from."""
+    scenario_path, environment_path = canonical_release_configs
+    monkeypatch.setattr(
+        release_plan, "git_state", lambda _root: GitState(commit="a" * 40, clean=True)
+    )
+    monkeypatch.setattr(
+        release_plan,
+        "extract_commit_tree",
+        lambda _repo_root, _commit, _destination: NANOFAAS_ROOT,
+    )
+    return release_plan.build_release_request(
+        repo_root=NANOLAB_ROOT,
+        nanofaas_root=NANOFAAS_ROOT,
+        scenario_path=scenario_path,
+        environment_path=environment_path,
+        release_config_path=None,
+        run_dir=tmp_path / "run",
+        performance_root=tmp_path / "performance",
+        source_tree=tmp_path / "tree",
+    )
+
+
+def _phase_named(workflow, title: str) -> ReleasePhaseTask:
+    for compiled in workflow.compile().tasks:
+        if isinstance(compiled.task, ReleasePhaseTask) and compiled.task.title == title:
+            return compiled.task
+    raise AssertionError(f"no release phase titled {title!r}")
+
+
+def test_amd64_build_phase_records_the_commands_it_will_run(
+    release_request: ReleaseRequest,
+) -> None:
+    """The phase must run the whole build command, and record what it ran.
+
+    `phase_inputs` is the reuse key, so deriving it from the real argv is what
+    keeps a receipt from claiming inputs the executed command never carried.
+    """
+    workflow = build_release_workflow(release_request, provider=RejectingProvider())
+    phase = _phase_named(workflow, "Build AMD64 images")
+
+    argvs = [argv for argv, _role, _remote_dir in phase.phase_inputs["commands"]]
+
+    natives = [a for a in argvs if a[0] == "./gradlew" and "-PimagePlatform=linux/amd64" in a]
+    assert natives, "no native AMD64 gradle build"
+    # The cell's own command is the source of truth: every native build runs it
+    # whole, per-target extra arguments included. Only control-plane carries
+    # -PcontrolPlaneModules=all, and dropping it is what shipped in v0.18.1.
+    assert set(natives) == {
+        cell.gradle_command for cell in release_request.image_plan.gradle_cells
+    }
+    assert any("-PcontrolPlaneModules=all" in argv for argv in natives)
+    assert any(argv[:3] == ("docker", "buildx", "bake") for argv in argvs)
+    assert any(argv[0] == "./gradlew" and "bootJar" in " ".join(argv) for argv in argvs)
+    assert phase.expected_images == tuple(
+        cell.image for cell in release_request.image_plan.cells
+    )
+
+
 def test_release_journal_is_scoped_to_the_versioned_run(tmp_path: Path) -> None:
     request = type("Request", (), {"run_dir": tmp_path, "version": "v1.2.3"})()
 
@@ -516,9 +580,11 @@ def test_build_release_workflow_compiles_without_cloud_discovery(
         "Acquire release stack VM",
         "Acquire immutable release source archive",
         "Acquire verified source on nanofaas-azure-release",
+        "Acquire AMD64 Bake and BuildKit inputs",
         f"Acquire release-amd64-v{CURRENT_VERSION} buildx builder",
         "Build AMD64 images",
         f"Release release-amd64-v{CURRENT_VERSION} buildx builder",
+        "Release AMD64 Bake and BuildKit inputs",
         "Release verified source on nanofaas-azure-release",
         "Release immutable release source archive",
         "Release release stack VM",

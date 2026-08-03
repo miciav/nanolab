@@ -77,7 +77,6 @@ from sonata_tasks.validate import (
 )
 from sonata_tasks.vm import vm_resource
 from sonata_tasks.release_composites import (
-    amd64_build_composite,
     arm64_build_composite,
     arm64_smoke_composite,
     attest_composite,
@@ -164,7 +163,6 @@ __all__ = [
     "vm_resource",
     # Release composites
     "command_specs_composite",
-    "amd64_build_composite",
     "registry_push_composite",
     "arm64_build_composite",
     "arm64_smoke_composite",

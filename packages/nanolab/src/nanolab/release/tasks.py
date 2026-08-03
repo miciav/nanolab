@@ -23,6 +23,13 @@ from nanolab.release.state import ArtifactEvidence
 
 PhaseWork = Callable[[TaskInputs], Iterable[Evidence]]
 
+# The two ways a phase proves it holds an image, and the reference scheme each
+# one must carry: the registry (skopeo) and the local daemon (docker inspect).
+MATRIX_DIGEST_SCHEMES = {
+    "local-registry-digest": "docker://",
+    "local-image-digest": "docker-daemon:",
+}
+
 
 def versioned_release_run_dir(run_dir: Path, version: str) -> Path:
     """Normalize a generic run root to one directory per release version."""
@@ -85,16 +92,23 @@ class ReleasePhaseTask(ReusableTask):
         )
         produced = tuple(self.work(inputs))
         if self.expected_images:
-            registry_evidence = tuple(
-                entry for entry in produced if entry.kind == "local-registry-digest"
-            )
-            expected = {f"docker://{image}" for image in self.expected_images}
+            # Both digest kinds cover the same matrix: the build phase inspects
+            # the daemon (docker-daemon:), the push phase inspects the registry
+            # (docker://). Compare the image, not the scheme it was read through
+            # -- but a reference missing its own scheme stays uncounted, so
+            # malformed evidence still fails the matrix.
+            matrix = tuple(entry for entry in produced if entry.kind in MATRIX_DIGEST_SCHEMES)
+            references = {
+                entry.reference.removeprefix(MATRIX_DIGEST_SCHEMES[entry.kind])
+                for entry in matrix
+                if entry.reference.startswith(MATRIX_DIGEST_SCHEMES[entry.kind])
+            }
             if (
-                len(registry_evidence) != len(expected)
-                or {entry.reference for entry in registry_evidence} != expected
-                or any(not is_sha256_digest(entry.digest) for entry in registry_evidence)
+                len(matrix) != len(self.expected_images)
+                or references != set(self.expected_images)
+                or any(not is_sha256_digest(entry.digest) for entry in matrix)
             ):
-                raise RuntimeError("local-registry-push evidence does not cover the image matrix")
+                raise RuntimeError(f"{self.phase} evidence does not cover the image matrix")
 
         _write_receipt(self.receipt, self.phase, produced)
         receipt = Evidence("file-digest", str(self.receipt), digest_path(self.receipt))
