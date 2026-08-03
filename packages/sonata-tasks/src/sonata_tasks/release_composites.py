@@ -543,10 +543,16 @@ def attest_composite(
 ) -> Steps:
     """SBOM, sign, attest, attach and verify every digest, one Steps per image.
 
-    The per-image grouping is the point: this phase issues five container runs
+    The per-image grouping is the point: this phase issues six container runs
     per digest across the whole published matrix, and a network failure two
     thirds of the way through should resume from the digest it died on, not
     from the first one.
+
+    `verify` and `verify-attestation` are both included, matching
+    `attest_release_images`: `verify` checks the simple-signing signature
+    `sign` produced, `verify-attestation` checks the separate in-toto
+    attestation `attest` produced. One passing says nothing about the other,
+    so dropping either loses real coverage.
 
     `images` must be digest-pinned references (``repo/name@sha256:...``).
     Signing a tag signs whatever the tag points at when cosign resolves it,
@@ -607,6 +613,16 @@ def attest_composite(
                         password_file=password_file,
                         docker_config=docker_config,
                         sbom_file=sbom_path,
+                        executor=executor,
+                        role=role,
+                    ),
+                    CosignTask(
+                        operation="verify",
+                        image=image,
+                        key_file=cosign_key,
+                        password_file=password_file,
+                        docker_config=docker_config,
+                        public_key_file=public_key_remote,
                         executor=executor,
                         role=role,
                     ),

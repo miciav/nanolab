@@ -407,11 +407,12 @@ class TestPublishAliasesComposite:
 
 
 class TestAttestComposite:
-    def test_attest_composite_runs_five_operations_per_image(self) -> None:
+    def test_attest_composite_runs_six_operations_per_image(self) -> None:
         executor = RecordingExecutor()
+        images = ("repo/a@sha256:aa", "repo/b@sha256:bb")
 
         composite = attest_composite(
-            ("repo/a@sha256:aa", "repo/b@sha256:bb"),
+            images,
             predicate_remote="/work/predicate.json",
             sbom_dir_remote="/work/sboms",
             public_key_remote="/work/cosign.pub",
@@ -426,11 +427,22 @@ class TestAttestComposite:
         # `Steps` keeps its inner tasks on the private `_steps` attribute --
         # there is no public accessor, so introspection has to reach past it.
         assert len(composite._steps) == 2
-        for per_image in composite._steps:
+        for image, per_image in zip(images, composite._steps, strict=True):
             titles = [step.title for step in per_image._steps]
-            assert len(titles) == 5
-            assert sum("Syft" in title for title in titles) == 1
-            assert sum("cosign" in title for title in titles) == 4
+            # Exact ordered titles, not just a count: a dropped, renamed, or
+            # reordered operation (e.g. losing the standalone `verify` step
+            # that checks `sign`'s signature, distinct from what
+            # `verify-attestation` checks for `attest`) fails this comparison
+            # even though the total step count could otherwise stay right by
+            # coincidence.
+            assert titles == [
+                f"Syft SBOM {image}",
+                f"cosign sign {image}",
+                f"cosign attest {image}",
+                f"cosign attach sbom {image}",
+                f"cosign verify {image}",
+                f"cosign verify-attestation {image}",
+            ]
 
     def test_attest_composite_pins_every_operation_to_the_same_digest(self) -> None:
         executor = RecordingExecutor()
