@@ -15,6 +15,7 @@ from nanolab.release.tasks import (
     registry_push_task,
     registry_artifacts_from_receipt,
     run_image_steps,
+    run_source_steps,
     source_test_task,
     publish_architectures_task,
     publish_manifests_task,
@@ -751,6 +752,18 @@ class _ScriptedExecutor:
         return TaskResult(
             task_id="", status="passed", return_code=0, stdout=self._responses[task.argv]
         )
+
+
+def test_run_source_steps_records_the_tested_source_tree(tmp_path: Path) -> None:
+    archive = tmp_path / "source.tar"
+    archive.write_bytes(b"tree")
+
+    evidence = run_source_steps(_NoopSteps(), TaskInputs.empty(), source_archive=archive)
+
+    assert len(evidence) == 1
+    assert evidence[0].kind == "file-digest"
+    assert evidence[0].reference == str(archive)
+    assert evidence[0].digest == digest_path(archive)
 
 
 def test_run_image_steps_rejects_a_foreign_architecture() -> None:

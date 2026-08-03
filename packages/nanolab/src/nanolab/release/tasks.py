@@ -270,9 +270,17 @@ def require_attestation_predicate(
         raise RuntimeError("attestation predicate does not match the release evidence")
 
 
-def run_source_steps(steps: Task[Any], inputs: TaskInputs) -> tuple[Evidence, ...]:
+def run_source_steps(
+    steps: Task[Any], inputs: TaskInputs, *, source_archive: Path
+) -> tuple[Evidence, ...]:
+    """Run the source tests and record which tree they ran against.
+
+    The archive digest is the whole evidence a resume needs: same tree, same
+    test outcome. Returning nothing here means the phase can never be reused
+    and every resume re-runs the full product suite.
+    """
     _run_steps(steps, inputs)
-    return ()
+    return (Evidence("file-digest", str(source_archive), digest_path(source_archive)),)
 
 
 def run_image_steps(

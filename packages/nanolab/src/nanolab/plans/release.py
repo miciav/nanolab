@@ -319,7 +319,9 @@ def build_release_workflow(
                 for command in source_commands
             )
         },
-        work=lambda inputs: run_source_steps(source_steps, inputs),
+        work=lambda inputs: run_source_steps(
+            source_steps, inputs, source_archive=release_dir / "source.tar"
+        ),
     )
 
     # --- Phase 2: AMD64 Build ---
