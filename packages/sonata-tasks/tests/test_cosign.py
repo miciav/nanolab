@@ -242,7 +242,7 @@ def test_sign_does_not_wait_for_confirmation() -> None:
         executor=executor, role="stack",
     ))
     argv = executor.seen[0].argv
-    assert argv[-4:] == ("sign", "--yes", "--key", "/key.cosign") or "--yes" in argv
+    assert "--yes" in argv
 
 
 def test_attest_declares_the_custom_predicate_type() -> None:
@@ -290,3 +290,20 @@ def test_public_key_writes_the_derived_key_to_a_file() -> None:
     argv = executor.seen[0].argv
     assert "public-key" in argv
     assert "/work/cosign.pub" in " ".join(argv)
+
+
+def test_public_key_output_file_is_not_interpolated_into_the_shell_script() -> None:
+    # output_file must reach the wrapper as a positional shell parameter, not
+    # be formatted into the `-c` script text -- otherwise a value containing
+    # a quote, `$`, or a backtick breaks out of the intended redirect.
+    executor = RecordingExecutor()
+    dangerous = '/work/cosign.pub"; rm -rf /; echo "pwned'
+    _run(CosignTask(
+        operation="public-key", image="", key_file="/secrets/cosign.key",
+        password_file="/secrets/pw", docker_config="/home/user/.docker",
+        output_file=dangerous, executor=executor, role="stack",
+    ))
+    argv = executor.seen[0].argv
+    script = argv[2]
+    assert dangerous not in script
+    assert dangerous in argv

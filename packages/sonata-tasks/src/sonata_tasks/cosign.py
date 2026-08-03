@@ -120,26 +120,26 @@ class CosignTask(CommandTask):
         run.append(COSIGN_IMAGE)
         run.extend(cosign)
 
-        redirect = f' > "{output_file}"' if operation == "public-key" else ""
+        if operation == "public-key":
+            assert output_file is not None  # validated in the dispatch above
+            # output_file is a positional shell parameter ($2), captured into
+            # a variable before the shift -- never formatted into the script
+            # text, so a value containing `"`, `$`, or a backtick still lands
+            # as a literal path, not shell syntax. Redirect instead of exec:
+            # public-key writes the key to stdout.
+            script = 'pw=$(cat "$1"); out="$2"; shift 2; COSIGN_PASSWORD="$pw" "$@" > "$out"'
+            positional = (password_file, output_file, *run)
+        else:
+            # ponytail: shell wrapper reads password file, shifts it away,
+            # then execs the real command with the password in the env.
+            script = 'pw=$(cat "$1"); shift; COSIGN_PASSWORD="$pw" exec "$@"'
+            positional = (password_file, *run)
+
         super().__init__(
             title=title or f"cosign {operation} {image or key_file}",
             # Password is read from a file by the shell wrapper and passed via
             # environment variable -- never appears in the process argv.
-            argv=(
-                "sh",
-                "-c",
-                # ponytail: shell wrapper reads password file, shifts it away,
-                # then execs the real command with the password in the env.
-                # public-key writes to stdout, so it redirects instead of exec'ing.
-                (
-                    'pw=$(cat "$1"); shift; COSIGN_PASSWORD="$pw" exec "$@"'
-                    if not redirect
-                    else f'pw=$(cat "$1"); shift; COSIGN_PASSWORD="$pw" "$@"{redirect}'
-                ),
-                "--",
-                password_file,
-                *run,
-            ),
+            argv=("sh", "-c", script, "--", *positional),
             executor=executor,
             role=role,
             cwd=cwd,
