@@ -16,7 +16,7 @@ COSIGN_IMAGE = (
 )
 
 CosignOperation = Literal[
-    "sign", "attest", "attach sbom", "verify", "verify-attestation"
+    "sign", "attest", "attach sbom", "verify", "verify-attestation", "public-key"
 ]
 
 
@@ -30,15 +30,18 @@ class CosignTask(CommandTask):
     Operations
     ----------
     sign
-        ``cosign sign --key /key.cosign <image>``
+        ``cosign sign --yes --key /key.cosign <image>``
     attest
-        ``cosign attest --key /key.cosign --predicate /predicate.json <image>``
+        ``cosign attest --yes --key /key.cosign --type custom --predicate
+        /predicate.json <image>``
     attach sbom
-        ``cosign attach sbom --sbom /sbom.json <image>``
+        ``cosign attach sbom --sbom /sbom.json --type spdx <image>``
     verify
         ``cosign verify --key /pub.key <image>``
     verify-attestation
-        ``cosign verify-attestation --key /pub.key <image>``
+        ``cosign verify-attestation --key /pub.key --type custom <image>``
+    public-key
+        ``cosign public-key --key /key.cosign``, redirected to ``output_file``
     """
 
     def __init__(
@@ -57,6 +60,7 @@ class CosignTask(CommandTask):
         predicate_file: str | None = None,
         sbom_file: str | None = None,
         public_key_file: str | None = None,
+        output_file: str | None = None,
     ) -> None:
         # Build the docker run arguments.
         run: list[str] = [
@@ -72,7 +76,7 @@ class CosignTask(CommandTask):
             "-v",
             f"{docker_config}:/auth:ro",
         ]
-        if operation in ("sign", "attest"):
+        if operation in ("sign", "attest", "public-key"):
             run.extend(["-v", f"{key_file}:/key.cosign:ro"])
         if public_key_file is not None and operation in ("verify", "verify-attestation"):
             run.extend(["-v", f"{public_key_file}:/pub.key:ro"])
@@ -82,32 +86,43 @@ class CosignTask(CommandTask):
             run.extend(["-v", f"{sbom_file}:/sbom.json:ro"])
 
         # Build the cosign subcommand run inside the container.
+        # --yes: these run unattended; without it cosign blocks on a prompt.
+        # --type: the release predicate is `custom`, and verify-attestation only
+        # finds an attestation whose type it was told to expect.
         cosign: tuple[str, ...]
         if operation == "sign":
-            cosign = ("sign", "--key", "/key.cosign", image)
+            cosign = ("sign", "--yes", "--key", "/key.cosign", image)
         elif operation == "attest":
             cosign = (
                 "attest",
+                "--yes",
                 "--key",
                 "/key.cosign",
+                "--type",
+                "custom",
                 "--predicate",
                 "/predicate.json",
                 image,
             )
         elif operation == "attach sbom":
-            cosign = ("attach", "sbom", "--sbom", "/sbom.json", image)
+            cosign = ("attach", "sbom", "--sbom", "/sbom.json", "--type", "spdx", image)
         elif operation == "verify":
             cosign = ("verify", "--key", "/pub.key", image)
         elif operation == "verify-attestation":
-            cosign = ("verify-attestation", "--key", "/pub.key", image)
+            cosign = ("verify-attestation", "--key", "/pub.key", "--type", "custom", image)
+        elif operation == "public-key":
+            if output_file is None:
+                raise ValueError("cosign public-key needs an output_file")
+            cosign = ("public-key", "--key", "/key.cosign")
         else:
             raise ValueError(f"unknown cosign operation: {operation}")
 
         run.append(COSIGN_IMAGE)
         run.extend(cosign)
 
+        redirect = f' > "{output_file}"' if operation == "public-key" else ""
         super().__init__(
-            title=title or f"cosign {operation} {image}",
+            title=title or f"cosign {operation} {image or key_file}",
             # Password is read from a file by the shell wrapper and passed via
             # environment variable -- never appears in the process argv.
             argv=(
@@ -115,7 +130,12 @@ class CosignTask(CommandTask):
                 "-c",
                 # ponytail: shell wrapper reads password file, shifts it away,
                 # then execs the real command with the password in the env.
-                'pw=$(cat "$1"); shift; COSIGN_PASSWORD="$pw" exec "$@"',
+                # public-key writes to stdout, so it redirects instead of exec'ing.
+                (
+                    'pw=$(cat "$1"); shift; COSIGN_PASSWORD="$pw" exec "$@"'
+                    if not redirect
+                    else f'pw=$(cat "$1"); shift; COSIGN_PASSWORD="$pw" "$@"{redirect}'
+                ),
                 "--",
                 password_file,
                 *run,

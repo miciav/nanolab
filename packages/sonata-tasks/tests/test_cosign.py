@@ -32,6 +32,10 @@ class FailingExecutor:
         )
 
 
+def _run(task: CosignTask) -> None:
+    task.run(TaskInputs.empty())
+
+
 COSIGN_ARGS = (
     "docker",
     "run",
@@ -73,6 +77,7 @@ class TestCosignTask:
             "/secrets/cosign.password",
             *COSIGN_ARGS,
             "sign",
+            "--yes",
             "--key",
             "/key.cosign",
             "reg/app:1.0.0",
@@ -96,10 +101,13 @@ class TestCosignTask:
         argv = executor.seen[0].argv
         assert "-v" in argv
         assert "/tmp/predicate.json:/predicate.json:ro" in argv
-        assert argv[-6:] == (
+        assert argv[-9:] == (
             "attest",
+            "--yes",
             "--key",
             "/key.cosign",
+            "--type",
+            "custom",
             "--predicate",
             "/predicate.json",
             "reg/app:1.0.0",
@@ -123,11 +131,13 @@ class TestCosignTask:
         argv = executor.seen[0].argv
         assert "-v" in argv
         assert "/tmp/sbom.spdx.json:/sbom.json:ro" in argv
-        assert argv[-5:] == (
+        assert argv[-7:] == (
             "attach",
             "sbom",
             "--sbom",
             "/sbom.json",
+            "--type",
+            "spdx",
             "reg/app:1.0.0",
         )
 
@@ -172,10 +182,12 @@ class TestCosignTask:
 
         assert task.title == "cosign verify-attestation reg/app:1.0.0"
         argv = executor.seen[0].argv
-        assert argv[-4:] == (
+        assert argv[-6:] == (
             "verify-attestation",
             "--key",
             "/pub.key",
+            "--type",
+            "custom",
             "reg/app:1.0.0",
         )
 
@@ -220,3 +232,61 @@ class TestCosignTask:
             ),
             CommandTask,
         )
+
+
+def test_sign_does_not_wait_for_confirmation() -> None:
+    executor = RecordingExecutor()
+    _run(CosignTask(
+        operation="sign", image="img@sha256:aa", key_file="/secrets/cosign.key",
+        password_file="/secrets/pw", docker_config="/home/user/.docker",
+        executor=executor, role="stack",
+    ))
+    argv = executor.seen[0].argv
+    assert argv[-4:] == ("sign", "--yes", "--key", "/key.cosign") or "--yes" in argv
+
+
+def test_attest_declares_the_custom_predicate_type() -> None:
+    executor = RecordingExecutor()
+    _run(CosignTask(
+        operation="attest", image="img@sha256:aa", key_file="/secrets/cosign.key",
+        password_file="/secrets/pw", docker_config="/home/user/.docker",
+        predicate_file="/work/predicate.json", executor=executor, role="stack",
+    ))
+    argv = executor.seen[0].argv
+    assert "--yes" in argv
+    assert argv[argv.index("--type") + 1] == "custom"
+
+
+def test_attach_sbom_declares_spdx() -> None:
+    executor = RecordingExecutor()
+    _run(CosignTask(
+        operation="attach sbom", image="img@sha256:aa", key_file="/secrets/cosign.key",
+        password_file="/secrets/pw", docker_config="/home/user/.docker",
+        sbom_file="/work/sbom.spdx.json", executor=executor, role="stack",
+    ))
+    argv = executor.seen[0].argv
+    assert argv[argv.index("--type") + 1] == "spdx"
+
+
+def test_verify_attestation_declares_the_custom_predicate_type() -> None:
+    executor = RecordingExecutor()
+    _run(CosignTask(
+        operation="verify-attestation", image="img@sha256:aa",
+        key_file="/secrets/cosign.key", password_file="/secrets/pw",
+        docker_config="/home/user/.docker", public_key_file="/work/cosign.pub",
+        executor=executor, role="stack",
+    ))
+    argv = executor.seen[0].argv
+    assert argv[argv.index("--type") + 1] == "custom"
+
+
+def test_public_key_writes_the_derived_key_to_a_file() -> None:
+    executor = RecordingExecutor()
+    _run(CosignTask(
+        operation="public-key", image="", key_file="/secrets/cosign.key",
+        password_file="/secrets/pw", docker_config="/home/user/.docker",
+        output_file="/work/cosign.pub", executor=executor, role="stack",
+    ))
+    argv = executor.seen[0].argv
+    assert "public-key" in argv
+    assert "/work/cosign.pub" in " ".join(argv)
