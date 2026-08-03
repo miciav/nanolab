@@ -370,6 +370,7 @@ def build_release_workflow(
             executor,
             release_images,
             registry=False,
+            architecture="amd64",
         ),
     )
 
@@ -847,6 +848,10 @@ def build_release_workflow(
             arm_inputs,
         ),
     )
+    # ARM64 gets a smoke phase and AMD64 does not, on purpose: the three
+    # benchmark runs exercise every AMD64 image from the local registry and
+    # fail if one does not start, so AMD64 is smoke-tested by the loadtest.
+    # Nothing runs the ARM64 images otherwise, so they need their own.
     wf.add(  # pyright: ignore[reportArgumentType]
         arm64_smoke,
         requires=(infrastructure.stack, infrastructure.arm_builder, tunnel),

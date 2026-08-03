@@ -732,3 +732,62 @@ def test_image_steps_reject_malformed_digest_output(stdout) -> None:
 
     with pytest.raises(RuntimeError, match="invalid image digest"):
         run_image_steps(Steps(), TaskInputs.empty(), Executor(), ("image:v1",), registry=False)
+
+
+class _NoopSteps:
+    title = "Steps"
+
+    def run(self, _inputs):
+        return TaskOutcome()
+
+
+class _ScriptedExecutor:
+    """Maps an exact argv tuple to the stdout a real command would print."""
+
+    def __init__(self, responses: dict[tuple[str, ...], str]) -> None:
+        self._responses = responses
+
+    def run(self, task, *, dry_run=False):
+        return TaskResult(
+            task_id="", status="passed", return_code=0, stdout=self._responses[task.argv]
+        )
+
+
+def test_run_image_steps_rejects_a_foreign_architecture() -> None:
+    executor = _ScriptedExecutor(
+        {
+            ("docker", "image", "inspect", "--format={{.Architecture}}", "img:v1"): "arm64",
+            ("docker", "image", "inspect", "--format={{.Id}}", "img:v1"): "sha256:" + "a" * 64,
+        }
+    )
+
+    with pytest.raises(RuntimeError, match="image architecture mismatch"):
+        run_image_steps(
+            _NoopSteps(),
+            TaskInputs.empty(),
+            executor,
+            ("img:v1",),
+            registry=False,
+            architecture="amd64",
+        )
+
+
+def test_run_image_steps_accepts_the_expected_architecture() -> None:
+    digest = "sha256:" + "b" * 64
+    executor = _ScriptedExecutor(
+        {
+            ("docker", "image", "inspect", "--format={{.Architecture}}", "img:v1"): "amd64",
+            ("docker", "image", "inspect", "--format={{.Id}}", "img:v1"): digest,
+        }
+    )
+
+    evidence = run_image_steps(
+        _NoopSteps(),
+        TaskInputs.empty(),
+        executor,
+        ("img:v1",),
+        registry=False,
+        architecture="amd64",
+    )
+
+    assert [item.digest for item in evidence] == [digest]

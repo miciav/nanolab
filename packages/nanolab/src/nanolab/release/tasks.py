@@ -282,11 +282,20 @@ def run_image_steps(
     images: tuple[str, ...],
     *,
     registry: bool,
+    architecture: str | None = None,
 ) -> tuple[Evidence, ...]:
-    """Run build/push steps and capture the complete current image matrix."""
+    """Run build/push steps and capture the complete current image matrix.
+
+    `architecture`, when given, asserts every image really carries it: a
+    cross-built or mistagged image otherwise inspects cleanly and reaches the
+    manifest list, where the mismatch surfaces as a runtime failure on a
+    user's machine instead of here.
+    """
     _run_steps(steps, inputs)
     evidence: list[Evidence] = []
     for image in images:
+        if architecture is not None:
+            _require_architecture(executor, image, architecture)
         argv = (
             (
                 "skopeo",
@@ -317,6 +326,24 @@ def run_image_steps(
             )
         )
     return tuple(evidence)
+
+
+def _require_architecture(
+    executor: CommandTaskExecutor, image: str, expected: str
+) -> None:
+    result = executor.run(
+        CommandTaskSpec(
+            task_id="",
+            summary=f"Verify {image} architecture",
+            argv=("docker", "image", "inspect", "--format={{.Architecture}}", image),
+            role="stack",
+        )
+    )
+    actual = result.stdout.strip() if isinstance(result.stdout, str) else ""
+    if result.status != "passed" or actual != expected:
+        raise RuntimeError(
+            f"image architecture mismatch for {image}: expected {expected}, got {actual or 'empty'}"
+        )
 
 
 def _run_steps(steps: Task[Any], inputs: TaskInputs) -> None:
