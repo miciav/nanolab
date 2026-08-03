@@ -12,11 +12,11 @@ from sonata_tasks.release_composites import (
     amd64_build_composite,
     arm64_build_composite,
     attest_composite,
+    command_specs_composite,
     publish_aliases_composite,
     publish_architectures_composite,
     publish_manifests_composite,
     registry_push_composite,
-    source_tests_composite,
 )
 
 
@@ -151,7 +151,7 @@ class TestSourceTestsComposite:
             ),
         ]
 
-        composite = source_tests_composite(commands, executor)
+        composite = command_specs_composite(commands, executor, title="Run source tests")
         workflow = Workflow("source-tests")
         workflow.add(composite)
         workflow.run()
@@ -176,7 +176,7 @@ class TestSourceTestsComposite:
             ),
         ]
 
-        composite = source_tests_composite(commands, executor)
+        composite = command_specs_composite(commands, executor, title="Run source tests")
         workflow = Workflow("source-tests-fields")
         workflow.add(composite)
         workflow.run()
@@ -194,7 +194,7 @@ class TestSourceTestsComposite:
             CommandTaskSpec(task_id="lint", summary="Lint", argv=("echo", "x"), role="host"),
         ]
 
-        composite = source_tests_composite(commands, executor)
+        composite = command_specs_composite(commands, executor, title="Run source tests")
         assert "Run source tests" in composite.title
 
     def test_custom_title(self) -> None:
@@ -203,7 +203,7 @@ class TestSourceTestsComposite:
             CommandTaskSpec(task_id="lint", summary="Lint", argv=("echo", "x"), role="host"),
         ]
 
-        composite = source_tests_composite(commands, executor, title="Custom title")
+        composite = command_specs_composite(commands, executor, title="Custom title")
         assert composite.title == "Custom title"
 
     def test_handles_empty_command_list(self) -> None:
@@ -213,7 +213,7 @@ class TestSourceTestsComposite:
         import pytest
 
         with pytest.raises(ValueError, match="at least one step"):
-            source_tests_composite([], executor)
+            command_specs_composite([], executor, title="Run source tests")
 
 
 class TestAmd64BuildComposite:
@@ -488,6 +488,26 @@ class TestAttestComposite:
         assert executor.seen[0].argv[0] == "docker"  # syft via docker run
 
 
+class TestCommandSpecsComposite:
+    def test_command_specs_composite_titles_each_step_from_the_spec_summary(self) -> None:
+        executor = RecordingExecutor()
+        commands = (
+            CommandTaskSpec(task_id="a", summary="First", argv=("echo", "one"), role="stack"),
+            CommandTaskSpec(task_id="b", summary="Second", argv=("echo", "two"), role="stack"),
+        )
+
+        composite = command_specs_composite(commands, executor=executor, title="Build AMD64 images")
+
+        workflow = Workflow("test-command-specs")
+        workflow.add(composite)
+        workflow.run()
+
+        assert composite.title == "Build AMD64 images"
+        assert len(executor.seen) == 2
+        assert executor.seen[0].summary == "First"
+        assert executor.seen[1].summary == "Second"
+
+
 class TestCompositeCompilation:
     """Integration-level checks: composites compile and run in a Workflow."""
 
@@ -497,7 +517,7 @@ class TestCompositeCompilation:
             CommandTaskSpec(task_id="lint", summary="Lint", argv=("echo", "lint"), role="host"),
         ]
 
-        composite = source_tests_composite(commands, executor)
+        composite = command_specs_composite(commands, executor, title="Run source tests")
         workflow = Workflow("source-tests")
         workflow.add(composite)
         compiled = workflow.compile()

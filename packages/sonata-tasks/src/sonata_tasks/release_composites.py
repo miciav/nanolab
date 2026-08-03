@@ -38,7 +38,7 @@ from sonata_tasks.skopeo import SkopeoCopyTask, SkopeoInspectTask
 from sonata_tasks.syft import SyftTask
 
 __all__ = [
-    "source_tests_composite",
+    "command_specs_composite",
     "amd64_build_composite",
     "registry_push_composite",
     "arm64_build_composite",
@@ -69,33 +69,34 @@ class _PlanItems:
 
 
 # ---------------------------------------------------------------------------
-# 1. source_tests_composite
+# 1. command_specs_composite
 # ---------------------------------------------------------------------------
 
 
-def source_tests_composite(
+def command_specs_composite(
     commands: Sequence[CommandTaskSpec],
     executor: CommandTaskExecutor,
     *,
-    title: str = "Run source tests",
+    title: str,
 ) -> Steps:
-    """Wrap a list of test commands into a Steps composite.
+    """Wrap a list of command specs into a Steps composite.
 
-    Each ``CommandTaskSpec`` becomes a ``CommandTask``, run in order.
-    The composite is the simplest wrapper — a flat sequence, no
-    cell-level grouping.
+    Each ``CommandTaskSpec`` becomes a ``CommandTask``, run in order, journalled
+    individually so a resumed phase skips the commands it already finished.
+
+    This is the generic spec-to-Steps bridge: the release phases that already
+    have a tested command generator (`source_test_commands`,
+    `amd64_build_commands`) feed it here rather than rebuilding their argv.
 
     Parameters
     ----------
     commands :
-        One spec per test command.  ``spec.summary`` becomes the
-        task title, ``spec.argv`` the command line, ``spec.role``
-        the execution role.
+        One spec per command.  ``spec.summary`` becomes the task title,
+        ``spec.argv`` the command line, ``spec.role`` the execution role.
     executor :
         Role-bound executor that runs each command.
     title :
-        Optional override for the composite title (default
-        ``"Run source tests"``).
+        Title of the composite, and the prefix of every step id in the journal.
     """
     steps = tuple(
         CommandTask(

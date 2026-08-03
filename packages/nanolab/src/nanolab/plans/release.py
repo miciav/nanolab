@@ -18,8 +18,8 @@ from sonata_engine import Evidence, JournalConfig, Verifier, Workflow
 from sonata_tasks.buildx import buildx_builder_resource
 from sonata_tasks.release_composites import (
     amd64_build_composite,
+    command_specs_composite,
     registry_push_composite,
-    source_tests_composite,
 )
 from nanolab.plans import loadtest as loadtest_plan
 from sonata_tasks.registry_tunnel import registry_tunnel_resource
@@ -302,7 +302,9 @@ def build_release_workflow(
         arm_requires=(infrastructure.arm_builder,),
     )
     source_commands = source_test_commands(Path(source_dir))
-    source_steps = source_tests_composite(source_commands, executor=executor)
+    source_steps = command_specs_composite(
+        source_commands, executor=executor, title="Run source tests"
+    )
     source_tests = source_test_task(
         identity=identity,
         run_dir=request.run_dir,

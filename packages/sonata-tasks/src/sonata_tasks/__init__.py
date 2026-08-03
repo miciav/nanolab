@@ -81,11 +81,11 @@ from sonata_tasks.release_composites import (
     arm64_build_composite,
     arm64_smoke_composite,
     attest_composite,
+    command_specs_composite,
     publish_aliases_composite,
     publish_architectures_composite,
     publish_manifests_composite,
     registry_push_composite,
-    source_tests_composite,
 )
 
 __all__ = [
@@ -163,7 +163,7 @@ __all__ = [
     "FileTransferTask",
     "vm_resource",
     # Release composites
-    "source_tests_composite",
+    "command_specs_composite",
     "amd64_build_composite",
     "registry_push_composite",
     "arm64_build_composite",
