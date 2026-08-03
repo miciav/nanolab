@@ -15,11 +15,11 @@ from typing import TYPE_CHECKING, Any
 from nanolab.images.bake import render_bake_json
 from nanolab.images.plan import ImagePlan
 from nanolab.release import arm
-from nanolab.release.state import ArtifactEvidence, digest_path
+from nanolab.release.model import ArtifactEvidence, digest_path
 from workflow_tasks.tasks.models import CommandTaskSpec
 
 if TYPE_CHECKING:
-    from nanolab.release.run import Amd64ReleasePlan
+    from nanolab.release.model import Amd64ReleasePlan
 
 _GO_TOOLCHAIN = (
     "golang:1.24-alpine@sha256:757779acac4af1b349a20f357c7296097b4a0b89da4ad0e370b339060077282a"

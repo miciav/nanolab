@@ -7,7 +7,7 @@ import pytest
 
 from nanolab.images.plan import build_image_plan
 from nanolab.release import arm
-from nanolab.release.state import ArtifactEvidence
+from nanolab.release.model import ArtifactEvidence
 
 
 NANOFAAS_ROOT = Path(os.environ["NANOFAAS_ROOT"]).resolve()

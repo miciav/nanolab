@@ -276,7 +276,7 @@ def test_release_runs_arm64_only_after_the_passed_amd64_gate(
     assert all("--retry-max-time 120" in event for event in health_checks)
     payloads = [
         json.loads(path.read_text(encoding="utf-8"))
-        for path in sorted(plan.state_directory.glob("*.json"))
+        for path in sorted(release_run.state_directory(plan).glob("*.json"))
     ]
     assert [payload["phase"] for payload in payloads] == list(release_run.RELEASE_PHASES)
 
@@ -324,7 +324,7 @@ def test_arm64_failures_are_journaled_and_cannot_reach_publication(
 
     payloads = [
         json.loads(path.read_text(encoding="utf-8"))
-        for path in sorted(plan.state_directory.glob("*.json"))
+        for path in sorted(release_run.state_directory(plan).glob("*.json"))
     ]
     assert payloads[-1]["phase"] == failed_phase
     assert payloads[-1]["outcome"] == "failed"
@@ -392,7 +392,7 @@ def test_injected_arm64_phase_failure_never_reaches_publication(
 
     payloads = [
         json.loads(path.read_text(encoding="utf-8"))
-        for path in sorted(plan.state_directory.glob("*.json"))
+        for path in sorted(release_run.state_directory(plan).glob("*.json"))
     ]
     assert payloads[-1]["phase"] == failed_phase
     assert payloads[-1]["outcome"] == "failed"
@@ -509,7 +509,7 @@ def test_run_rechecks_the_guarded_commit_immediately_before_arm64(
     assert not any("TCP-LISTEN:5000" in event for event in events)
     journal = [
         json.loads(path.read_text(encoding="utf-8"))
-        for path in sorted(plan.state_directory.glob("*.json"))
+        for path in sorted(release_run.state_directory(plan).glob("*.json"))
     ]
     assert journal[-1]["phase"] == "arm64-build"
     assert journal[-1]["outcome"] == "failed"
@@ -545,7 +545,7 @@ def test_run_rechecks_the_guarded_commit_immediately_before_arm64_smoke(
     assert not any("docker run --detach" in event for event in events)
     journal = [
         json.loads(path.read_text(encoding="utf-8"))
-        for path in sorted(plan.state_directory.glob("*.json"))
+        for path in sorted(release_run.state_directory(plan).glob("*.json"))
     ]
     assert journal[-1]["phase"] == "arm64-smoke"
     assert journal[-1]["outcome"] == "failed"
@@ -614,7 +614,7 @@ def test_resume_invalidates_arm_build_and_smoke_when_arm_digest_changes(
     assert any("TCP-LISTEN:5000" in event for event in second_events)
     payloads = [
         json.loads(path.read_text(encoding="utf-8"))
-        for path in sorted(plan.state_directory.glob("*.json"))
+        for path in sorted(release_run.state_directory(plan).glob("*.json"))
     ]
     invalidation = next(
         payload
@@ -669,7 +669,7 @@ def test_resume_repeats_only_arm_smoke_when_its_local_marker_changes(
     assert any("docker run --detach" in event for event in second_events)
     payloads = [
         json.loads(path.read_text(encoding="utf-8"))
-        for path in sorted(plan.state_directory.glob("*.json"))
+        for path in sorted(release_run.state_directory(plan).glob("*.json"))
     ]
     invalidation = next(
         payload
@@ -725,7 +725,7 @@ def test_resume_on_recreated_vm_restages_verified_source_before_rebuilding(
     assert not any("./gradlew test" in event for event in second_events)
     payloads = [
         json.loads(path.read_text(encoding="utf-8"))
-        for path in sorted(plan.state_directory.glob("*.json"))
+        for path in sorted(release_run.state_directory(plan).glob("*.json"))
     ]
     invalidation = next(payload for payload in payloads if payload["kind"] == "invalidation")
     assert invalidation["invalidateFrom"] == "amd64-build"

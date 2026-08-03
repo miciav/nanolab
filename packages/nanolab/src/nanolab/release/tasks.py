@@ -17,8 +17,7 @@ from workflow_tasks.execution.bindings import CommandTaskExecutor
 from workflow_tasks.tasks.models import CommandTaskSpec
 
 from nanolab.release.evidence import is_sha256_digest, receipt_artifacts
-from nanolab.release.state import ReleaseIdentity, digest_path
-from nanolab.release.state import ArtifactEvidence
+from nanolab.release.model import ArtifactEvidence, ReleaseIdentity, digest_path
 
 
 PhaseWork = Callable[[TaskInputs], Iterable[Evidence]]

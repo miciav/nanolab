@@ -15,7 +15,7 @@ from pathlib import Path
 from nanolab.release.remote_retry import retry_on_connection_death
 from nanolab.images.plan import ImageCell, build_image_plan
 from nanolab.release.versioning import normalize_version
-from nanolab.release.state import ArtifactEvidence
+from nanolab.release.model import ArtifactEvidence
 
 
 PUBLISH_PHASES = ("publish-architectures", "publish-manifests", "publish-aliases")

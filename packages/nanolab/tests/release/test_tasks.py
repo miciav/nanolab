@@ -7,7 +7,7 @@ from workflow_tasks.tasks.models import TaskResult
 
 from nanolab.release.evidence import file_digest_verifier, receipt_artifacts
 from nanolab.release import tasks as release_tasks
-from nanolab.release.state import ReleaseIdentity, digest_path
+from nanolab.release.model import ReleaseIdentity, digest_path
 from nanolab.release.tasks import (
     amd64_build_task,
     arm64_build_task,

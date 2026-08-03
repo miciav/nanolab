@@ -19,7 +19,7 @@ from nanolab.release import run as release_run
 from nanolab.release.environment import release_lock_path, release_run_lock
 from nanolab.release.evidence import RECEIPT_KINDS
 from nanolab.release.metrics import RegressionDecision
-from nanolab.release.run import GitState
+from nanolab.release.model import GitState
 from nanolab.release.versioning import read_project_version
 from nanolab.workspace.paths import ToolPaths
 from workflow_tasks.vm.models import VmInfo
@@ -134,6 +134,8 @@ def test_release_plan_only_renders_the_guarded_offline_plan(
             AssertionError("plan must not start release execution")
         ),
     )
+
+    monkeypatch.setattr(release_cli, "render_plan", lambda plan: plan.render())
 
     result = CliRunner().invoke(app, ["release", "plan", *_common_release_args(tmp_path)])
 

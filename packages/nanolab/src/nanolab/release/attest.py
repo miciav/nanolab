@@ -18,7 +18,8 @@ from typing import Any
 from nanolab.release.remote_retry import retry_on_connection_death
 from nanolab.release.metrics import render_history, render_release_record
 from nanolab.release.secrets import RemoteCosignCredentials
-from nanolab.release.state import ArtifactEvidence, ReleaseJournal, digest_path
+from nanolab.release.model import ArtifactEvidence, digest_path
+from nanolab.release.state import ReleaseJournal
 
 
 ATTEST_PHASES = ("attest", "finalize")

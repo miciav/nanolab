@@ -8,7 +8,8 @@ import pytest
 
 from nanolab.release import attest
 from nanolab.release.secrets import RemoteCosignCredentials
-from nanolab.release.state import ReleaseIdentity, ReleaseJournal
+from nanolab.release.model import ReleaseIdentity
+from nanolab.release.state import ReleaseJournal
 
 
 FIXTURE_PASSWORD = "fixture-cosign-password"

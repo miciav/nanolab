@@ -4,13 +4,11 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
 from contextlib import AbstractContextManager
-from dataclasses import dataclass, field
 import hashlib
 import json
 import math
 import os
 import shlex
-import subprocess
 import sys
 from pathlib import Path
 import tempfile
@@ -28,7 +26,7 @@ from nanolab.cli.vm_provider import (
     vm_request_for_role,
 )
 from nanolab.images.bake import render_bake_json
-from nanolab.images.plan import DEFAULT_REGISTRY, ImagePlan, build_image_plan
+from nanolab.images.plan import DEFAULT_REGISTRY, build_image_plan
 from nanolab.plans.loadtest import build_loadtest_plan
 from nanolab.release import arm
 from nanolab.release.build import (  # noqa: F401 - compatibility re-exports
@@ -85,14 +83,18 @@ from nanolab.release import attest, publish
 from nanolab.release.secrets import (
     stage_cosign_credentials,
     stage_ghcr_credentials,
-    validate_secret_file,
 )
-from nanolab.release.state import (
-    ArtifactEvidence,
+from nanolab.release.model import (
+    Amd64ReleasePlan,
+    BuilderConfiguration,
+    CredentialFiles,
+    GitState,  # noqa: F401 - re-exported for the legacy runner surface
     ReleaseIdentity,
-    ReleaseJournal,
+    ReleaseSettings,
     digest_path,
+    git_state,
 )
+from nanolab.release.state import ArtifactEvidence, ReleaseJournal
 from nanolab.release.versioning import normalize_version
 from workflow_tasks.infra.ansible import AnsibleAdapter
 from workflow_tasks.vm.models import VmRequest, vm_remote_home
@@ -109,120 +111,29 @@ AMD64_PHASES = (
 )
 RELEASE_PHASES = AMD64_PHASES + arm.ARM64_PHASES + publish.PUBLISH_PHASES + attest.ATTEST_PHASES
 
-@dataclass(frozen=True, slots=True)
-class GitState:
-    commit: str
-    clean: bool
+def state_directory(plan: Amd64ReleasePlan) -> Path:
+    """Where the procedural journal keeps its entries for this release."""
+    return plan.journal_root / "releases" / plan.version / "state"
 
 
-@dataclass(frozen=True, slots=True)
-class CredentialFiles:
-    ghcr_token: Path = field(repr=False)
-    cosign_key: Path = field(repr=False)
-    cosign_password: Path | None = field(repr=False)
-
-    def validate(self, *, repo_root: Path | None = None) -> "CredentialFiles":
-        if self.cosign_password is None:
-            raise ValueError("cosign password file is required")
-        paths = (self.ghcr_token, self.cosign_key, self.cosign_password)
-        for path in paths:
-            validate_secret_file(path)
-        if repo_root is not None:
-            root = Path(repo_root).resolve(strict=True)
-            for path in paths:
-                try:
-                    path.resolve(strict=True).relative_to(root)
-                except ValueError:
-                    continue
-                raise ValueError("release credential files must be outside the repository")
-        return self
-
-
-@dataclass(frozen=True, slots=True)
-class BuilderConfiguration:
-    name: str
-    max_parallelism: int
-
-
-@dataclass(frozen=True, slots=True)
-class ReleaseSettings:
-    max_parallelism: int
-    scenario: Path
-    scenario_name: str
-    benchmark_runs: int
-    profile: str
-    throughput_max_loss_percent: float
-    p95_max_increase_percent: float
-    error_rate_max: float
-
-
-@dataclass(frozen=True, slots=True)
-class Amd64ReleasePlan:
-    repo_root: Path
-    run_dir: Path
-    version: str
-    identity: ReleaseIdentity
-    environment: EnvironmentConfig
-    scenario: ScenarioConfig
-    settings: ReleaseSettings
-    image_plan: ImagePlan
-    builder: BuilderConfiguration
-    bake_file: Path
-    buildkit_config: Path
-    performance_root: Path
-    credentials: CredentialFiles | None = field(repr=False)
-
-    @property
-    def phase_names(self) -> tuple[str, ...]:
-        return RELEASE_PHASES
-
-    @property
-    def journal_root(self) -> Path:
-        release_parent = self.run_dir.parent
-        if release_parent.name == "releases" and self.run_dir.name == self.version:
-            return release_parent.parent
-        return self.run_dir
-
-    @property
-    def state_directory(self) -> Path:
-        return self.journal_root / "releases" / self.version / "state"
-
-    def render(self) -> str:
-        lines = [
-            f"release {self.version} ({self.identity.source_commit})",
-            "provider azure: stack + loadgen",
-            (
-                f"buildx {self.builder.name}: docker-container, "
-                f"maxParallelism={self.builder.max_parallelism}"
-            ),
-            f"images: {len(self.image_plan.cells)} AMD64 + dynamic ARM64 via Bake + native",
-            "ARM64: digest-pinned QEMU after regression-gate",
-            (
-                "credentials: 3 private files validated; transfer deferred"
-                if self.credentials is not None
-                else "credentials: deferred for offline plan"
-            ),
-        ]
-        lines.extend(f"{index:02d}  {phase}" for index, phase in enumerate(self.phase_names, 1))
-        return "\n".join(lines) + "\n"
-
-
-def git_state(repo_root: Path) -> GitState:
-    commit = subprocess.run(
-        ("git", "rev-parse", "HEAD"),
-        cwd=repo_root,
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
-    status = subprocess.run(
-        ("git", "status", "--porcelain=v1"),
-        cwd=repo_root,
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout
-    return GitState(commit=commit, clean=not status.strip())
+def render_plan(plan: Amd64ReleasePlan) -> str:
+    lines = [
+        f"release {plan.version} ({plan.identity.source_commit})",
+        "provider azure: stack + loadgen",
+        (
+            f"buildx {plan.builder.name}: docker-container, "
+            f"maxParallelism={plan.builder.max_parallelism}"
+        ),
+        f"images: {len(plan.image_plan.cells)} AMD64 + dynamic ARM64 via Bake + native",
+        "ARM64: digest-pinned QEMU after regression-gate",
+        (
+            "credentials: 3 private files validated; transfer deferred"
+            if plan.credentials is not None
+            else "credentials: deferred for offline plan"
+        ),
+    ]
+    lines.extend(f"{index:02d}  {phase}" for index, phase in enumerate(RELEASE_PHASES, 1))
+    return "\n".join(lines) + "\n"
 
 
 def build_amd64_release_plan(
@@ -361,7 +272,7 @@ def _run_amd64_release_locked(
     _RUN_STARTED = time.monotonic()
     plan.credentials.validate(repo_root=plan.repo_root)
     _assert_guarded_source(plan)
-    existing_entries = tuple(plan.state_directory.glob("*.json"))
+    existing_entries = tuple(state_directory(plan).glob("*.json"))
     if existing_entries and not resume:
         raise ValueError("release journal already exists; pass --resume to verify and reuse it")
     if resume and not existing_entries:

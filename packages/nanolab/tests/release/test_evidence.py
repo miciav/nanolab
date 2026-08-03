@@ -8,7 +8,7 @@ from nanolab.release.evidence import (
     release_evidence_verifiers,
     signature_evidence_verifier,
 )
-from nanolab.release.state import digest_path
+from nanolab.release.model import digest_path
 
 
 def test_file_digest_verifier_fails_closed(tmp_path: Path) -> None:

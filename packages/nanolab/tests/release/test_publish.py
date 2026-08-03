@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from nanolab.release import publish
-from nanolab.release.state import ArtifactEvidence
+from nanolab.release.model import ArtifactEvidence
 
 
 NANOFAAS_ROOT = Path(os.environ["NANOFAAS_ROOT"]).resolve()

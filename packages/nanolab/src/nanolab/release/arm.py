@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from nanolab.images.plan import ImageCell, ImagePlan, build_image_plan
-from nanolab.release.state import ArtifactEvidence
+from nanolab.release.model import ArtifactEvidence
 from workflow_tasks.tasks.models import CommandTaskSpec
 
 

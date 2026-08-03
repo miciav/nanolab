@@ -4,13 +4,8 @@ from pathlib import Path
 
 import typer
 
-from nanolab.release.run import (
-    Amd64ReleasePlan,
-    CredentialFiles,
-    build_amd64_release_plan,
-    git_state,
-    run_amd64_release,
-)
+from nanolab.release.model import Amd64ReleasePlan, CredentialFiles, git_state
+from nanolab.release.run import build_amd64_release_plan, render_plan, run_amd64_release
 from nanolab.release.versioning import normalize_version, prepare_version
 from nanolab.workspace.paths import default_tool_paths
 
@@ -75,7 +70,7 @@ def install_release_commands(app: typer.Typer) -> None:
             )
         except (FileNotFoundError, PermissionError, RuntimeError, ValueError) as error:
             raise _bad_parameter(error) from error
-        typer.echo(plan.render(), nl=False)
+        typer.echo(render_plan(plan), nl=False)
 
     @release.command("run")
     def run_command(

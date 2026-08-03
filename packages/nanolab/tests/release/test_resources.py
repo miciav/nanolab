@@ -9,7 +9,7 @@ from sonata_engine import Resource, Task, TaskInputs, TaskOutcome, Workflow
 
 import nanolab.release.resources as release_resources
 from nanolab.config.environment import EnvironmentConfig
-from nanolab.release.state import ArtifactEvidence
+from nanolab.release.model import ArtifactEvidence
 from nanolab.release.resources import cosign_credentials_resource, ghcr_credentials_resource
 
 

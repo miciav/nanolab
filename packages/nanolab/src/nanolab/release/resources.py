@@ -33,7 +33,7 @@ from nanolab.images.bake import render_bake_json
 from nanolab.images.plan import ImagePlan
 from nanolab.release.environment import secure_release_endpoints, verify_release_vm_facts
 from nanolab.release.build import create_source_archive, stage_source_archive
-from nanolab.release.state import ArtifactEvidence
+from nanolab.release.model import ArtifactEvidence
 from nanolab.release.secrets import (
     RemoteCosignCredentials,
     RemoteDockerCredentials,

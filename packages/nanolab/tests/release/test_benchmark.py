@@ -181,7 +181,7 @@ def test_run_composes_amd64_gate_and_defers_all_credentials_and_publication(
     assert all(action[4] is None for action in push_actions)
     payloads = [
         json.loads(path.read_text(encoding="utf-8"))
-        for path in sorted(plan.state_directory.glob("*.json"))
+        for path in sorted(release_run.state_directory(plan).glob("*.json"))
     ]
     assert [payload["phase"] for payload in payloads] == list(release_run.RELEASE_PHASES)
     assert all(payload["outcome"] == "passed" for payload in payloads)
@@ -223,7 +223,7 @@ def test_real_regression_failure_stops_the_release_at_the_amd64_gate(
     assert decision["passed"] is False
     journal = [
         json.loads(path.read_text(encoding="utf-8"))
-        for path in sorted(plan.state_directory.glob("*.json"))
+        for path in sorted(release_run.state_directory(plan).glob("*.json"))
     ]
     assert journal[-1]["phase"] == "regression-gate"
     assert journal[-1]["outcome"] == "failed"
@@ -325,7 +325,7 @@ def test_run_rechecks_the_guarded_commit_immediately_before_the_gate(
 
     journal = [
         json.loads(path.read_text(encoding="utf-8"))
-        for path in sorted(plan.state_directory.glob("*.json"))
+        for path in sorted(release_run.state_directory(plan).glob("*.json"))
     ]
     assert journal[-1]["phase"] == "regression-gate"
     assert journal[-1]["outcome"] == "failed"
@@ -366,7 +366,7 @@ def test_registry_digest_change_invalidates_push_and_benchmarks_use_digest_refs(
     assert all("@sha256:" in str(call["prebuilt_control_plane_image"]) for call in calls)
     payloads = [
         json.loads(path.read_text(encoding="utf-8"))
-        for path in sorted(plan.state_directory.glob("*.json"))
+        for path in sorted(release_run.state_directory(plan).glob("*.json"))
     ]
     invalidation = next(payload for payload in payloads if payload["kind"] == "invalidation")
     assert invalidation["invalidateFrom"] == "local-registry-push"
@@ -396,7 +396,7 @@ def test_registry_mutation_after_push_evidence_fails_before_any_benchmark(
     assert calls == []
     payloads = [
         json.loads(path.read_text(encoding="utf-8"))
-        for path in sorted(plan.state_directory.glob("*.json"))
+        for path in sorted(release_run.state_directory(plan).glob("*.json"))
     ]
     push = next(payload for payload in payloads if payload.get("phase") == "local-registry-push")
     benchmark = payloads[-1]

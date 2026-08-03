@@ -59,15 +59,16 @@ from nanolab.release.resources import (
     ghcr_credentials_resource,
     release_execution_guard,
 )
-from nanolab.release.run import (
+from nanolab.release.build import source_test_commands
+from nanolab.release.model import (
     Amd64ReleasePlan,
     BuilderConfiguration,
     CredentialFiles,
+    ReleaseIdentity,
     ReleaseSettings,
+    digest_path,
     git_state,
-    source_test_commands,
 )
-from nanolab.release.state import ReleaseIdentity, digest_path
 from nanolab.release.tasks import (
     aggregate_benchmarks_task,
     amd64_build_task,

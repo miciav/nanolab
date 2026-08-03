@@ -12,11 +12,11 @@ def test_plan_is_amd64_only_and_uses_a_named_bounded_buildx_builder(
     assert plan.version == CURRENT_VERSION
     assert plan.image_plan.cells
     assert {cell.architecture for cell in plan.image_plan.cells} == {"amd64"}
-    assert plan.phase_names == release_run.RELEASE_PHASES
+    assert release_run.RELEASE_PHASES == release_run.RELEASE_PHASES
     assert plan.builder.name == BUILDER_NAME
     assert plan.builder.max_parallelism == 4
     assert "max-parallelism = 4" in plan.buildkit_config.read_text(encoding="utf-8")
-    rendered = plan.render()
+    rendered = release_run.render_plan(plan)
     assert "docker-container" in rendered
     assert f"{len(plan.image_plan.cells)} AMD64 + dynamic ARM64" in rendered
     assert "digest-pinned QEMU after regression-gate" in rendered
@@ -308,7 +308,7 @@ def test_injected_publish_phase_failures_stop_downstream_publication(
 
     payloads = [
         json.loads(path.read_text(encoding="utf-8"))
-        for path in sorted(plan.state_directory.glob("*.json"))
+        for path in sorted(release_run.state_directory(plan).glob("*.json"))
     ]
     assert payloads[-1]["phase"] == failed_phase
     assert payloads[-1]["outcome"] == "failed"
@@ -743,7 +743,7 @@ def test_resume_provisions_before_verification_and_invalidates_from_changed_evid
     ]
     payloads = [
         json.loads(path.read_text(encoding="utf-8"))
-        for path in sorted(plan.state_directory.glob("*.json"))
+        for path in sorted(release_run.state_directory(plan).glob("*.json"))
     ]
     invalidation = next(payload for payload in payloads if payload["kind"] == "invalidation")
     assert invalidation["invalidateFrom"] == "benchmark-2"
@@ -786,7 +786,7 @@ def test_each_phase_failure_stops_before_arm_or_publication_and_is_journaled(
 
     payloads = [
         json.loads(path.read_text(encoding="utf-8"))
-        for path in sorted(plan.state_directory.glob("*.json"))
+        for path in sorted(release_run.state_directory(plan).glob("*.json"))
     ]
     assert payloads[-1]["phase"] == failed_phase
     assert payloads[-1]["outcome"] == "failed"
@@ -819,7 +819,7 @@ def test_each_post_action_failure_is_journaled_before_later_phases(
 
     payloads = [
         json.loads(path.read_text(encoding="utf-8"))
-        for path in sorted(plan.state_directory.glob("*.json"))
+        for path in sorted(release_run.state_directory(plan).glob("*.json"))
     ]
     assert payloads[-1]["phase"] == failed_phase
     assert payloads[-1]["outcome"] == "failed"

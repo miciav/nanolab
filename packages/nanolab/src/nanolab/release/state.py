@@ -7,7 +7,6 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 import fcntl
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -15,7 +14,11 @@ import re
 import tempfile
 from typing import Any
 
-from nanolab.release.versioning import normalize_version
+from nanolab.release.model import (
+    ArtifactEvidence,
+    ReleaseIdentity,
+    digest_path,
+)
 
 
 SCHEMA_VERSION = 1
@@ -36,81 +39,12 @@ DEFAULT_RELEASE_PHASES = (
     "attest",
     "finalize",
 )
-_DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _ENTRY_NAME = re.compile(r"(?P<sequence>[0-9]{3})-(?P<label>[a-z0-9-]+)\.json\Z")
 _INVALIDATION_REASON = "resume-evidence-mismatch"
-_KNOWN_FIXTURE_SECRETS = (
-    "fixture-secret-must-not-leak",
-    "fixture-ghcr-token-must-not-leak",
-    "fixture-cosign-key-must-not-leak",
-    "fixture-cosign-password-must-not-leak",
-)
 
 
 class JournalCorruptionError(ValueError):
     """Raised when existing release state cannot be trusted."""
-
-
-class ResumeValidationError(ValueError):
-    """Raised when a caller supplies invalid release evidence."""
-
-
-@dataclass(frozen=True, slots=True)
-class ReleaseIdentity:
-    """Values that must match exactly before a phase may be reused."""
-
-    source_commit: str
-    prepared_version: str
-    release_config_digest: str
-    environment_digest: str
-
-    def __post_init__(self) -> None:
-        _reject_fixture_secret(self.source_commit)
-        _reject_fixture_secret(self.prepared_version)
-        _reject_fixture_secret(self.release_config_digest)
-        _reject_fixture_secret(self.environment_digest)
-        if not re.fullmatch(r"[0-9a-f]{40}", self.source_commit):
-            raise ResumeValidationError("source commit must be a 40-character lowercase SHA")
-        try:
-            normalized, _ = normalize_version(self.prepared_version)
-        except ValueError as error:
-            raise ResumeValidationError("prepared version must be a semantic version") from error
-        if normalized != self.prepared_version:
-            raise ResumeValidationError("prepared version must not use a container-tag prefix")
-        for field in ("release_config_digest", "environment_digest"):
-            if not _DIGEST.fullmatch(getattr(self, field)):
-                raise ResumeValidationError(f"{field} must be a sha256 digest")
-
-    def as_entry(self) -> dict[str, str]:
-        return {
-            "sourceCommit": self.source_commit,
-            "preparedVersion": self.prepared_version,
-            "releaseConfigDigest": self.release_config_digest,
-            "environmentDigest": self.environment_digest,
-        }
-
-
-@dataclass(frozen=True, slots=True)
-class ArtifactEvidence:
-    """A local file or remote object whose digest makes a phase reusable."""
-
-    location: str
-    reference: str
-    digest: str
-
-    def __post_init__(self) -> None:
-        _reject_fixture_secret(self.location)
-        _reject_fixture_secret(self.reference)
-        _reject_fixture_secret(self.digest)
-        if self.location not in {"local", "remote"}:
-            raise ResumeValidationError("artifact location must be local or remote")
-        if not self.reference:
-            raise ResumeValidationError("artifact reference must not be empty")
-        if not _DIGEST.fullmatch(self.digest):
-            raise ValueError("artifact digest must be a sha256 digest")
-
-    def as_entry(self) -> dict[str, str]:
-        return {"location": self.location, "reference": self.reference, "digest": self.digest}
 
 
 @dataclass(frozen=True, slots=True)
@@ -279,14 +213,6 @@ class ReleaseJournal:
         return destination
 
 
-def digest_path(path: Path) -> str:
-    digest = hashlib.sha256()
-    with Path(path).open("rb") as handle:
-        for block in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(block)
-    return f"sha256:{digest.hexdigest()}"
-
-
 def _phase_entry(
     identity: ReleaseIdentity,
     phase: str,
@@ -448,6 +374,3 @@ def _next_phase_from_latest(
     return next((phase for phase in phases if latest.get(phase, {}).get("outcome") != "passed"), None)
 
 
-def _reject_fixture_secret(value: str) -> None:
-    if any(secret in value for secret in _KNOWN_FIXTURE_SECRETS):
-        raise ValueError("release journal values must not contain fixture secrets")

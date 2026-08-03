@@ -24,13 +24,13 @@ from nanolab.release.metrics import (
     evaluate_regression,
     newest_comparable_record,
 )
-from nanolab.release.state import ArtifactEvidence, digest_path
+from nanolab.release.model import ArtifactEvidence, digest_path
 from workflow_tasks.loadtest.adapters import HttpPrometheusClient
 
 if TYPE_CHECKING:
     from nanolab.plans.release import ReleaseRequest
     from nanolab.release.resources import ReleaseEndpoints
-    from nanolab.release.run import Amd64ReleasePlan
+    from nanolab.release.model import Amd64ReleasePlan
     from nanolab.release.state import ReleaseJournal
 
     # Benchmark phases read the same eight fields from the legacy procedural plan

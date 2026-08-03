@@ -10,7 +10,7 @@ import re
 from sonata_engine import Evidence, Verifier
 
 from nanolab.release.build import _remote_image_digest
-from nanolab.release.state import ArtifactEvidence, digest_path
+from nanolab.release.model import ArtifactEvidence, digest_path
 
 
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")

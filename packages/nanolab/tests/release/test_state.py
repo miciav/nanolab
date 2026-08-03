@@ -7,15 +7,17 @@ from typing import Any
 
 import pytest
 
-from nanolab.release.state import (
-    ArtifactDigest,
+from nanolab.release.model import (
     ArtifactEvidence,
-    JournalCorruptionError,
     ReleaseIdentity,
-    ReleaseJournal,
-    ResumePlan,
     ResumeValidationError,
     digest_path,
+)
+from nanolab.release.state import (
+    ArtifactDigest,
+    JournalCorruptionError,
+    ReleaseJournal,
+    ResumePlan,
 )
 
 
