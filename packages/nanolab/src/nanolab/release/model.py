@@ -152,13 +152,6 @@ class Amd64ReleasePlan:
     performance_root: Path
     credentials: CredentialFiles | None = field(repr=False)
 
-    @property
-    def journal_root(self) -> Path:
-        release_parent = self.run_dir.parent
-        if release_parent.name == "releases" and self.run_dir.name == self.version:
-            return release_parent.parent
-        return self.run_dir
-
 
 def git_state(repo_root: Path) -> GitState:
     commit = subprocess.run(

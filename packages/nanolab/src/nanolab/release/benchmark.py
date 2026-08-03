@@ -19,92 +19,23 @@ from nanolab.release.metrics import (
     aggregate_runs,
     PerformanceAggregate,
     PerformanceProfile,
-    RegressionDecision,
     RegressionPolicy,
     evaluate_regression,
     newest_comparable_record,
 )
-from nanolab.release.model import ArtifactEvidence, digest_path
+from nanolab.release.build import _registry_digest_map, _write_json
+from nanolab.release.model import Amd64ReleasePlan, ArtifactEvidence, digest_path
 from workflow_tasks.loadtest.adapters import HttpPrometheusClient
 
 if TYPE_CHECKING:
     from nanolab.plans.release import ReleaseRequest
     from nanolab.release.resources import ReleaseEndpoints
-    from nanolab.release.model import Amd64ReleasePlan
-    from nanolab.release.state import ReleaseJournal
 
-    # Benchmark phases read the same eight fields from the legacy procedural plan
-    # and from the Sonata request; neither may be imported at runtime (cycle).
+    # Benchmark phases read the same eight fields from the release plan and from
+    # the Sonata request; ReleaseRequest may not be imported at runtime (cycle).
     type ReleasePlanLike = Amd64ReleasePlan | ReleaseRequest
 
 LoadtestBuilder = Callable[..., object]
-
-
-def _coordinator():
-    from nanolab.release import run
-
-    return run
-
-
-def _inspect_registry_digest(*args: Any, **kwargs: Any) -> Any:
-    from nanolab.release.build import _inspect_registry_digest as inspect
-
-    return inspect(*args, **kwargs)
-
-
-def _read_verified_local_json(*args: Any, **kwargs: Any) -> Any:
-    return _coordinator()._read_verified_local_json(*args, **kwargs)  # noqa: SLF001
-
-
-def _write_json(*args: Any, **kwargs: Any) -> Any:
-    return _coordinator()._write_json(*args, **kwargs)  # noqa: SLF001
-
-
-def _run_benchmark(
-    plan: ReleasePlanLike,
-    index: int,
-    loadtest_builder: LoadtestBuilder,
-    bindings: object,
-    fetcher: object | None,
-    control_plane_url: str,
-    prometheus_url: str,
-    provider: object,
-    request: object,
-    expected_registry_digests: Mapping[str, str],
-) -> tuple[ArtifactEvidence, ...]:
-    run_dir = plan.run_dir / f"run-{index}"
-    workflow = loadtest_builder(
-        plan.scenario,
-        plan.environment,
-        bindings,
-        control_plane_url=control_plane_url,
-        prometheus_client=HttpPrometheusClient(prometheus_url),
-        run_dir=run_dir,
-        fetcher=fetcher,
-        repo_root=plan.repo_root,
-        prebuilt_control_plane_image=_pinned_native_image(
-            plan,
-            "control-plane",
-            provider,
-            request,
-            expected_registry_digests,
-        ),
-        prebuilt_function_images={
-            function: _pinned_native_image(
-                plan,
-                _function_target_name(function),
-                provider,
-                request,
-                expected_registry_digests,
-            )
-            for function in plan.scenario.functions
-        },
-    )
-    workflow.run()  # type: ignore[attr-defined]
-    summary = run_dir / "summary.json"
-    if not summary.is_file():
-        raise RuntimeError(f"load-test summary was not written: {summary}")
-    return (ArtifactEvidence("local", str(summary), digest_path(summary)),)
 
 
 def _native_image(plan: ReleasePlanLike, target_name: str) -> str:
@@ -112,22 +43,6 @@ def _native_image(plan: ReleasePlanLike, target_name: str) -> str:
         if cell.target.name == target_name and cell.flavor == "native":
             return cell.image
     raise ValueError(f"release image plan has no AMD64 native image for {target_name}")
-
-
-def _pinned_native_image(
-    plan: ReleasePlanLike,
-    target_name: str,
-    provider: object,
-    request: object,
-    expected_registry_digests: Mapping[str, str],
-) -> str:
-    tagged = _native_image(plan, target_name)
-    expected = expected_registry_digests[tagged]
-    actual = _inspect_registry_digest(provider, request, tagged)
-    if actual != expected:
-        raise RuntimeError(f"registry image changed before benchmark: {target_name}")
-    repository, _ = tagged.rsplit(":", 1)
-    return f"{repository}@{expected}"
 
 
 def _function_target_name(function_key: str) -> str:
@@ -198,70 +113,11 @@ def _aggregate_from_payload(payload: Mapping[str, Any]) -> PerformanceAggregate:
     )
 
 
-def _decision_from_payload(payload: Mapping[str, Any]) -> RegressionDecision:
-    failures = payload.get("failures")
-    if not isinstance(failures, list):
-        raise ValueError("regression decision evidence is invalid")
-    return RegressionDecision(
-        passed=bool(payload["passed"]),
-        establishes_baseline=bool(payload["establishes_baseline"]),
-        failures=tuple(str(value) for value in failures),
-    )
-
-
 def _read_json_file(path: Path) -> dict[str, Any]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError(f"JSON evidence must be an object: {path}")
     return payload
-
-
-def _write_aggregate(
-    plan: ReleasePlanLike,
-    journal: ReleaseJournal,
-) -> ArtifactEvidence:
-    summaries = tuple(
-        _read_verified_local_json(
-            journal,
-            f"benchmark-{index}",
-            plan.run_dir / f"run-{index}" / "summary.json",
-        )
-        for index in range(1, plan.settings.benchmark_runs + 1)
-    )
-    aggregate = aggregate_runs(_performance_profile(plan), summaries)
-    return _write_json(plan.run_dir / "aggregate.json", asdict(aggregate))
-
-
-def _evaluate_gate(
-    plan: ReleasePlanLike,
-    journal: ReleaseJournal,
-) -> tuple[RegressionDecision, ArtifactEvidence]:
-    aggregate = _aggregate_from_payload(
-        _read_verified_local_json(
-            journal,
-            "aggregate",
-            plan.run_dir / "aggregate.json",
-        )
-    )
-    baseline_record = newest_comparable_record(
-        tuple(
-            record
-            for record in _release_records(plan.performance_root / "releases")
-            # a re-release of this version must not use itself as baseline
-            if str(record.get("version")) != plan.version
-        ),
-        aggregate.profile,
-    )
-    baseline = _aggregate_from_record(baseline_record) if baseline_record is not None else None
-    decision = evaluate_regression(
-        aggregate,
-        baseline,
-        _regression_policy(plan),
-        k6_passed=True,
-        autoscaling_passed=True,
-    )
-    artifact = _write_json(plan.run_dir / "regression-decision.json", asdict(decision))
-    return decision, artifact
 
 
 performance_profile = _performance_profile
@@ -282,8 +138,6 @@ def run_sonata_benchmark(
     registry_receipt: Path,
 ) -> Evidence:
     """Run one isolated load test against the digest-pinned release matrix."""
-    from nanolab.release.build import _registry_digest_map
-
     digests = _registry_digest_map(
         plan.image_plan,
         _receipt_artifacts(registry_receipt, "local-registry-push", "local-registry-digest"),

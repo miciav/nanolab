@@ -1,9 +1,9 @@
 """Compile a release scenario into a Sonata workflow.
 
-The release pipeline defined in `nanolab release run` replays here as a
-linear DAG built from the Task and Resource primitives defined in sonata-tasks.
-Each phase that iterates over image cells is a composite Steps node so the
-workflow surface remains coarse-grained and selectable.
+The release pipeline is a linear DAG built from the Task and Resource
+primitives defined in sonata-tasks. Each phase that iterates over image cells
+is a composite Steps node so the workflow surface stays coarse-grained and
+selectable.
 """
 
 from __future__ import annotations
@@ -871,7 +871,6 @@ def build_release_workflow(
         )
         require_attestation_predicate(attest.receipt, predicate_file, expected_predicate)
         artifacts = release_attest.finalize_release(
-            None,
             record=release_record(),
             performance_root=request.performance_root,
         )

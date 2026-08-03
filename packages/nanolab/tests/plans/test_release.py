@@ -17,7 +17,7 @@ from workflow_tasks.vm.models import VmInfo
 
 import nanolab.plans.release as release_plan
 import nanolab.release.resources as release_resources
-import nanolab.release.run as release_run
+import nanolab.release.build as release_build
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.images.plan import DEFAULT_REGISTRY, ImagePlan
@@ -340,7 +340,7 @@ def _arm_failure_workflow(
         release_plan, "git_state", lambda _root: GitState(commit="a" * 40, clean=True)
     )
     monkeypatch.setattr(
-        release_run, "git_state", lambda _root: GitState(commit="a" * 40, clean=True)
+        release_build, "git_state", lambda _root: GitState(commit="a" * 40, clean=True)
     )
     monkeypatch.setattr(
         release_plan,

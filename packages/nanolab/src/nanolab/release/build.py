@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
+import json
 import os
 from pathlib import Path
 import shlex
@@ -10,16 +11,14 @@ import subprocess
 import tarfile
 import tempfile
 import textwrap
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from nanolab.images.bake import render_bake_json
 from nanolab.images.plan import ImagePlan
 from nanolab.release import arm
-from nanolab.release.model import ArtifactEvidence, digest_path
+from nanolab.release.model import Amd64ReleasePlan, ArtifactEvidence, digest_path, git_state
+from nanolab.release.remote_retry import retry_on_connection_death
 from workflow_tasks.tasks.models import CommandTaskSpec
-
-if TYPE_CHECKING:
-    from nanolab.release.model import Amd64ReleasePlan
 
 _GO_TOOLCHAIN = (
     "golang:1.24-alpine@sha256:757779acac4af1b349a20f357c7296097b4a0b89da4ad0e370b339060077282a"
@@ -34,30 +33,88 @@ _RUST_TOOLCHAIN = (
 ArchiveBuilder = Callable[[Path, str, Path], ArtifactEvidence]
 
 
-def _coordinator():
-    from nanolab.release import run
+def _provider_exec(
+    provider: object,
+    request: object,
+    argv: tuple[str, ...],
+    *,
+    cwd: str | None = None,
+    env: dict[str, str] | None = None,
+    bounded: bool = False,
+) -> object:
+    if bounded:
+        # The SSH executor waits for the exit status before draining output,
+        # so a command whose output exceeds the channel window (~2MB)
+        # deadlocks: the remote writer blocks and the command never exits.
+        # Bulk commands (tests, image builds, pushes) buffer output remotely
+        # and return only a 64KB tail — plenty for diagnosis, and stderr is
+        # folded into stdout. Commands whose stdout gets parsed must NOT be
+        # bounded.
+        script = shlex.join(argv)
+        argv = (
+            "sh",
+            "-c",
+            "{ " + script + " ; } >/tmp/release-cmd.log 2>&1; "
+                            "ec=$?; tail -c 65536 /tmp/release-cmd.log; exit $ec",
+        )
+    result = retry_on_connection_death(
+        lambda: provider.exec_argv(  # type: ignore[attr-defined]
+            request, argv, env=env, cwd=cwd, dry_run=False
+        ),
+        describe="remote command",
+    )
+    return _require_result(result, "remote release command")
 
-    return run
+
+def _provider_transfer_to(
+    provider: object,
+    request: object,
+    *,
+    source: Path,
+    destination: str,
+    action: str,
+) -> object:
+    result = retry_on_connection_death(
+        lambda: provider.transfer_to(  # type: ignore[attr-defined]
+            request, source=source, destination=destination
+        ),
+        describe=f"transfer {source.name}",
+    )
+    return _require_result(result, action)
 
 
-def _provider_exec(*args: Any, **kwargs: Any) -> Any:
-    return _coordinator()._provider_exec(*args, **kwargs)  # noqa: SLF001
+def _require_result(result: object, action: str) -> object:
+    return_code = int(getattr(result, "return_code", 0))
+    if return_code != 0:
+        detail = str(getattr(result, "stderr", "") or getattr(result, "stdout", ""))
+        raise RuntimeError(detail or f"{action} failed (exit {return_code})")
+    return result
 
 
-def _provider_transfer_to(*args: Any, **kwargs: Any) -> Any:
-    return _coordinator()._provider_transfer_to(*args, **kwargs)  # noqa: SLF001
+def _assert_guarded_source(plan: Amd64ReleasePlan) -> None:
+    source = git_state(plan.repo_root)
+    if not source.clean:
+        raise ValueError("release requires a clean Git tree")
+    if source.commit != plan.identity.source_commit:
+        raise ValueError("release source commit changed after planning")
 
 
-def _assert_guarded_source(*args: Any, **kwargs: Any) -> Any:
-    return _coordinator()._assert_guarded_source(*args, **kwargs)  # noqa: SLF001
-
-
-def _write_json(*args: Any, **kwargs: Any) -> Any:
-    return _coordinator()._write_json(*args, **kwargs)  # noqa: SLF001
-
-
-def _git_state(*args: Any, **kwargs: Any) -> Any:
-    return _coordinator().git_state(*args, **kwargs)
+def _write_json(path: Path, payload: Mapping[str, Any]) -> ArtifactEvidence:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2, sort_keys=True)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return ArtifactEvidence("local", str(path), digest_path(path))
 
 
 def source_test_commands(remote_source_dir: Path) -> tuple[CommandTaskSpec, ...]:
@@ -377,7 +434,7 @@ def create_source_archive(
     destination: Path,
 ) -> ArtifactEvidence:
     root = Path(repo_root)
-    before = _git_state(root)
+    before = git_state(root)
     if not before.clean:
         raise ValueError("release requires a clean Git tree")
     if before.commit != guarded_commit:
@@ -397,7 +454,7 @@ def create_source_archive(
             cwd=root,
             check=True,
         )
-        after = _git_state(root)
+        after = git_state(root)
         if after != before:
             raise ValueError("release source changed while creating archive")
         os.replace(temporary, output)
@@ -437,96 +494,6 @@ def stage_source_archive(
         request,
         ("tar", "-xf", remote_archive, "-C", remote_source_dir),
     )
-
-
-def _run_source_tests(
-    plan: Amd64ReleasePlan,
-    provider: object,
-    request: object,
-    archive_builder: ArchiveBuilder,
-    remote_archive: str,
-    remote_source_dir: str,
-) -> tuple[ArtifactEvidence, ...]:
-    archive = plan.run_dir / "source.tar"
-    archive.unlink(missing_ok=True)
-    archive_evidence = archive_builder(plan.repo_root, plan.identity.source_commit, archive)
-    stage_source_archive(
-        provider,
-        request,
-        archive=archive,
-        remote_archive=remote_archive,
-        remote_source_dir=remote_source_dir,
-    )
-    for command in source_test_commands(Path(remote_source_dir)):
-        _provider_exec(
-            provider,
-            request,
-            command.argv,
-            cwd=command.remote_dir,
-            bounded=True,
-        )
-    marker = _write_json(
-        plan.run_dir / "source-tests.json",
-        {"sourceCommit": plan.identity.source_commit, "passed": True},
-    )
-    return archive_evidence, marker
-
-
-def _build_amd64_images(
-    plan: Amd64ReleasePlan,
-    provider: object,
-    request: object,
-    remote_bake: str,
-    remote_buildkit: str,
-    remote_source_dir: str,
-) -> tuple[ArtifactEvidence, ...]:
-    _verify_generated_build_inputs(plan)
-    _provider_exec(provider, request, ("mkdir", "-p", str(Path(remote_bake).parent)))
-    for source, destination in (
-        (plan.bake_file, remote_bake),
-        (plan.buildkit_config, remote_buildkit),
-    ):
-        _provider_transfer_to(
-            provider,
-            request,
-            source=source,
-            destination=destination,
-            action=f"transfer {source.name}",
-        )
-    _reset_named_builder(plan, provider, request)
-    builder_commands = (
-        CommandTaskSpec(
-            task_id="release.buildx.create",
-            summary="Create bounded release Buildx builder",
-            argv=(
-                "docker", "buildx", "create",
-                "--name", plan.builder.name,
-                "--driver", "docker-container",
-                "--buildkitd-config", remote_buildkit,
-                "--use",
-            ),
-            role="stack",
-            remote_dir=remote_source_dir,
-        ),
-        CommandTaskSpec(
-            task_id="release.buildx.bootstrap",
-            summary="Bootstrap bounded release Buildx builder",
-            argv=("docker", "buildx", "inspect", "--builder", plan.builder.name, "--bootstrap"),
-            role="stack",
-            remote_dir=remote_source_dir,
-        ),
-    )
-    for command in (
-        *builder_commands,
-        *amd64_build_commands(
-            plan.image_plan,
-            builder_name=plan.builder.name,
-            remote_bake_file=remote_bake,
-            remote_source_dir=remote_source_dir,
-        ),
-    ):
-        _provider_exec(provider, request, command.argv, cwd=command.remote_dir, bounded=True)
-    return _local_image_evidence(plan, provider, request)
 
 
 def _build_arm64_images(
@@ -777,23 +744,6 @@ def _pinned_image(tagged: str, digest: str) -> str:
     return f"{repository}@{digest}"
 
 
-def _verify_generated_build_inputs(plan: Amd64ReleasePlan) -> None:
-    expected_inputs = (
-        (plan.bake_file, render_bake_json(plan.image_plan)),
-        (
-            plan.buildkit_config,
-            f"[worker.oci]\n  max-parallelism = {plan.builder.max_parallelism}\n",
-        ),
-    )
-    for path, expected in expected_inputs:
-        try:
-            actual = path.read_text(encoding="utf-8")
-        except OSError as error:
-            raise ValueError(f"generated build input changed: {path.name}") from error
-        if actual != expected:
-            raise ValueError(f"generated build input changed: {path.name}")
-
-
 def _reset_named_builder(
     plan: Amd64ReleasePlan,
     provider: object,
@@ -814,60 +764,10 @@ def _reset_named_builder(
         )
 
 
-def _push_local_images(
-    plan: Amd64ReleasePlan,
-    provider: object,
-    request: object,
-    expected_build_evidence: Iterable[ArtifactEvidence],
-) -> tuple[ArtifactEvidence, ...]:
-    if _evidence_map(_local_image_evidence(plan, provider, request)) != _evidence_map(
-        expected_build_evidence
-    ):
-        raise RuntimeError("amd64-build evidence changed before consumption")
-    for cell in plan.image_plan.cells:
-        _provider_exec(
-            provider,
-            request,
-            ("docker", "push", cell.image),
-            bounded=True,
-        )
-    return _registry_image_evidence(plan, provider, request)
-
-
 def _evidence_map(
     artifacts: Iterable[ArtifactEvidence],
 ) -> dict[tuple[str, str], str]:
     return {(artifact.location, artifact.reference): artifact.digest for artifact in artifacts}
-
-
-def _local_image_evidence(
-    plan: Amd64ReleasePlan,
-    provider: object,
-    request: object,
-) -> tuple[ArtifactEvidence, ...]:
-    return tuple(
-        ArtifactEvidence(
-            "remote",
-            f"docker-daemon:{cell.image}",
-            _inspect_image_digest(provider, request, cell.image),
-        )
-        for cell in plan.image_plan.cells
-    )
-
-
-def _registry_image_evidence(
-    plan: Amd64ReleasePlan,
-    provider: object,
-    request: object,
-) -> tuple[ArtifactEvidence, ...]:
-    return tuple(
-        ArtifactEvidence(
-            "remote",
-            f"docker://{cell.image}",
-            _inspect_registry_digest(provider, request, cell.image),
-        )
-        for cell in plan.image_plan.cells
-    )
 
 
 def _inspect_image_digest(provider: object, request: object, reference: str) -> str:

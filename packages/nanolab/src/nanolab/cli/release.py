@@ -1,33 +1,10 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 import typer
 
-from nanolab.release.model import Amd64ReleasePlan, CredentialFiles, git_state
-from nanolab.release.run import build_amd64_release_plan, render_plan, run_amd64_release
-from nanolab.release.versioning import normalize_version, prepare_version
+from nanolab.release.model import git_state
+from nanolab.release.versioning import prepare_version
 from nanolab.workspace.paths import default_tool_paths
-
-
-def _release_plan(
-    version: str,
-    *,
-    environment: Path,
-    release_config: Path | None,
-    run_dir: Path | None,
-    credentials: CredentialFiles | None,
-) -> Amd64ReleasePlan:
-    paths = default_tool_paths()
-    plain_version, _ = normalize_version(version)
-    return build_amd64_release_plan(
-        repo_root=paths.nanofaas_root,
-        version=version,
-        environment_path=environment,
-        release_config_path=release_config or paths.tool_root / "release.yaml",
-        run_dir=run_dir or paths.runs_dir / "releases" / plain_version,
-        credentials=credentials,
-    )
 
 
 def _bad_parameter(error: Exception) -> typer.BadParameter:
@@ -35,7 +12,7 @@ def _bad_parameter(error: Exception) -> typer.BadParameter:
 
 
 def install_release_commands(app: typer.Typer) -> None:
-    release = typer.Typer(help="Prepare and run the guarded Azure image release workflow.")
+    release = typer.Typer(help="Prepare a version for the guarded Azure image release.")
 
     @release.command("prepare")
     def prepare_command(version: str = typer.Argument(...)) -> None:
@@ -49,67 +26,6 @@ def install_release_commands(app: typer.Typer) -> None:
             raise _bad_parameter(error) from error
         for path in updated:
             typer.echo(path.relative_to(paths.nanofaas_root))
-        typer.echo("Commit the prepared version changes before release plan or run.")
-
-    @release.command("plan")
-    def plan_command(
-        version: str = typer.Argument(...),
-        environment: Path = typer.Option(..., "--environment", exists=True, dir_okay=False),
-        release_config: Path | None = typer.Option(
-            None, "--release-config", exists=True, dir_okay=False
-        ),
-        run_dir: Path | None = typer.Option(None, "--run-dir"),
-    ) -> None:
-        try:
-            plan = _release_plan(
-                version,
-                environment=environment,
-                release_config=release_config,
-                run_dir=run_dir,
-                credentials=None,
-            )
-        except (FileNotFoundError, PermissionError, RuntimeError, ValueError) as error:
-            raise _bad_parameter(error) from error
-        typer.echo(render_plan(plan), nl=False)
-
-    @release.command("run")
-    def run_command(
-        version: str = typer.Argument(...),
-        environment: Path = typer.Option(..., "--environment", exists=True, dir_okay=False),
-        release_config: Path | None = typer.Option(
-            None, "--release-config", exists=True, dir_okay=False
-        ),
-        run_dir: Path | None = typer.Option(None, "--run-dir"),
-        ghcr_token_file: Path = typer.Option(..., "--ghcr-token-file", exists=True, dir_okay=False),
-        cosign_key_file: Path = typer.Option(..., "--cosign-key-file", exists=True, dir_okay=False),
-        cosign_password_file: Path = typer.Option(
-            ..., "--cosign-password-file", exists=True, dir_okay=False
-        ),
-        resume: bool = typer.Option(False, "--resume"),
-        keep: bool = typer.Option(False, "--keep"),
-        provision: bool = typer.Option(False, "--provision"),
-    ) -> None:
-        if not provision and not resume:
-            raise typer.BadParameter(
-                "fresh release run requires explicit --provision acknowledgement"
-            )
-        try:
-            plan = _release_plan(
-                version,
-                environment=environment,
-                release_config=release_config,
-                run_dir=run_dir,
-                credentials=CredentialFiles(
-                    ghcr_token=ghcr_token_file,
-                    cosign_key=cosign_key_file,
-                    cosign_password=cosign_password_file,
-                ),
-            )
-            decision = run_amd64_release(plan, resume=resume, keep=keep)
-        except (FileNotFoundError, PermissionError, RuntimeError, ValueError) as error:
-            raise _bad_parameter(error) from error
-        if not decision.passed:
-            raise typer.Exit(code=1)
-        typer.echo(f"Release {version} published and attested; the regression gate passed.")
+        typer.echo("Commit the prepared version changes before running the release workflow.")
 
     app.add_typer(release, name="release")

@@ -235,9 +235,9 @@ def attest_composite(
     what it set out to sign. A group the journal skipped appends nothing: it
     was signed by an earlier run, which recorded it then.
 
-    `verify` and `verify-attestation` are both included, matching
-    `attest_release_images`: `verify` checks the simple-signing signature
-    `sign` produced, `verify-attestation` checks the separate in-toto
+    `verify` and `verify-attestation` are both included: `verify` checks the
+    simple-signing signature `sign` produced, `verify-attestation` checks the
+    separate in-toto
     attestation `attest` produced. One passing says nothing about the other,
     so dropping either loses real coverage.
 
