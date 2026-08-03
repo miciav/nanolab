@@ -277,41 +277,20 @@ def source_test_commands(remote_source_dir: Path) -> tuple[CommandTaskSpec, ...]
 
 
 def amd64_build_commands(
-    plan: Amd64ReleasePlan,
+    plan: ImagePlan,
     *,
+    builder_name: str,
     remote_bake_file: str,
-    remote_buildkit_config: str,
     remote_source_dir: str,
 ) -> tuple[CommandTaskSpec, ...]:
-    commands = [
-        CommandTaskSpec(
-            task_id="release.buildx.create",
-            summary="Create bounded release Buildx builder",
-            argv=(
-                "docker",
-                "buildx",
-                "create",
-                "--name",
-                plan.builder.name,
-                "--driver",
-                "docker-container",
-                "--buildkitd-config",
-                remote_buildkit_config,
-                "--use",
-            ),
-            role="stack",
-            remote_dir=remote_source_dir,
-        ),
-        CommandTaskSpec(
-            task_id="release.buildx.bootstrap",
-            summary="Bootstrap bounded release Buildx builder",
-            argv=("docker", "buildx", "inspect", "--builder", plan.builder.name, "--bootstrap"),
-            role="stack",
-            remote_dir=remote_source_dir,
-        ),
-    ]
+    """Prepare, bake and natively build every AMD64 cell.
+
+    Mirrors `arm64_build_commands`: the builder itself is acquired by a
+    resource, so nothing here creates or bootstraps it.
+    """
+    commands: list[CommandTaskSpec] = []
     seen: set[str] = set()
-    for cell in plan.image_plan.bake_cells:
+    for cell in plan.bake_cells:
         prerequisite = cell.prerequisite_command
         if prerequisite is None or cell.target.name in seen:
             continue
@@ -334,7 +313,7 @@ def amd64_build_commands(
                 "buildx",
                 "bake",
                 "--builder",
-                plan.builder.name,
+                builder_name,
                 "--file",
                 remote_bake_file,
                 "--load",
@@ -352,7 +331,7 @@ def amd64_build_commands(
             role="stack",
             remote_dir=remote_source_dir,
         )
-        for cell in plan.image_plan.gradle_cells
+        for cell in plan.gradle_cells
     )
     return tuple(commands)
 
@@ -515,11 +494,36 @@ def _build_amd64_images(
             action=f"transfer {source.name}",
         )
     _reset_named_builder(plan, provider, request)
-    for command in amd64_build_commands(
-        plan,
-        remote_bake_file=remote_bake,
-        remote_buildkit_config=remote_buildkit,
-        remote_source_dir=remote_source_dir,
+    builder_commands = (
+        CommandTaskSpec(
+            task_id="release.buildx.create",
+            summary="Create bounded release Buildx builder",
+            argv=(
+                "docker", "buildx", "create",
+                "--name", plan.builder.name,
+                "--driver", "docker-container",
+                "--buildkitd-config", remote_buildkit,
+                "--use",
+            ),
+            role="stack",
+            remote_dir=remote_source_dir,
+        ),
+        CommandTaskSpec(
+            task_id="release.buildx.bootstrap",
+            summary="Bootstrap bounded release Buildx builder",
+            argv=("docker", "buildx", "inspect", "--builder", plan.builder.name, "--bootstrap"),
+            role="stack",
+            remote_dir=remote_source_dir,
+        ),
+    )
+    for command in (
+        *builder_commands,
+        *amd64_build_commands(
+            plan.image_plan,
+            builder_name=plan.builder.name,
+            remote_bake_file=remote_bake,
+            remote_source_dir=remote_source_dir,
+        ),
     ):
         _provider_exec(provider, request, command.argv, cwd=command.remote_dir, bounded=True)
     return _local_image_evidence(plan, provider, request)

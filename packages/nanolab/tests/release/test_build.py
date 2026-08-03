@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from ._release_support import *
 
+from nanolab.images.plan import build_image_plan
 from nanolab.release import build as release_build
 
 
@@ -49,48 +50,44 @@ def test_source_tests_reuse_gradle_and_uv_and_pin_container_toolchains() -> None
         assert command.remote_dir == "/srv/nanofaas-source"
 
 
-def test_amd64_build_commands_bind_every_bake_to_the_named_builder(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    plan = _plan(tmp_path, monkeypatch)
+def test_amd64_build_commands_prepare_bake_and_build_natively() -> None:
+    plan = build_image_plan(NANOFAAS_ROOT, "v9.9.9", architectures=("amd64",))
 
     commands = release_build.amd64_build_commands(
         plan,
-        remote_bake_file="/srv/release/docker-bake.json",
-        remote_buildkit_config="/srv/release/buildkitd.toml",
-        remote_source_dir="/srv/source",
+        builder_name="release-amd64-9.9.9",
+        remote_bake_file="/remote/docker-bake.json",
+        remote_source_dir="/remote/source",
     )
 
-    create = next(command for command in commands if command.task_id == "release.buildx.create")
-    assert create.argv == (
-        "docker",
-        "buildx",
-        "create",
-        "--name",
-        BUILDER_NAME,
-        "--driver",
-        "docker-container",
-        "--buildkitd-config",
-        "/srv/release/buildkitd.toml",
-        "--use",
-    )
-    bake = next(command for command in commands if command.task_id == "release.images.bake.amd64")
+    task_ids = [command.task_id for command in commands]
+    # The builder is the buildx resource's job, not these commands'.
+    assert not any("buildx" in task_id for task_id in task_ids)
+    # Every JVM bake cell gets its bootJar prepared before the bake.
+    prepares = [c for c in commands if c.task_id.startswith("release.images.prepare.")]
+    assert prepares, "no JVM prerequisite generated"
+    assert all(c.argv[0] == "./gradlew" for c in prepares)
+    bake_index = task_ids.index("release.images.bake.amd64")
+    assert all(task_ids.index(c.task_id) < bake_index for c in prepares)
+    # The bake uses the builder that was passed in.
+    bake = commands[bake_index]
     assert bake.argv == (
         "docker",
         "buildx",
         "bake",
         "--builder",
-        BUILDER_NAME,
+        "release-amd64-9.9.9",
         "--file",
-        "/srv/release/docker-bake.json",
+        "/remote/docker-bake.json",
         "--load",
         "docker-amd64",
     )
-    assert sum(command.task_id.startswith("release.images.native.") for command in commands) == len(
-        plan.image_plan.gradle_cells
-    )
-    assert all("arm64" not in " ".join(command.argv).lower() for command in commands)
-    assert all("ghcr.io" not in " ".join(command.argv) for command in commands)
+    # Native cells carry the whole gradle_command, not a subset.
+    natives = [c for c in commands if c.task_id.startswith("release.images.native.")]
+    assert natives, "no native build generated"
+    for command, cell in zip(natives, plan.gradle_cells, strict=True):
+        assert command.argv == cell.gradle_command
+    assert all(c.role == "stack" and c.remote_dir == "/remote/source" for c in commands)
 
 
 def test_sonata_owned_arm_resources_are_not_recreated_and_every_image_is_pushed(
