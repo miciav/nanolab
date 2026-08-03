@@ -279,7 +279,7 @@ def run_source_steps(
     test outcome. Returning nothing here means the phase can never be reused
     and every resume re-runs the full product suite.
     """
-    _run_steps(steps, inputs)
+    run_steps(steps, inputs)
     return (Evidence("file-digest", str(source_archive), digest_path(source_archive)),)
 
 
@@ -299,7 +299,7 @@ def run_image_steps(
     manifest list, where the mismatch surfaces as a runtime failure on a
     user's machine instead of here.
     """
-    _run_steps(steps, inputs)
+    run_steps(steps, inputs)
     evidence: list[Evidence] = []
     for image in images:
         if architecture is not None:
@@ -354,7 +354,7 @@ def _require_architecture(
         )
 
 
-def _run_steps(steps: Task[Any], inputs: TaskInputs) -> None:
+def run_steps(steps: Task[Any], inputs: TaskInputs) -> None:
     outcome = steps.run(inputs)
     if not isinstance(outcome, TaskOutcome):
         raise RuntimeError(f"{steps.title} returned an invalid outcome")

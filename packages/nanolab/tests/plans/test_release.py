@@ -1,7 +1,9 @@
 """Smoke tests for the release workflow builder."""
 
+import hashlib
+import json
 import os
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -17,9 +19,10 @@ import nanolab.release.resources as release_resources
 import nanolab.release.run as release_run
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
-from nanolab.images.plan import ImagePlan
+from nanolab.images.plan import DEFAULT_REGISTRY, ImagePlan
 from nanolab.plans.release import ReleaseRequest, build_release_workflow
-from nanolab.release.publish import PublishPlan
+from nanolab.release.metrics import PerformanceAggregate, PerformanceProfile
+from nanolab.release.publish import PublishPlan, build_publish_plan
 from nanolab.release.run import CredentialFiles, GitState, ReleaseSettings
 from nanolab.release.state import digest_path
 from nanolab.release.state import ArtifactEvidence
@@ -268,6 +271,11 @@ class _ArmWorkflowProvider:
         del env, cwd, dry_run
         self.commands.append(argv)
         rendered = " ".join(argv)
+        if argv[:2] == ("mktemp", "-d"):
+            # the shape stage_cosign_credentials insists on before it stages
+            return SimpleNamespace(
+                return_code=0, stdout="/tmp/nanofaas-release-credentials.aB3xY9\n", stderr=""
+            )
         if argv[0] == "sha256sum":
             digest = self.remote_digests[argv[1]].removeprefix("sha256:")
             return SimpleNamespace(return_code=0, stdout=f"{digest}  {argv[1]}\n", stderr="")
@@ -460,6 +468,125 @@ def test_new_arm_source_transfer_failure_compensates_all_acquired_resources(
     assert any(task.argv[:4] == ("docker", "buildx", "rm", "--force") for task in executor.commands)
     assert not any("skopeo copy" in " ".join(task.argv) for task in executor.commands)
     assert not phases["Build ARM64 images"].receipt.exists()
+
+
+def _write_receipt(path: Path, phase: str, kind: str, entries: dict[str, str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "phase": phase,
+                "evidence": [
+                    {"kind": kind, "reference": reference, "digest": digest}
+                    for reference, digest in entries.items()
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def _stage_attest_inputs(phases: dict[str, ReleasePhaseTask]) -> dict[str, str]:
+    """Write the receipts the attest phase reads; return what they claim published.
+
+    Every alias carries the digest of the manifest it points at, exactly as
+    GHCR reports it, so the de-duplication the phase must do has something to
+    de-duplicate.
+    """
+    release_dir = phases["Attest published images"].run_dir
+    plan = build_publish_plan(
+        NANOFAAS_ROOT, f"v{CURRENT_VERSION}", local_registry=DEFAULT_REGISTRY
+    )
+
+    def digest(text: str) -> str:
+        return "sha256:" + hashlib.sha256(text.encode()).hexdigest()
+
+    architectures = {copy.destination: digest(copy.destination) for copy in plan.copies}
+    manifests = {item.reference: digest(item.reference) for item in plan.manifests}
+    aliases = {item.reference: manifests[item.source] for item in plan.aliases}
+    assert aliases, "publish plan has no aliases, so nothing would de-duplicate"
+
+    for title, phase, published in (
+        ("Publish architecture images", "publish-architectures", architectures),
+        ("Publish image manifests", "publish-manifests", manifests),
+        ("Publish image aliases", "publish-aliases", aliases),
+    ):
+        _write_receipt(
+            phases[title].receipt,
+            phase,
+            "ghcr-digest",
+            {f"docker://{reference}": value for reference, value in published.items()},
+        )
+
+    aggregate_file = release_dir / "aggregate.json"
+    aggregate_file.parent.mkdir(parents=True, exist_ok=True)
+    aggregate_file.write_text(
+        json.dumps(
+            asdict(
+                PerformanceAggregate(
+                    profile=PerformanceProfile(
+                        name="azure-d8s-v5+d2s-v5-amd64-native-loadtest-v1",
+                        provider="azure",
+                        stack_vm="Standard_D8s_v5",
+                        loadgen_vm="Standard_D2s_v5",
+                        architecture="amd64",
+                        flavor="native",
+                        scenario="loadtest.yaml",
+                    ),
+                    run_count=3,
+                    metrics={"throughputRps": 100.0, "latencyP95Ms": 10.0, "errorRate": 0.0},
+                )
+            )
+        ),
+        encoding="utf-8",
+    )
+    _write_receipt(
+        phases["Aggregate benchmarks"].receipt,
+        "aggregate",
+        "file-digest",
+        {str(aggregate_file): digest_path(aggregate_file)},
+    )
+    return {**architectures, **manifests, **aliases}
+
+
+def test_attest_phase_records_one_signature_per_pinned_digest(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    canonical_release_configs: tuple[Path, Path],
+) -> None:
+    """The attest receipt must prove a signature happened, once per pinned digest.
+
+    The predicate digest alone proves nothing about signing: a release where
+    cosign failed non-fatally would write the very same receipt.
+    """
+    workflow, provider, executor, phases = _arm_failure_workflow(
+        monkeypatch, tmp_path, "none", *canonical_release_configs
+    )
+    published = _stage_attest_inputs(phases)
+    attest = phases["Attest published images"]
+
+    workflow.run(select=Selection(only="attest-published-images"))
+
+    evidence = json.loads(attest.receipt.read_text(encoding="utf-8"))["evidence"]
+    signatures = [item for item in evidence if item["kind"] == "cosign-attestation"]
+    assert signatures, "attest produced no signing evidence"
+    assert any(item["kind"] == "file-digest" for item in evidence), "predicate evidence lost"
+    # one signature per unique pinned digest -- aliases resolve to the same
+    # digest as their manifest and must not be signed twice
+    pinned = {f"{reference.rsplit(':', 1)[0]}@{value}" for reference, value in published.items()}
+    assert {item["reference"] for item in signatures} == pinned
+    assert len(signatures) == len(pinned) < len(published)
+    assert all(item["reference"].endswith(f"@{item['digest']}") for item in signatures)
+
+    # the receipt may only claim what cosign was actually asked to sign
+    signed = [
+        task.argv[-1]
+        for task in executor.commands
+        if task.argv[-5:-1] == ("sign", "--yes", "--key", "/key.cosign")
+    ]
+    assert sorted(signed) == sorted(item["reference"] for item in signatures)
+    assert any(destination.endswith("/predicate.json") for destination in provider.transfers)
+    assert any(task.argv[:3] == ("grep", "-q", "PUBLIC KEY") for task in executor.commands)
 
 
 def test_build_release_workflow_compiles_without_cloud_discovery(

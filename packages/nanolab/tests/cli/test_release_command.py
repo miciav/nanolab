@@ -17,6 +17,7 @@ import nanolab.cli.product as product_module
 import nanolab.plans.release as release_plan
 from nanolab.release import run as release_run
 from nanolab.release.environment import release_lock_path, release_run_lock
+from nanolab.release.evidence import RECEIPT_KINDS
 from nanolab.release.metrics import RegressionDecision
 from nanolab.release.run import GitState
 from nanolab.release.versioning import read_project_version
@@ -419,12 +420,9 @@ def test_generic_release_run_provisions_journals_and_passes(release_cli_harness)
     kwargs = release_cli_harness.workflows[0].run_kwargs
     assert kwargs["journal"].path == journal
     assert kwargs["resume"] is False
-    assert set(kwargs["verifiers"]) == {
-        "file-digest",
-        "local-image-digest",
-        "local-registry-digest",
-        "ghcr-digest",
-    }
+    # every kind a receipt may carry needs a verifier, or the phase that
+    # records it can never be skipped on resume
+    assert set(kwargs["verifiers"]) == RECEIPT_KINDS
     metadata = json.loads(
         (release_cli_harness.release_dir / "run-metadata.json").read_text(encoding="utf-8")
     )

@@ -8,18 +8,23 @@ workflow surface remains coarse-grained and selectable.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, replace
 import json
 from pathlib import Path
 from typing import Any
 
 import yaml
-from sonata_engine import Evidence, JournalConfig, Verifier, Workflow
+from sonata_engine import Evidence, JournalConfig, Steps, Verifier, Workflow
 from sonata_tasks.buildx import buildx_builder_resource
+from sonata_tasks.command import CommandTask
+from sonata_tasks.cosign import CosignTask
 from sonata_tasks.release_composites import (
+    attest_composite,
     command_specs_composite,
     registry_push_composite,
 )
+from sonata_tasks.transfer import FileTransferTask
 from nanolab.plans import loadtest as loadtest_plan
 from sonata_tasks.registry_tunnel import registry_tunnel_resource
 from workflow_tasks.execution.bindings import RoleBoundCommandTaskExecutor
@@ -73,6 +78,7 @@ from nanolab.release.tasks import (
     regression_gate_task,
     run_image_steps,
     run_source_steps,
+    run_steps,
     registry_artifacts_from_receipt,
     registry_evidence,
     source_test_task,
@@ -724,6 +730,19 @@ def build_release_workflow(
 
     predicate_file = release_dir / "predicate.json"
     remote_predicate = f"{remote_root}/predicate.json"
+    remote_sboms = f"{remote_root}/sboms"
+    remote_public_key = f"{remote_sboms}/cosign.pub"
+
+    def _pinned(images: Mapping[str, str]) -> tuple[str, ...]:
+        """Collapse tags and aliases onto the unique set of pinned digests.
+
+        Aliases point at the same digest as their native manifest, so signing
+        by reference would sign the same artifact several times.
+        """
+        pinned: dict[str, None] = {}
+        for reference, digest in sorted(images.items()):
+            pinned.setdefault(f"{reference.rsplit(':', 1)[0]}@{digest}", None)
+        return tuple(pinned)
 
     def attest_images(inputs: Any) -> tuple[Evidence, ...]:
         if cosign is None:
@@ -745,26 +764,82 @@ def build_release_workflow(
             ),
             encoding="utf-8",
         )
-        result = provider.exec_argv(
-            stack_req, ("mkdir", "-p", remote_root), env=None, cwd=None, dry_run=False
+        credentials = inputs.resource(cosign).value
+        if credentials.password_file is None:
+            raise ValueError("cosign attestation requires a staged password file")
+        docker_config = docker_credentials(inputs).docker_config
+
+        # One-shot setup: the SBOM directory (whose parent is the release root
+        # the predicate lands in), the predicate itself, and the public half of
+        # the signing key -- `cosign verify` rejects the encrypted private key.
+        # None of it is per-image, so none of it belongs in the composite.
+        # ponytail: re-runs on resume; four cheap calls against six per digest.
+        run_steps(
+            Steps(
+                title="Stage attestation inputs",
+                steps=(
+                    CommandTask(
+                        title="Create remote SBOM directory",
+                        argv=("mkdir", "-p", remote_sboms),
+                        executor=executor,
+                        role="stack",
+                    ),
+                    FileTransferTask(
+                        provider=provider,
+                        request=stack_req,
+                        source=predicate_file,
+                        destination=remote_predicate,
+                        title="Transfer release predicate",
+                    ),
+                    CosignTask(
+                        operation="public-key",
+                        image="",
+                        key_file=credentials.key_file,
+                        password_file=str(credentials.password_file),
+                        docker_config=docker_config,
+                        output_file=remote_public_key,
+                        executor=executor,
+                        role="stack",
+                    ),
+                    # cosign public-key redirects to a file, so a failure that
+                    # still exits 0 leaves an empty key that makes every later
+                    # `verify` fail for the wrong reason. Check what landed.
+                    CommandTask(
+                        title="Verify derived cosign public key",
+                        argv=("grep", "-q", "PUBLIC KEY", remote_public_key),
+                        executor=executor,
+                        role="stack",
+                    ),
+                ),
+            ),
+            inputs,
         )
-        if int(getattr(result, "return_code", 0)) != 0:
-            raise RuntimeError("create remote attestation directory failed")
-        result = provider.transfer_to(
-            stack_req, source=predicate_file, destination=remote_predicate
+
+        pinned = _pinned(images)
+        run_steps(
+            attest_composite(
+                pinned,
+                predicate_remote=remote_predicate,
+                sbom_dir_remote=remote_sboms,
+                public_key_remote=remote_public_key,
+                cosign_key=credentials.key_file,
+                password_file=str(credentials.password_file),
+                docker_config=docker_config,
+                executor=executor,
+                role="stack",
+            ),
+            inputs,
         )
-        if int(getattr(result, "return_code", 0)) != 0:
-            raise RuntimeError("transfer release predicate failed")
-        release_attest.attest_release_images(
-            provider,
-            stack_req,
-            images=images,
-            predicate_remote=remote_predicate,
-            sbom_dir_remote=f"{remote_root}/sboms",
-            cosign=inputs.resource(cosign).value,
-            docker_config=docker_credentials(inputs).docker_config,
+
+        # One entry per signed digest: without it a release where cosign failed
+        # non-fatally produces a receipt indistinguishable from a signed one.
+        return (
+            Evidence("file-digest", str(predicate_file), digest_path(predicate_file)),
+            *(
+                Evidence("cosign-attestation", reference, reference.split("@", 1)[1])
+                for reference in pinned
+            ),
         )
-        return (Evidence("file-digest", str(predicate_file), digest_path(predicate_file)),)
 
     attest = attest_task(
         identity=identity,
