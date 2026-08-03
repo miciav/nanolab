@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 import pytest
@@ -8,6 +9,15 @@ from workflow_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 from sonata_tasks.command import CommandTask
 from sonata_tasks.cosign import COSIGN_IMAGE, CosignTask
+
+
+def test_cosign_image_is_digest_pinned() -> None:
+    # A mutable tag like `:latest` would let the supply-chain toolchain drift
+    # out from under a pinned release. Assert the shape -- a `@sha256:` digest
+    # followed by 64 hex characters -- not today's specific digest, so a
+    # legitimate pin bump doesn't fail this test.
+    assert re.search(r"@sha256:[0-9a-f]{64}$", COSIGN_IMAGE)
+    assert ":latest" not in COSIGN_IMAGE
 
 
 @dataclass

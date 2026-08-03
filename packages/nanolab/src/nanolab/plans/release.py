@@ -349,6 +349,7 @@ def build_release_workflow(
         role="stack",
         requires=(infrastructure.stack, amd64_inputs),
         buildkitd_config=f"{remote_root}/buildkitd-amd64.toml",
+        replace_existing=True,
     )
     amd64_commands = amd64_build_commands(
         request.image_plan,

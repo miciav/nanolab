@@ -907,6 +907,60 @@ def test_build_release_workflow_compiles_without_cloud_discovery(
     assert "Release release stack VM" in suffix_titles
 
 
+def test_amd64_buildx_builder_replaces_a_surviving_builder(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    canonical_release_configs: tuple[Path, Path],
+) -> None:
+    """A builder left over from a prior run must be replaced, not reused.
+
+    ``buildx_builder_resource`` short-circuits on an existing builder unless
+    ``replace_existing=True``, and skipping the create step also skips the
+    ``--buildkitd-config`` that carries ``[worker.oci] max-parallelism`` --
+    the unbounded-parallelism defect this release path exists to fix. The
+    ARM64 builder already sets ``replace_existing=True``; the AMD64 builder
+    must match it.
+    """
+    scenario_path, environment_path = canonical_release_configs
+    monkeypatch.setattr(
+        release_plan,
+        "git_state",
+        lambda _root: GitState(commit="a" * 40, clean=True),
+    )
+    monkeypatch.setattr(
+        release_plan,
+        "extract_commit_tree",
+        lambda _repo_root, _commit, _destination: NANOFAAS_ROOT,
+    )
+
+    calls: list[dict] = []
+    real_buildx_builder_resource = release_plan.buildx_builder_resource
+
+    def spy(**kwargs):
+        calls.append(kwargs)
+        return real_buildx_builder_resource(**kwargs)
+
+    monkeypatch.setattr(release_plan, "buildx_builder_resource", spy)
+
+    request = release_plan.build_release_request(
+        repo_root=NANOLAB_ROOT,
+        nanofaas_root=NANOFAAS_ROOT,
+        scenario_path=scenario_path,
+        environment_path=environment_path,
+        release_config_path=None,
+        run_dir=tmp_path / "run",
+        performance_root=tmp_path / "performance",
+        source_tree=tmp_path / "tree",
+    )
+
+    build_release_workflow(request, provider=RejectingProvider())
+
+    amd64_calls = [call for call in calls if call["name"].startswith("release-amd64-")]
+    assert len(amd64_calls) == 1
+    assert amd64_calls[0]["replace_existing"] is True
+    assert amd64_calls[0]["buildkitd_config"] is not None
+
+
 @pytest.mark.parametrize(
     "selection",
     (
