@@ -634,6 +634,42 @@ def test_release_barriers_reject_failed_gate_and_mismatched_smoke(tmp_path: Path
         )
 
 
+def test_finalize_reads_a_predicate_from_a_receipt_that_also_records_signatures(
+    tmp_path: Path,
+) -> None:
+    """The attest receipt carries two kinds; finalize must still read its one file.
+
+    Signing evidence lands in the same receipt as the predicate digest, so a
+    parser that requires every entry to be the kind the caller asked for kills
+    finalize on every signed release.
+    """
+    predicate = tmp_path / "predicate.json"
+    predicate.write_text('{"version": "v1"}', encoding="utf-8")
+    receipt = tmp_path / "attest.json"
+    receipt.write_text(
+        json.dumps(
+            {
+                "phase": "attest",
+                "evidence": [
+                    {
+                        "kind": "file-digest",
+                        "reference": str(predicate),
+                        "digest": digest_path(predicate),
+                    },
+                    {
+                        "kind": "cosign-attestation",
+                        "reference": "ghcr.io/nanofaas/gateway@sha256:" + "a" * 64,
+                        "digest": "sha256:" + "a" * 64,
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    require_attestation_predicate(receipt, predicate, {"version": "v1"})
+
+
 def test_finalize_rejects_semantically_wrong_current_predicate(tmp_path: Path) -> None:
     predicate = tmp_path / "predicate.json"
     predicate.write_text('{"version": "wrong"}', encoding="utf-8")

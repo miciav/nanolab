@@ -6,6 +6,7 @@ from nanolab.release.evidence import (
     file_digest_verifier,
     image_digest_verifier,
     release_evidence_verifiers,
+    signature_evidence_verifier,
 )
 from nanolab.release.state import digest_path
 
@@ -35,6 +36,27 @@ def test_image_digest_verifier_fails_closed() -> None:
         raise OSError("registry unavailable")
 
     assert not image_digest_verifier(unreachable)(evidence)
+
+
+def test_signature_verifier_accepts_only_self_consistent_pinned_references() -> None:
+    """A signature claim must name the digest it says it signed.
+
+    Sonata skips a resumed phase when this returns True, so it must reject a
+    claim that could belong to some other artifact -- and must accept a real
+    one, or every resume re-signs the whole matrix.
+    """
+    digest = "sha256:" + "a" * 64
+    reference = f"ghcr.io/nanofaas/gateway@{digest}"
+
+    assert signature_evidence_verifier(Evidence("cosign-attestation", reference, digest))
+    # a tag, not a digest: cosign would sign whatever it points at today
+    assert not signature_evidence_verifier(
+        Evidence("cosign-attestation", "ghcr.io/nanofaas/gateway:v1", digest)
+    )
+    # pinned to one artifact, claiming the digest of another
+    assert not signature_evidence_verifier(
+        Evidence("cosign-attestation", reference, "sha256:" + "b" * 64)
+    )
 
 
 def test_authenticated_ghcr_verifier_uses_authfile_without_exposing_token(
