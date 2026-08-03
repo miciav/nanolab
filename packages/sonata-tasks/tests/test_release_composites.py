@@ -13,12 +13,8 @@ from workflow_tasks.tasks.models import CommandTaskSpec, TaskResult
 from sonata_tasks import release_composites
 from sonata_tasks.release_composites import (
     _AttestImageTask,
-    arm64_build_composite,
     attest_composite,
     command_specs_composite,
-    publish_aliases_composite,
-    publish_architectures_composite,
-    publish_manifests_composite,
     registry_push_composite,
 )
 
@@ -126,56 +122,6 @@ def _bake_cell(
         image=image,
         build_kind="bake",
     )
-
-
-def _gradle_cell(
-    name: str,
-    image: str,
-    arch: str = "amd64",
-    flavor: str = "native",
-) -> _FakeCell:
-    return _FakeCell(
-        target=_FakeTarget(
-            name=name,
-            native_gradle_task=f":{name}:bootBuildImage",
-            native_image_property=f"{name}Image",
-        ),
-        architecture=arch,
-        flavor=flavor,
-        tag=image.rsplit(":", 1)[-1],
-        image=image,
-        build_kind="gradle",
-    )
-
-
-# ---------------------------------------------------------------------------
-# Test doubles for PublishPlan-like objects
-# ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class _FakeCopy:
-    source: str
-    destination: str
-
-
-@dataclass(frozen=True)
-class _FakeManifest:
-    reference: str
-    sources: tuple[str, str]
-
-
-@dataclass(frozen=True)
-class _FakeAlias:
-    reference: str
-    source: str
-
-
-@dataclass(frozen=True)
-class _FakePublishPlan:
-    copies: tuple[_FakeCopy, ...]
-    manifests: tuple[_FakeManifest, ...] = ()
-    aliases: tuple[_FakeAlias, ...] = ()
 
 
 # ---------------------------------------------------------------------------
@@ -307,141 +253,6 @@ class TestRegistryPushComposite:
 
         composite = registry_push_composite(plan, executor, "host")
         assert composite is not None
-
-
-class TestArm64BuildComposite:
-    def test_uses_resource_owned_builder_without_creating_another(self) -> None:
-        executor = RecordingExecutor()
-        plan = _plan_with_cells(
-            _bake_cell("ctrl", "reg/ctrl:v1-arm64", arch="arm64"),
-        )
-
-        composite = arm64_build_composite(
-            plan,
-            executor,
-            "arm-builder",
-            "my-builder",
-            remote_bake_file="/release/docker-bake.json",
-        )
-        workflow = Workflow("arm64-build")
-        workflow.add(composite)
-        workflow.run()
-
-        assert not [s for s in executor.seen if "create" in s.argv]
-        bake = next(s for s in executor.seen if "bake" in s.argv)
-        assert bake.argv[bake.argv.index("--builder") + 1] == "my-builder"
-
-    def test_skips_amd64_cells(self) -> None:
-        executor = RecordingExecutor()
-        plan = _plan_with_cells(
-            _bake_cell("ctrl", "reg/ctrl:v1-amd64", arch="amd64"),
-            _bake_cell("ctrl", "reg/ctrl:v1-arm64", arch="arm64"),
-        )
-
-        composite = arm64_build_composite(plan, executor, "arm-builder", "b")
-        workflow = Workflow("arm64-build")
-        workflow.add(composite)
-        workflow.run()
-
-        assert len(executor.seen) == 1
-
-    def test_registry_tunnel_delegated_to_resource(self) -> None:
-        executor = RecordingExecutor()
-        plan = _plan_with_cells(
-            _bake_cell("ctrl", "reg/ctrl:v1-arm64", arch="arm64"),
-        )
-
-        composite = arm64_build_composite(
-            plan, executor, "arm-builder", "b", registry_upstream="localhost:5000"
-        )
-        workflow = Workflow("arm64-build")
-        workflow.add(composite)
-        workflow.run()
-
-        # The composite does NOT create the tunnel — the registry_tunnel_resource
-        # in the parent workflow DAG handles acquire/release.
-        tunnel_cmds = [s for s in executor.seen if "socat" in str(s.argv)]
-        assert len(tunnel_cmds) == 0
-
-
-class TestPublishArchitecturesComposite:
-    def test_copies_each_cell_with_plain_references(self) -> None:
-        executor = RecordingExecutor()
-        plan = _FakePublishPlan(
-            copies=(
-                _FakeCopy(source="reg/ctrl:v1-amd64", destination="ghcr.io/ctrl:v1-amd64"),
-                _FakeCopy(source="reg/watch:v1-amd64", destination="ghcr.io/watch:v1-amd64"),
-            )
-        )
-
-        composite = publish_architectures_composite(plan, executor, "host", "/auth.json")
-        workflow = Workflow("publish-arch")
-        workflow.add(composite)
-        workflow.run()
-
-        assert len(executor.seen) == 2
-        sources = [s for s in executor.seen[0].argv if "docker://" in s]
-        # Source is plain tag reference, not digest-pinned
-        assert "docker://reg/ctrl:v1-amd64" in sources
-
-
-class TestPublishManifestsComposite:
-    def test_creates_manifests_via_publish_plan(self) -> None:
-        executor = RecordingExecutor()
-        plan = _FakePublishPlan(
-            copies=(),
-            manifests=(
-                _FakeManifest(
-                    reference="ghcr.io/ctrl:v1",
-                    sources=("ghcr.io/ctrl:v1-amd64", "ghcr.io/ctrl:v1-arm64"),
-                ),
-            ),
-        )
-        composite = publish_manifests_composite(plan, executor, "host", "/docker")
-        workflow = Workflow("publish-manifest")
-        workflow.add(composite)
-        workflow.run()
-
-        assert len(executor.seen) == 1
-        spec = executor.seen[0]
-        assert "imagetools" in spec.argv
-        assert "create" in spec.argv
-
-
-class TestPublishAliasesComposite:
-    def test_creates_aliases_via_publish_plan(self) -> None:
-        executor = RecordingExecutor()
-        plan = _FakePublishPlan(
-            copies=(),
-            manifests=(),
-            aliases=(
-                _FakeAlias(
-                    reference="ghcr.io/ctrl:v1",
-                    source="ghcr.io/ctrl:v1-native",
-                ),
-            ),
-        )
-        composite = publish_aliases_composite(plan, executor, "host", "/docker")
-        workflow = Workflow("publish-alias")
-        workflow.add(composite)
-        workflow.run()
-
-        assert len(executor.seen) == 1
-        spec = executor.seen[0]
-        assert "imagetools" in spec.argv
-        assert "create" in spec.argv
-
-    def test_noop_when_plan_has_no_aliases(self) -> None:
-        executor = RecordingExecutor()
-        plan = _FakePublishPlan(copies=(), manifests=(), aliases=())
-
-        composite = publish_aliases_composite(plan, executor, "host", "/docker")
-        workflow = Workflow("publish-alias")
-        workflow.add(composite)
-        workflow.run()
-
-        assert len(executor.seen) == 1
-        assert "true" in executor.seen[0].argv
 
 
 class TestAttestComposite:
