@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from sonata_engine import Workflow
+from sonata_engine import Steps, Workflow
 from workflow_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 from sonata_tasks.release_composites import (
@@ -32,6 +32,13 @@ class RecordingExecutor:
     def run(self, task: CommandTaskSpec, *, dry_run: bool = False) -> TaskResult:
         self.seen.append(task)
         return TaskResult(task_id="", status="passed", return_code=0)
+
+
+def _run_composite(composite: Steps, executor: RecordingExecutor) -> None:
+    """Compile and run a composite, so ``executor.seen`` fills with real argv."""
+    workflow = Workflow("test-composite")
+    workflow.add(composite)
+    workflow.run()
 
 
 # ---------------------------------------------------------------------------
@@ -400,26 +407,65 @@ class TestPublishAliasesComposite:
 
 
 class TestAttestComposite:
-    def test_attests_each_image_with_syft_and_cosign(self) -> None:
+    def test_attest_composite_runs_five_operations_per_image(self) -> None:
         executor = RecordingExecutor()
-        images = ["reg/img1:v1"]
 
         composite = attest_composite(
-            images,
-            Path("/predicate.json"),
-            Path("/sboms"),
-            "/cosign.key",
-            "/docker",
-            executor,
-            "host",
-            password_file="/pw.txt",
+            ("repo/a@sha256:aa", "repo/b@sha256:bb"),
+            predicate_remote="/work/predicate.json",
+            sbom_dir_remote="/work/sboms",
+            public_key_remote="/work/cosign.pub",
+            cosign_key="/secrets/cosign-key",
+            password_file="/secrets/cosign-password",
+            docker_config="/home/azureuser/.docker",
+            executor=executor,
+            role="stack",
         )
-        workflow = Workflow("attest")
-        workflow.add(composite)
-        workflow.run()
 
-        assert len(executor.seen) == 2  # syft + cosign
-        assert executor.seen[0].argv[0] == "docker"  # syft via docker run
+        # One Steps per image, so a resume picks up from the unsigned image.
+        # `Steps` keeps its inner tasks on the private `_steps` attribute --
+        # there is no public accessor, so introspection has to reach past it.
+        assert len(composite._steps) == 2
+        for per_image in composite._steps:
+            titles = [step.title for step in per_image._steps]
+            assert len(titles) == 5
+            assert sum("Syft" in title for title in titles) == 1
+            assert sum("cosign" in title for title in titles) == 4
+
+    def test_attest_composite_pins_every_operation_to_the_same_digest(self) -> None:
+        executor = RecordingExecutor()
+        composite = attest_composite(
+            ("repo/a@sha256:aa",),
+            predicate_remote="/work/predicate.json",
+            sbom_dir_remote="/work/sboms",
+            public_key_remote="/work/cosign.pub",
+            cosign_key="/secrets/cosign-key",
+            password_file="/secrets/cosign-password",
+            docker_config="/home/azureuser/.docker",
+            executor=executor,
+            role="stack",
+        )
+        _run_composite(composite, executor)
+
+        assert executor.seen, "composite ran nothing"
+        for spec in executor.seen:
+            assert "repo/a@sha256:aa" in spec.argv, f"unpinned reference in {spec.argv}"
+
+    def test_attest_composite_handles_an_empty_image_set(self) -> None:
+        executor = RecordingExecutor()
+        composite = attest_composite(
+            (),
+            predicate_remote="/work/predicate.json",
+            sbom_dir_remote="/work/sboms",
+            public_key_remote="/work/cosign.pub",
+            cosign_key="/secrets/cosign-key",
+            password_file="/secrets/cosign-password",
+            docker_config="/home/azureuser/.docker",
+            executor=executor,
+            role="stack",
+        )
+
+        assert len(composite._steps) == 1
 
 
 class TestCommandSpecsComposite:

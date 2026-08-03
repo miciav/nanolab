@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from pathlib import Path
+import re
 from typing import Any
 
 from sonata_engine import Steps
@@ -529,41 +530,32 @@ def publish_aliases_composite(
 
 def attest_composite(
     images: Sequence[str],
-    predicate_remote: Path,
-    sbom_dir_remote: Path,
+    *,
+    predicate_remote: str,
+    sbom_dir_remote: str,
+    public_key_remote: str,
     cosign_key: str,
+    password_file: str,
     docker_config: str,
     executor: CommandTaskExecutor,
     role: ExecutionRole,
-    *,
     title: str = "Attest images",
-    password_file: str = "",
 ) -> Steps:
-    """Generate SBOMs and cosign attestations for a list of images.
+    """SBOM, sign, attest, attach and verify every digest, one Steps per image.
 
-    For each image: generate an SPDX SBOM with ``SyftTask``, then
-    cosign attest with ``CosignTask``.
+    The per-image grouping is the point: this phase issues five container runs
+    per digest across the whole published matrix, and a network failure two
+    thirds of the way through should resume from the digest it died on, not
+    from the first one.
 
-    Parameters
-    ----------
-    images :
-        Image references to attest.
-    predicate_remote :
-        Path to the cosign predicate file on each remote.
-    sbom_dir_remote :
-        Directory on each remote where the SBOM will be written.
-    cosign_key :
-        Path to the cosign private key on each remote.
-    docker_config :
-        Path to the Docker config directory.
-    executor :
-        Role-bound executor.
-    role :
-        Execution role.
-    title :
-        Optional override.
-    password_file :
-        Path to the file containing the cosign key password.
+    `images` must be digest-pinned references (``repo/name@sha256:...``).
+    Signing a tag signs whatever the tag points at when cosign resolves it,
+    which is not necessarily what the release verified.
+
+    `public_key_remote` must already hold the public half of `cosign_key`:
+    ``cosign verify`` rejects an encrypted private key outright. Deriving it is
+    a one-shot setup step, so it belongs to the caller, not to this per-image
+    composite.
     """
     if not images:
         return Steps(
@@ -577,14 +569,23 @@ def attest_composite(
 
     cell_steps: list[Any] = []
     for image in images:
-        sbom_path = sbom_dir_remote / f"{image.replace('/', '_').replace(':', '_')}.spdx.json"
+        sbom_path = f"{sbom_dir_remote}/{_artifact_slug(image)}.spdx.json"
         cell_steps.append(
             Steps(
                 title=f"Attest {image}",
                 steps=(
                     SyftTask(
                         image=image,
-                        output_path=str(sbom_path),
+                        output_path=sbom_path,
+                        docker_config=docker_config,
+                        executor=executor,
+                        role=role,
+                    ),
+                    CosignTask(
+                        operation="sign",
+                        image=image,
+                        key_file=cosign_key,
+                        password_file=password_file,
                         docker_config=docker_config,
                         executor=executor,
                         role=role,
@@ -593,13 +594,37 @@ def attest_composite(
                         operation="attest",
                         image=image,
                         key_file=cosign_key,
-                        password_file=password_file or cosign_key + ".password",
+                        password_file=password_file,
                         docker_config=docker_config,
+                        predicate_file=predicate_remote,
                         executor=executor,
                         role=role,
-                        predicate_file=str(predicate_remote),
+                    ),
+                    CosignTask(
+                        operation="attach sbom",
+                        image=image,
+                        key_file=cosign_key,
+                        password_file=password_file,
+                        docker_config=docker_config,
+                        sbom_file=sbom_path,
+                        executor=executor,
+                        role=role,
+                    ),
+                    CosignTask(
+                        operation="verify-attestation",
+                        image=image,
+                        key_file=cosign_key,
+                        password_file=password_file,
+                        docker_config=docker_config,
+                        public_key_file=public_key_remote,
+                        executor=executor,
+                        role=role,
                     ),
                 ),
             )
         )
     return Steps(title=title, steps=tuple(cell_steps))
+
+
+def _artifact_slug(reference: str) -> str:
+    return re.sub(r"[^a-zA-Z0-9._-]+", "-", reference.split("/")[-1])
