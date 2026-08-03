@@ -7,7 +7,7 @@ from workflow_tasks.tasks.models import TaskResult
 
 from nanolab.release.evidence import file_digest_verifier, receipt_artifacts
 from nanolab.release import tasks as release_tasks
-from nanolab.release.state import ReleaseIdentity, digest_path
+from nanolab.release.model import ReleaseIdentity, digest_path
 from nanolab.release.tasks import (
     amd64_build_task,
     arm64_build_task,
@@ -15,6 +15,7 @@ from nanolab.release.tasks import (
     registry_push_task,
     registry_artifacts_from_receipt,
     run_image_steps,
+    run_source_steps,
     source_test_task,
     publish_architectures_task,
     publish_manifests_task,
@@ -266,6 +267,50 @@ def test_registry_push_rejects_malformed_matrix_evidence(
         phase_inputs={"matrix": ["image-a:v1"]},
         expected_images=("image-a:v1",),
         work=lambda _inputs: (Evidence("local-registry-digest", reference, digest),),
+    )
+
+    with pytest.raises(RuntimeError, match="does not cover the image matrix"):
+        task.run(TaskInputs.empty())
+
+
+def test_expected_images_accepts_daemon_local_digests(tmp_path: Path) -> None:
+    digest = "sha256:" + "c" * 64
+    image = "localhost:5000/nanofaas/server:v1-amd64"
+    task = amd64_build_task(
+        identity=_identity(),
+        run_dir=tmp_path,
+        phase_inputs={"matrix": [image]},
+        expected_images=(image,),
+        work=lambda _inputs: (Evidence("local-image-digest", f"docker-daemon:{image}", digest),),
+    )
+
+    outcome = task.run(TaskInputs.empty())
+
+    assert any(item.kind == "local-image-digest" for item in outcome.evidence)
+
+
+def test_expected_images_still_rejects_an_incomplete_matrix(tmp_path: Path) -> None:
+    task = amd64_build_task(
+        identity=_identity(),
+        run_dir=tmp_path,
+        phase_inputs={"matrix": ["a:v1", "b:v1"]},
+        expected_images=("a:v1", "b:v1"),
+        work=lambda _inputs: (
+            Evidence("local-image-digest", "docker-daemon:a:v1", "sha256:" + "d" * 64),
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="amd64-build evidence does not cover the image matrix"):
+        task.run(TaskInputs.empty())
+
+
+def test_expected_images_rejects_a_daemon_digest_without_its_scheme(tmp_path: Path) -> None:
+    task = amd64_build_task(
+        identity=_identity(),
+        run_dir=tmp_path,
+        phase_inputs={"matrix": ["a:v1"]},
+        expected_images=("a:v1",),
+        work=lambda _inputs: (Evidence("local-image-digest", "a:v1", "sha256:" + "d" * 64),),
     )
 
     with pytest.raises(RuntimeError, match="does not cover the image matrix"):
@@ -589,6 +634,42 @@ def test_release_barriers_reject_failed_gate_and_mismatched_smoke(tmp_path: Path
         )
 
 
+def test_finalize_reads_a_predicate_from_a_receipt_that_also_records_signatures(
+    tmp_path: Path,
+) -> None:
+    """The attest receipt carries two kinds; finalize must still read its one file.
+
+    Signing evidence lands in the same receipt as the predicate digest, so a
+    parser that requires every entry to be the kind the caller asked for kills
+    finalize on every signed release.
+    """
+    predicate = tmp_path / "predicate.json"
+    predicate.write_text('{"version": "v1"}', encoding="utf-8")
+    receipt = tmp_path / "attest.json"
+    receipt.write_text(
+        json.dumps(
+            {
+                "phase": "attest",
+                "evidence": [
+                    {
+                        "kind": "file-digest",
+                        "reference": str(predicate),
+                        "digest": digest_path(predicate),
+                    },
+                    {
+                        "kind": "cosign-attestation",
+                        "reference": "ghcr.io/nanofaas/gateway@sha256:" + "a" * 64,
+                        "digest": "sha256:" + "a" * 64,
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    require_attestation_predicate(receipt, predicate, {"version": "v1"})
+
+
 def test_finalize_rejects_semantically_wrong_current_predicate(tmp_path: Path) -> None:
     predicate = tmp_path / "predicate.json"
     predicate.write_text('{"version": "wrong"}', encoding="utf-8")
@@ -688,3 +769,74 @@ def test_image_steps_reject_malformed_digest_output(stdout) -> None:
 
     with pytest.raises(RuntimeError, match="invalid image digest"):
         run_image_steps(Steps(), TaskInputs.empty(), Executor(), ("image:v1",), registry=False)
+
+
+class _NoopSteps:
+    title = "Steps"
+
+    def run(self, _inputs):
+        return TaskOutcome()
+
+
+class _ScriptedExecutor:
+    """Maps an exact argv tuple to the stdout a real command would print."""
+
+    def __init__(self, responses: dict[tuple[str, ...], str]) -> None:
+        self._responses = responses
+
+    def run(self, task, *, dry_run=False):
+        return TaskResult(
+            task_id="", status="passed", return_code=0, stdout=self._responses[task.argv]
+        )
+
+
+def test_run_source_steps_records_the_tested_source_tree(tmp_path: Path) -> None:
+    archive = tmp_path / "source.tar"
+    archive.write_bytes(b"tree")
+
+    evidence = run_source_steps(_NoopSteps(), TaskInputs.empty(), source_archive=archive)
+
+    assert len(evidence) == 1
+    assert evidence[0].kind == "file-digest"
+    assert evidence[0].reference == str(archive)
+    assert evidence[0].digest == digest_path(archive)
+
+
+def test_run_image_steps_rejects_a_foreign_architecture() -> None:
+    executor = _ScriptedExecutor(
+        {
+            ("docker", "image", "inspect", "--format={{.Architecture}}", "img:v1"): "arm64",
+            ("docker", "image", "inspect", "--format={{.Id}}", "img:v1"): "sha256:" + "a" * 64,
+        }
+    )
+
+    with pytest.raises(RuntimeError, match="image architecture mismatch"):
+        run_image_steps(
+            _NoopSteps(),
+            TaskInputs.empty(),
+            executor,
+            ("img:v1",),
+            registry=False,
+            architecture="amd64",
+        )
+
+
+def test_run_image_steps_accepts_the_expected_architecture() -> None:
+    digest = "sha256:" + "b" * 64
+    executor = _ScriptedExecutor(
+        {
+            ("docker", "image", "inspect", "--format={{.Architecture}}", "img:v1"): "amd64",
+            ("docker", "image", "inspect", "--format={{.Id}}", "img:v1"): digest,
+        }
+    )
+
+    evidence = run_image_steps(
+        _NoopSteps(),
+        TaskInputs.empty(),
+        executor,
+        ("img:v1",),
+        registry=False,
+        architecture="amd64",
+    )
+
+    assert [item.digest for item in evidence] == [digest]

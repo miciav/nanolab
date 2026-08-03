@@ -9,7 +9,7 @@ from sonata_engine import Resource, Task, TaskInputs, TaskOutcome, Workflow
 
 import nanolab.release.resources as release_resources
 from nanolab.config.environment import EnvironmentConfig
-from nanolab.release.state import ArtifactEvidence
+from nanolab.release.model import ArtifactEvidence
 from nanolab.release.resources import cosign_credentials_resource, ghcr_credentials_resource
 
 
@@ -349,16 +349,17 @@ def test_arm_build_inputs_transfer_bake_and_buildkit_and_cleanup_on_failure(
             return SimpleNamespace(return_code=0)
 
     provider = Provider()
-    resource = release_resources.arm_build_inputs_resource(
+    resource = release_resources.build_inputs_resource(
         image_plan=SimpleNamespace(cells=()),
         max_parallelism=3,
         run_dir=tmp_path,
         remote_root="/home/user/nanofaas-release/v1",
         provider=provider,
         request=object(),
+        architecture="arm64",
     )
 
-    with pytest.raises(RuntimeError, match="buildkitd.toml"):
+    with pytest.raises(RuntimeError, match="buildkitd-arm64"):
         resource.acquire(TaskInputs.empty())
 
     assert provider.transfers == [
@@ -366,17 +367,17 @@ def test_arm_build_inputs_transfer_bake_and_buildkit_and_cleanup_on_failure(
             "docker-bake-arm64.json",
             "/home/user/nanofaas-release/v1/docker-bake-arm64.json",
         ),
-        ("buildkitd.toml", "/home/user/nanofaas-release/v1/buildkitd.toml"),
+        ("buildkitd-arm64.toml", "/home/user/nanofaas-release/v1/buildkitd-arm64.toml"),
     ]
     assert provider.commands[-1] == (
         "rm",
         "-f",
         "--",
         "/home/user/nanofaas-release/v1/docker-bake-arm64.json",
-        "/home/user/nanofaas-release/v1/buildkitd.toml",
+        "/home/user/nanofaas-release/v1/buildkitd-arm64.toml",
     )
     assert not (tmp_path / "docker-bake-arm64.json").exists()
-    assert not (tmp_path / "buildkitd.toml").exists()
+    assert not (tmp_path / "buildkitd-arm64.toml").exists()
 
 
 @pytest.mark.parametrize(
@@ -412,13 +413,14 @@ def test_release_source_resources_reject_unsafe_remote_paths(
 )
 def test_arm_inputs_reject_unsafe_remote_root(remote_root: str, tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="release remote"):
-        release_resources.arm_build_inputs_resource(
+        release_resources.build_inputs_resource(
             image_plan=SimpleNamespace(cells=()),
             max_parallelism=1,
             run_dir=tmp_path,
             remote_root=remote_root,
             provider=object(),
             request=object(),
+            architecture="arm64",
         )
 
 
@@ -478,13 +480,14 @@ def test_arm_inputs_normal_release_propagates_cleanup_failure(
             )
 
     provider = Provider()
-    resource = release_resources.arm_build_inputs_resource(
+    resource = release_resources.build_inputs_resource(
         image_plan=SimpleNamespace(cells=()),
         max_parallelism=1,
         run_dir=tmp_path,
         remote_root="/home/user/nanofaas-release/v1",
         provider=provider,
         request=object(),
+        architecture="arm64",
     )
     state = resource.acquire(TaskInputs.empty())
     provider.failing = True
@@ -493,4 +496,4 @@ def test_arm_inputs_normal_release_propagates_cleanup_failure(
         resource.release(TaskInputs.empty(), state)
 
     assert not (tmp_path / "docker-bake-arm64.json").exists()
-    assert not (tmp_path / "buildkitd.toml").exists()
+    assert not (tmp_path / "buildkitd-arm64.toml").exists()

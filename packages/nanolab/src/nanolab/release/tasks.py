@@ -17,11 +17,17 @@ from workflow_tasks.execution.bindings import CommandTaskExecutor
 from workflow_tasks.tasks.models import CommandTaskSpec
 
 from nanolab.release.evidence import is_sha256_digest, receipt_artifacts
-from nanolab.release.state import ReleaseIdentity, digest_path
-from nanolab.release.state import ArtifactEvidence
+from nanolab.release.model import ArtifactEvidence, ReleaseIdentity, digest_path
 
 
 PhaseWork = Callable[[TaskInputs], Iterable[Evidence]]
+
+# The two ways a phase proves it holds an image, and the reference scheme each
+# one must carry: the registry (skopeo) and the local daemon (docker inspect).
+MATRIX_DIGEST_SCHEMES = {
+    "local-registry-digest": "docker://",
+    "local-image-digest": "docker-daemon:",
+}
 
 
 def versioned_release_run_dir(run_dir: Path, version: str) -> Path:
@@ -85,16 +91,23 @@ class ReleasePhaseTask(ReusableTask):
         )
         produced = tuple(self.work(inputs))
         if self.expected_images:
-            registry_evidence = tuple(
-                entry for entry in produced if entry.kind == "local-registry-digest"
-            )
-            expected = {f"docker://{image}" for image in self.expected_images}
+            # Both digest kinds cover the same matrix: the build phase inspects
+            # the daemon (docker-daemon:), the push phase inspects the registry
+            # (docker://). Compare the image, not the scheme it was read through
+            # -- but a reference missing its own scheme stays uncounted, so
+            # malformed evidence still fails the matrix.
+            matrix = tuple(entry for entry in produced if entry.kind in MATRIX_DIGEST_SCHEMES)
+            references = {
+                entry.reference.removeprefix(MATRIX_DIGEST_SCHEMES[entry.kind])
+                for entry in matrix
+                if entry.reference.startswith(MATRIX_DIGEST_SCHEMES[entry.kind])
+            }
             if (
-                len(registry_evidence) != len(expected)
-                or {entry.reference for entry in registry_evidence} != expected
-                or any(not is_sha256_digest(entry.digest) for entry in registry_evidence)
+                len(matrix) != len(self.expected_images)
+                or references != set(self.expected_images)
+                or any(not is_sha256_digest(entry.digest) for entry in matrix)
             ):
-                raise RuntimeError("local-registry-push evidence does not cover the image matrix")
+                raise RuntimeError(f"{self.phase} evidence does not cover the image matrix")
 
         _write_receipt(self.receipt, self.phase, produced)
         receipt = Evidence("file-digest", str(self.receipt), digest_path(self.receipt))
@@ -256,9 +269,17 @@ def require_attestation_predicate(
         raise RuntimeError("attestation predicate does not match the release evidence")
 
 
-def run_source_steps(steps: Task[Any], inputs: TaskInputs) -> tuple[Evidence, ...]:
-    _run_steps(steps, inputs)
-    return ()
+def run_source_steps(
+    steps: Task[Any], inputs: TaskInputs, *, source_archive: Path
+) -> tuple[Evidence, ...]:
+    """Run the source tests and record which tree they ran against.
+
+    The archive digest is the whole evidence a resume needs: same tree, same
+    test outcome. Returning nothing here means the phase can never be reused
+    and every resume re-runs the full product suite.
+    """
+    run_steps(steps, inputs)
+    return (Evidence("file-digest", str(source_archive), digest_path(source_archive)),)
 
 
 def run_image_steps(
@@ -268,11 +289,20 @@ def run_image_steps(
     images: tuple[str, ...],
     *,
     registry: bool,
+    architecture: str | None = None,
 ) -> tuple[Evidence, ...]:
-    """Run build/push steps and capture the complete current image matrix."""
-    _run_steps(steps, inputs)
+    """Run build/push steps and capture the complete current image matrix.
+
+    `architecture`, when given, asserts every image really carries it: a
+    cross-built or mistagged image otherwise inspects cleanly and reaches the
+    manifest list, where the mismatch surfaces as a runtime failure on a
+    user's machine instead of here.
+    """
+    run_steps(steps, inputs)
     evidence: list[Evidence] = []
     for image in images:
+        if architecture is not None:
+            _require_architecture(executor, image, architecture)
         argv = (
             (
                 "skopeo",
@@ -305,7 +335,25 @@ def run_image_steps(
     return tuple(evidence)
 
 
-def _run_steps(steps: Task[Any], inputs: TaskInputs) -> None:
+def _require_architecture(
+    executor: CommandTaskExecutor, image: str, expected: str
+) -> None:
+    result = executor.run(
+        CommandTaskSpec(
+            task_id="",
+            summary=f"Verify {image} architecture",
+            argv=("docker", "image", "inspect", "--format={{.Architecture}}", image),
+            role="stack",
+        )
+    )
+    actual = result.stdout.strip() if isinstance(result.stdout, str) else ""
+    if result.status != "passed" or actual != expected:
+        raise RuntimeError(
+            f"image architecture mismatch for {image}: expected {expected}, got {actual or 'empty'}"
+        )
+
+
+def run_steps(steps: Task[Any], inputs: TaskInputs) -> None:
     outcome = steps.run(inputs)
     if not isinstance(outcome, TaskOutcome):
         raise RuntimeError(f"{steps.title} returned an invalid outcome")

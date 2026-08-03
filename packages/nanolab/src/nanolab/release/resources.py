@@ -33,7 +33,7 @@ from nanolab.images.bake import render_bake_json
 from nanolab.images.plan import ImagePlan
 from nanolab.release.environment import secure_release_endpoints, verify_release_vm_facts
 from nanolab.release.build import create_source_archive, stage_source_archive
-from nanolab.release.state import ArtifactEvidence
+from nanolab.release.model import ArtifactEvidence
 from nanolab.release.secrets import (
     RemoteCosignCredentials,
     RemoteDockerCredentials,
@@ -71,7 +71,7 @@ class ReleaseSourceResources:
 
 
 @dataclass(frozen=True, slots=True)
-class ArmBuildInputs:
+class BuildInputs:
     bake_file: Path
     buildkit_config: Path
     remote_bake_file: str
@@ -415,7 +415,7 @@ def build_release_source_resources(
     )
 
 
-def arm_build_inputs_resource(
+def build_inputs_resource(
     *,
     image_plan: ImagePlan,
     max_parallelism: int,
@@ -423,12 +423,18 @@ def arm_build_inputs_resource(
     remote_root: str,
     provider: object,
     request: object,
+    architecture: str,
     requires: tuple[Resource[Any], ...] = (),
-) -> Resource[ArmBuildInputs]:
-    """Stage the two generated inputs consumed by the ARM Buildx builder."""
+) -> Resource[BuildInputs]:
+    """Stage the two generated inputs consumed by a Buildx builder.
+
+    The filenames carry the architecture because both builders stage into the
+    same local run directory: a shared name would let one architecture's
+    cleanup delete the other's file.
+    """
     remote_root = str(_release_remote_root(remote_root))
-    bake = Path(run_dir) / "docker-bake-arm64.json"
-    buildkit = Path(run_dir) / "buildkitd.toml"
+    bake = Path(run_dir) / f"docker-bake-{architecture}.json"
+    buildkit = Path(run_dir) / f"buildkitd-{architecture}.toml"
     remote_bake = f"{remote_root}/{bake.name}"
     remote_buildkit = f"{remote_root}/{buildkit.name}"
 
@@ -439,7 +445,7 @@ def arm_build_inputs_resource(
                 request,
                 ("rm", "-f", "--", remote_bake, remote_buildkit),
             )
-            _require_remote_success(result, "ARM release input cleanup")
+            _require_remote_success(result, f"{architecture} release input cleanup")
         except BaseException as cleanup_error:
             error = cleanup_error
         finally:
@@ -448,7 +454,7 @@ def arm_build_inputs_resource(
         if error is not None:
             raise error
 
-    def acquire(_inputs: TaskInputs) -> ArmBuildInputs:
+    def acquire(_inputs: TaskInputs) -> BuildInputs:
         Path(run_dir).mkdir(parents=True, exist_ok=True)
         bake.write_text(render_bake_json(image_plan), encoding="utf-8")
         buildkit.write_text(
@@ -460,7 +466,7 @@ def arm_build_inputs_resource(
                 request, ("mkdir", "-p", remote_root)
             )
             if int(getattr(result, "return_code", 0)) != 0:
-                raise RuntimeError("create ARM release input directory failed")
+                raise RuntimeError(f"create {architecture} release input directory failed")
             for source, destination in ((bake, remote_bake), (buildkit, remote_buildkit)):
                 result = provider.transfer_to(  # type: ignore[attr-defined]
                     request, source=source, destination=destination
@@ -468,12 +474,12 @@ def arm_build_inputs_resource(
                 if int(getattr(result, "return_code", 0)) != 0:
                     raise RuntimeError(f"transfer {source.name} failed")
         except BaseException as error:
-            best_effort(error, cleanup, what="ARM release inputs failed acquire")
+            best_effort(error, cleanup, what=f"{architecture} release inputs failed acquire")
             raise
-        return ArmBuildInputs(bake, buildkit, remote_bake, remote_buildkit)
+        return BuildInputs(bake, buildkit, remote_bake, remote_buildkit)
 
     return Resource(
-        title="Acquire ARM64 Bake and BuildKit inputs",
+        title=f"Acquire {architecture.upper()} Bake and BuildKit inputs",
         acquire=acquire,
         release=lambda _inputs, _value: cleanup(),
         requires=requires,
