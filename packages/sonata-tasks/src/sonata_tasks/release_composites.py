@@ -20,12 +20,14 @@ Imports from companion tasks
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+import hashlib
+import json
 from pathlib import Path
 import re
 from typing import Any
 
-from sonata_engine import Steps
+from sonata_engine import Evidence, ReusableTask, Steps, Task, TaskInputs, TaskOutcome
 from workflow_tasks.execution.bindings import CommandTaskExecutor
 from workflow_tasks.execution.roles import ExecutionRole
 from workflow_tasks.tasks.models import CommandTaskSpec
@@ -528,6 +530,58 @@ def publish_aliases_composite(
 # ---------------------------------------------------------------------------
 
 
+class _AttestImageTask(ReusableTask):
+    """One digest's whole attestation, skippable as a unit on resume.
+
+    A nested ``Steps`` of plain ``Task``s does not skip: ``decide_resume``
+    returns ``"skip"`` only for a ``ReusableTask`` whose evidence still
+    verifies, and ``CommandTask``/``CosignTask``/``SyftTask`` are plain tasks.
+    This class is that ``ReusableTask``, so a resumed release re-signs the
+    digest it died on and leaves the ones already signed alone. The six
+    operations stay a nested ``Steps`` beneath it, so the journal still names
+    each one.
+
+    The outcome carries the ``cosign-attestation`` evidence for this digest and
+    no value: a skipped step may only contribute ``None``.
+    """
+
+    # A resumed group must be able to retry the operation it died on, and a
+    # `failed` record on a non-idempotent task raises instead of retrying.
+    idempotent = True
+
+    def __init__(
+        self,
+        *,
+        image: str,
+        steps: tuple[Task[Any], ...],
+        identity: Mapping[str, Any],
+        signed: list[Evidence],
+    ) -> None:
+        self._image = image
+        self._steps = steps
+        self._signed = signed
+        encoded = json.dumps(identity, sort_keys=True, separators=(",", ":"))
+        self._reuse_key = f"attest:{image}:sha256:{hashlib.sha256(encoded.encode()).hexdigest()}"
+        # The reuse key rides in the title because a step's journal identity is
+        # its slug, and this composite is built inside a release phase at run
+        # time -- so it never reaches `CompiledWorkflow.fingerprint`, the only
+        # place the engine ever consults a `reuse_key`. Without it, a changed
+        # predicate path or operation set would skip on a record that no longer
+        # describes this work.
+        self.title = f"Attest {image} {self._reuse_key[-8:]}"
+        self._group = Steps(title=self.title, steps=steps)
+
+    @property
+    def reuse_key(self) -> str:
+        return self._reuse_key
+
+    def run(self, inputs: TaskInputs) -> TaskOutcome[None]:
+        self._group.run(inputs)
+        evidence = Evidence("cosign-attestation", self._image, self._image.split("@", 1)[1])
+        self._signed.append(evidence)
+        return TaskOutcome(evidence=(evidence,))
+
+
 def attest_composite(
     images: Sequence[str],
     *,
@@ -539,14 +593,21 @@ def attest_composite(
     docker_config: str,
     executor: CommandTaskExecutor,
     role: ExecutionRole,
+    signed: list[Evidence] | None = None,
     title: str = "Attest images",
 ) -> Steps:
-    """SBOM, sign, attest, attach and verify every digest, one Steps per image.
+    """SBOM, sign, attest, attach and verify every digest, one group per image.
 
     The per-image grouping is the point: this phase issues six container runs
     per digest across the whole published matrix, and a network failure two
     thirds of the way through should resume from the digest it died on, not
-    from the first one.
+    from the first one. Each group is a `ReusableTask`, which is what makes the
+    engine skip it -- see `_AttestImageTask`.
+
+    `signed` collects one `cosign-attestation` Evidence per group that actually
+    ran, in run order, so a caller can record what this run signed rather than
+    what it set out to sign. A group the journal skipped appends nothing: it
+    was signed by an earlier run, which recorded it then.
 
     `verify` and `verify-attestation` are both included, matching
     `attest_release_images`: `verify` checks the simple-signing signature
@@ -573,70 +634,93 @@ def attest_composite(
             ),
         )
 
+    collected = [] if signed is None else signed
     cell_steps: list[Any] = []
     for image in images:
+        if "@" not in image:
+            raise ValueError(f"attestation needs a digest-pinned reference, got {image!r}")
         sbom_path = f"{sbom_dir_remote}/{_artifact_slug(image)}.spdx.json"
+        operations: tuple[Task[Any], ...] = (
+            SyftTask(
+                image=image,
+                output_path=sbom_path,
+                docker_config=docker_config,
+                executor=executor,
+                role=role,
+            ),
+            CosignTask(
+                operation="sign",
+                image=image,
+                key_file=cosign_key,
+                password_file=password_file,
+                docker_config=docker_config,
+                executor=executor,
+                role=role,
+            ),
+            CosignTask(
+                operation="attest",
+                image=image,
+                key_file=cosign_key,
+                password_file=password_file,
+                docker_config=docker_config,
+                predicate_file=predicate_remote,
+                executor=executor,
+                role=role,
+            ),
+            CosignTask(
+                operation="attach sbom",
+                image=image,
+                key_file=cosign_key,
+                password_file=password_file,
+                docker_config=docker_config,
+                sbom_file=sbom_path,
+                executor=executor,
+                role=role,
+            ),
+            CosignTask(
+                operation="verify",
+                image=image,
+                key_file=cosign_key,
+                password_file=password_file,
+                docker_config=docker_config,
+                public_key_file=public_key_remote,
+                executor=executor,
+                role=role,
+            ),
+            CosignTask(
+                operation="verify-attestation",
+                image=image,
+                key_file=cosign_key,
+                password_file=password_file,
+                docker_config=docker_config,
+                public_key_file=public_key_remote,
+                executor=executor,
+                role=role,
+            ),
+        )
+        for step in operations:
+            # The six are all safe to re-enter: syft regenerates, cosign
+            # sign/attest/attach upsert, verify is read-only. Saying so is what
+            # lets a resumed group retry the operation it died on instead of
+            # refusing the resume outright.
+            step.idempotent = True
         cell_steps.append(
-            Steps(
-                title=f"Attest {image}",
-                steps=(
-                    SyftTask(
-                        image=image,
-                        output_path=sbom_path,
-                        docker_config=docker_config,
-                        executor=executor,
-                        role=role,
-                    ),
-                    CosignTask(
-                        operation="sign",
-                        image=image,
-                        key_file=cosign_key,
-                        password_file=password_file,
-                        docker_config=docker_config,
-                        executor=executor,
-                        role=role,
-                    ),
-                    CosignTask(
-                        operation="attest",
-                        image=image,
-                        key_file=cosign_key,
-                        password_file=password_file,
-                        docker_config=docker_config,
-                        predicate_file=predicate_remote,
-                        executor=executor,
-                        role=role,
-                    ),
-                    CosignTask(
-                        operation="attach sbom",
-                        image=image,
-                        key_file=cosign_key,
-                        password_file=password_file,
-                        docker_config=docker_config,
-                        sbom_file=sbom_path,
-                        executor=executor,
-                        role=role,
-                    ),
-                    CosignTask(
-                        operation="verify",
-                        image=image,
-                        key_file=cosign_key,
-                        password_file=password_file,
-                        docker_config=docker_config,
-                        public_key_file=public_key_remote,
-                        executor=executor,
-                        role=role,
-                    ),
-                    CosignTask(
-                        operation="verify-attestation",
-                        image=image,
-                        key_file=cosign_key,
-                        password_file=password_file,
-                        docker_config=docker_config,
-                        public_key_file=public_key_remote,
-                        executor=executor,
-                        role=role,
-                    ),
-                ),
+            _AttestImageTask(
+                image=image,
+                steps=operations,
+                identity={
+                    "schema": 1,
+                    "image": image,
+                    # Titles carry the operation and the reference, so a
+                    # dropped, renamed or reordered operation changes the key.
+                    "operations": [step.title for step in operations],
+                    "predicate": predicate_remote,
+                    "sbom": sbom_path,
+                    "publicKey": public_key_remote,
+                    "key": cosign_key,
+                    "dockerConfig": docker_config,
+                },
+                signed=collected,
             )
         )
     return Steps(title=title, steps=tuple(cell_steps))

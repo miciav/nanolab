@@ -816,9 +816,11 @@ def build_release_workflow(
         )
 
         pinned = _pinned(images)
+        signed: list[Evidence] = []
         run_steps(
             attest_composite(
                 pinned,
+                signed=signed,
                 predicate_remote=remote_predicate,
                 sbom_dir_remote=remote_sboms,
                 public_key_remote=remote_public_key,
@@ -831,14 +833,17 @@ def build_release_workflow(
             inputs,
         )
 
-        # One entry per signed digest: without it a release where cosign failed
-        # non-fatally produces a receipt indistinguishable from a signed one.
+        # One entry per digest this run signed, emitted by the group that did
+        # the signing -- not synthesized from `pinned`, which is a list of work
+        # to do rather than work that happened.
+        # ponytail: a group the journal skipped appends nothing, so a resumed
+        # phase's receipt claims only what it re-signed. That under-claims and
+        # never over-claims; carrying a skipped group's evidence forward would
+        # need the engine to hand a composite the evidence behind a skip, and
+        # `Steps.run` only ever sees `TaskExecution.outcome`, which is None.
         return (
             Evidence("file-digest", str(predicate_file), digest_path(predicate_file)),
-            *(
-                Evidence("cosign-attestation", reference, reference.split("@", 1)[1])
-                for reference in pinned
-            ),
+            *signed,
         )
 
     attest = attest_task(

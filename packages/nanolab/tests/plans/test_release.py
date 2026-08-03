@@ -3,15 +3,16 @@
 import hashlib
 import json
 import os
+from collections.abc import Callable, Mapping
 from dataclasses import asdict, replace
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 import yaml
-from sonata_engine import Resource, Selection
+from sonata_engine import JournalConfig, Resource, Selection
 from workflow_tasks.execution.bindings import RoleBindings
-from workflow_tasks.tasks.models import TaskResult
+from workflow_tasks.tasks.models import CommandTaskSpec, TaskResult
 from workflow_tasks.vm.models import VmInfo
 
 import nanolab.plans.release as release_plan
@@ -21,6 +22,7 @@ from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.images.plan import DEFAULT_REGISTRY, ImagePlan
 from nanolab.plans.release import ReleaseRequest, build_release_workflow
+from nanolab.release.evidence import signature_evidence_verifier
 from nanolab.release.metrics import PerformanceAggregate, PerformanceProfile
 from nanolab.release.publish import PublishPlan, build_publish_plan
 from nanolab.release.run import CredentialFiles, GitState, ReleaseSettings
@@ -233,10 +235,16 @@ def test_build_release_workflow_compiles_to_a_workflow():
 class _ArmWorkflowExecutor:
     def __init__(self) -> None:
         self.commands = []
+        # Set by a test to fail a chosen command; None means everything passes.
+        self.fail_when: Callable[[CommandTaskSpec], bool] | None = None
 
     def run(self, task, *, dry_run=False):
         del dry_run
         self.commands.append(task)
+        if self.fail_when is not None and self.fail_when(task):
+            return TaskResult(
+                task_id="", status="failed", return_code=1, stderr="injected failure"
+            )
         if task.argv[:3] == ("docker", "buildx", "inspect"):
             if "--bootstrap" in task.argv:
                 return TaskResult(
@@ -486,7 +494,7 @@ def _write_receipt(path: Path, phase: str, kind: str, entries: dict[str, str]) -
     )
 
 
-def _stage_attest_inputs(phases: dict[str, ReleasePhaseTask]) -> dict[str, str]:
+def _stage_attest_inputs(phases: Mapping[str, ReleasePhaseTask]) -> dict[str, str]:
     """Write the receipts the attest phase reads; return what they claim published.
 
     Every alias carries the digest of the manifest it points at, exactly as
@@ -587,6 +595,109 @@ def test_attest_phase_records_one_signature_per_pinned_digest(
     assert sorted(signed) == sorted(item["reference"] for item in signatures)
     assert any(destination.endswith("/predicate.json") for destination in provider.transfers)
     assert any(task.argv[:3] == ("grep", "-q", "PUBLIC KEY") for task in executor.commands)
+
+
+def _touched(commands, references: set[str]) -> set[str]:
+    """Which references the executor was asked to do any work on."""
+    return {reference for reference in references if any(reference in c.argv for c in commands)}
+
+
+def _attested(commands, references: set[str]) -> set[str]:
+    """Which references reached `verify-attestation`, the last step of a group."""
+    return {
+        c.argv[-1]
+        for c in commands
+        if c.argv[-1] in references and "verify-attestation" in c.argv
+    }
+
+
+def _spoil_signature_evidence(journal: Path, reference: str) -> None:
+    """Point one group's recorded signature at a digest its reference disowns.
+
+    `signature_evidence_verifier` accepts a record only when the reference is
+    pinned to the digest it claims, so this is the smallest edit that makes a
+    real journal record stop verifying.
+    """
+    records = [json.loads(line) for line in journal.read_text(encoding="utf-8").splitlines()]
+    spoiled = 0
+    for record in records:
+        if "/attest-" not in str(record.get("task_id", "")):
+            continue
+        for item in record.get("evidence", ()):
+            if item.get("reference") == reference:
+                item["digest"] = "sha256:" + "c" * 64
+                spoiled += 1
+    assert spoiled, f"no journalled group evidence for {reference}"
+    journal.write_text(
+        "".join(json.dumps(record, separators=(",", ":")) + "\n" for record in records),
+        encoding="utf-8",
+    )
+
+
+def test_resumed_attest_skips_the_digests_it_already_signed(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    canonical_release_configs: tuple[Path, Path],
+) -> None:
+    """A resume must not re-sign a digest whose group already finished.
+
+    This is the property Tasks 8-9 assumed and never observed: a `Steps` of
+    plain tasks re-runs every step, because `decide_resume` skips only a
+    `ReusableTask` whose evidence verifies. So the assertion is what cosign was
+    asked to do on the second run, not what a status string says.
+    """
+    workflow, _provider, executor, phases = _arm_failure_workflow(
+        monkeypatch, tmp_path, "none", *canonical_release_configs
+    )
+    published = _stage_attest_inputs(phases)
+    attest = phases["Attest published images"]
+    journal = JournalConfig(tmp_path / "release.jsonl")
+    verifiers = {"cosign-attestation": signature_evidence_verifier}
+    only_attest = Selection(only="attest-published-images")
+    pinned = {f"{reference.rsplit(':', 1)[0]}@{digest}" for reference, digest in published.items()}
+    assert len(pinned) > 1, "one digest cannot show a resume skipping anything"
+
+    # Run 1 dies on the second signature, so at least one group finished first.
+    signs: list[str] = []
+
+    def fail_second_sign(spec: CommandTaskSpec) -> bool:
+        if "sign" in spec.argv and spec.argv[-1] in pinned:
+            signs.append(spec.argv[-1])
+            return len(signs) > 1
+        return False
+
+    executor.fail_when = fail_second_sign
+    with pytest.raises(RuntimeError, match="cosign sign"):
+        workflow.run(select=only_attest, journal=journal)
+
+    finished = _attested(executor.commands, pinned)
+    assert finished, "run 1 finished no group, so there is nothing to skip"
+    assert signs[-1] not in finished
+
+    # Run 2 resumes and must touch only the digests run 1 left unsigned.
+    executor.fail_when = None
+    mark = len(executor.commands)
+    workflow.run(select=only_attest, journal=journal, resume=True, verifiers=verifiers)
+
+    resumed = executor.commands[mark:]
+    assert _touched(resumed, pinned) == pinned - finished
+    assert _attested(resumed, pinned) == pinned - finished
+    # The receipt claims what this run signed, not what it set out to sign.
+    evidence = json.loads(attest.receipt.read_text(encoding="utf-8"))["evidence"]
+    signatures = {item["reference"] for item in evidence if item["kind"] == "cosign-attestation"}
+    assert signatures == pinned - finished
+
+    # Run 3: one group's recorded evidence stops verifying, and that group
+    # alone re-runs. Removing the receipt is what makes the phase itself run
+    # again -- otherwise the whole phase skips and proves nothing.
+    stale = sorted(finished)[0]
+    attest.receipt.unlink()
+    _spoil_signature_evidence(journal.path, stale)
+    mark = len(executor.commands)
+    workflow.run(select=only_attest, journal=journal, resume=True, verifiers=verifiers)
+
+    rerun = executor.commands[mark:]
+    assert _touched(rerun, pinned) == {stale}
 
 
 def test_build_release_workflow_compiles_without_cloud_discovery(

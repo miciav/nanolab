@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from sonata_engine import Steps, Workflow
+import pytest
+from sonata_engine import Evidence, Steps, Workflow
 from workflow_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 from sonata_tasks.release_composites import (
+    _AttestImageTask,
     arm64_build_composite,
     attest_composite,
     command_specs_composite,
@@ -32,6 +35,38 @@ class RecordingExecutor:
     def run(self, task: CommandTaskSpec, *, dry_run: bool = False) -> TaskResult:
         self.seen.append(task)
         return TaskResult(task_id="", status="passed", return_code=0)
+
+
+def _attest(
+    *,
+    images: Sequence[str] = ("repo/a@sha256:aa",),
+    predicate_remote: str = "/work/predicate.json",
+    sbom_dir_remote: str = "/work/sboms",
+    public_key_remote: str = "/work/cosign.pub",
+    cosign_key: str = "/secrets/cosign-key",
+    executor: RecordingExecutor | None = None,
+    signed: list[Evidence] | None = None,
+) -> Steps:
+    """An attest composite whose inputs a test can vary one at a time."""
+    return attest_composite(
+        images,
+        predicate_remote=predicate_remote,
+        sbom_dir_remote=sbom_dir_remote,
+        public_key_remote=public_key_remote,
+        cosign_key=cosign_key,
+        password_file="/secrets/cosign-password",
+        docker_config="/home/azureuser/.docker",
+        executor=executor or RecordingExecutor(),
+        role="stack",
+        signed=signed,
+    )
+
+
+def _attest_group(composite: Steps) -> _AttestImageTask:
+    """The first per-image group of an attest composite."""
+    group = composite._steps[0]
+    assert isinstance(group, _AttestImageTask)
+    return group
 
 
 def _run_composite(composite: Steps, executor: RecordingExecutor) -> None:
@@ -478,6 +513,43 @@ class TestAttestComposite:
         )
 
         assert len(composite._steps) == 1
+
+    def test_attest_composite_rejects_an_unpinned_reference(self) -> None:
+        with pytest.raises(ValueError, match="digest-pinned"):
+            _attest(images=("repo/a:v1",))
+
+    def test_attest_group_reuse_key_covers_what_it_signs(self) -> None:
+        """A changed input changes the key -- and the step's journal identity.
+
+        The engine consults a `reuse_key` only through
+        `CompiledWorkflow.fingerprint`, and this composite is built inside a
+        release phase at run time, so it never gets compiled. Carrying the key
+        in the title is what keeps a changed input from skipping on a record
+        that describes different work.
+        """
+        base = _attest_group(_attest())
+        assert base.reusable, "a group that opts out of reuse can never be skipped"
+
+        for other in (
+            _attest_group(_attest(predicate_remote="/work/other.json")),
+            _attest_group(_attest(sbom_dir_remote="/work/other-sboms")),
+            _attest_group(_attest(public_key_remote="/work/other.pub")),
+            _attest_group(_attest(cosign_key="/secrets/other-key")),
+        ):
+            assert other.reuse_key != base.reuse_key, other.title
+            assert other.title != base.title, other.reuse_key
+
+    def test_attest_group_emits_the_signature_it_produced(self) -> None:
+        """`signed` collects one entry per group that ran, not per image asked."""
+        executor = RecordingExecutor()
+        images = ("repo/a@sha256:aa", "repo/b@sha256:bb")
+        signed: list[Evidence] = []
+
+        _run_composite(_attest(images=images, executor=executor, signed=signed), executor)
+
+        assert [(e.kind, e.reference, e.digest) for e in signed] == [
+            ("cosign-attestation", image, image.split("@", 1)[1]) for image in images
+        ]
 
 
 class TestCommandSpecsComposite:
