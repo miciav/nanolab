@@ -342,5 +342,16 @@ def _exec(
         describe=f"publication {argv[0]}",
     )
     if int(getattr(result, "return_code", 0)) != 0:
-        raise RuntimeError(f"release publication command failed: {argv[0]} {argv[1]}")
+        # Carry the registry's own words. Without them a failed publish reads
+        # only "skopeo copy", and the difference between a throttled push, an
+        # expired token and a missing manifest costs a manual reproduction on
+        # a VM that the failure itself usually just tore down.
+        detail = (
+            str(getattr(result, "stderr", "")).strip()
+            or str(getattr(result, "stdout", "")).strip()
+            or "no output"
+        )
+        raise RuntimeError(
+            f"release publication command failed: {argv[0]} {argv[1]}: {detail}"
+        )
     return result

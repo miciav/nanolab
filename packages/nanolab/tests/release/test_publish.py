@@ -51,6 +51,7 @@ class _PublishProvider:
     copy_corruptions: set[str] = field(default_factory=set)
     retag_corruptions: set[str] = field(default_factory=set)
     fail_on_prefix: tuple[str, ...] | None = None
+    failure_stderr: str = ""
     inspect_platform_overrides: dict[str, tuple[str, ...]] = field(default_factory=dict)
     # Source digests naming a multi-instance index, mapped to the digest of the
     # instance matching the copying host. Buildx attaches a provenance manifest
@@ -69,7 +70,7 @@ class _PublishProvider:
         del request, env, cwd, dry_run
         self.commands.append(argv)
         if self.fail_on_prefix is not None and argv[: len(self.fail_on_prefix)] == self.fail_on_prefix:
-            return _Result(return_code=1)
+            return _Result(return_code=1, stderr=self.failure_stderr)
         if argv[:2] == ("skopeo", "copy"):
             source = argv[-2].removeprefix("docker://")
             destination = argv[-1].removeprefix("docker://")
@@ -309,6 +310,30 @@ def test_copy_command_failure_stops_the_phase() -> None:
         command[:4] == ("docker", "buildx", "imagetools", "create")
         for command in provider.commands
     )
+
+
+def test_copy_failure_reports_what_the_registry_said() -> None:
+    """A failed publish must carry the registry's own words.
+
+    Without them the error reads only "skopeo copy", and a throttled push, an
+    expired token and a missing manifest are indistinguishable — on a release
+    whose VMs the failure has usually already torn down.
+    """
+    plan = _plan()
+    provider = _PublishProvider(
+        fail_on_prefix=("skopeo", "copy"),
+        failure_stderr="toomanyrequests: retry-after 60",
+    )
+    digests = publish.require_publication_evidence(plan, _evidence(plan))
+
+    with pytest.raises(RuntimeError, match="toomanyrequests: retry-after 60"):
+        publish.publish_architecture_images(
+            provider,
+            object(),
+            plan,
+            digests,
+            authfile="/tmp/creds/docker/config.json",
+        )
 
 
 # --- manifests -------------------------------------------------------------
