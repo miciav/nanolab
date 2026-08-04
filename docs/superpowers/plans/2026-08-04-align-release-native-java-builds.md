@@ -641,7 +641,9 @@ git commit -m "docs: describe the unified native Java image build"
 - Consumes: everything from Tasks 1–4.
 - Produces: a completed release, or a named failure at a node past `008`.
 
-The failed run left a journal at `packages/nanolab/runs/canary/releases/0.18.2/sonata.jsonl`. Resuming reuses the verified source tests and provisioning (~10 minutes) and restarts at the AMD64 build.
+**Corrected after the final whole-branch review — this task originally said to resume, and that cannot work.** `ReleasePhaseTask.reuse_key` hashes `phase_inputs`, whose `"commands"` entry holds the argv of every command in the phase. Deleting the six `release.images.native.*` specs necessarily changes the AMD64 build phase's fingerprint, so Sonata raises `WorkflowTopologyMismatchError` when it loads the journal. Measured fingerprints: base `10accf3` = `sha256:b5982d99…`, HEAD = `sha256:cc211880…`, journal = `sha256:12e08f89…` — the journal matches neither, so resume was already broken before this branch, and this branch guarantees it.
+
+The run therefore starts fresh with `--provision`, which supersedes the old run directory. That re-runs provisioning and source tests, about 10-15 minutes that the journal would have saved. It fails before any Azure call if attempted the old way, so the cost of the discovery is zero.
 
 - [ ] **Step 1: Refresh the operator CIDR**
 
@@ -660,7 +662,7 @@ git -C $HOME/Downloads/mcFaas status --short
 
 Expected: empty output. Anything else fails the release preflight.
 
-- [ ] **Step 3: Resume the release**
+- [ ] **Step 3: Run the release fresh**
 
 ```bash
 export NANOFAAS_ROOT=$HOME/Downloads/mcFaas
@@ -668,13 +670,15 @@ export NANOFAAS_ROOT=$HOME/Downloads/mcFaas
   packages/nanolab/scenarios-v2/release.yaml \
   --environment packages/nanolab/environments/azure-release.yaml \
   --release-config packages/nanolab/scenarios-v2/release-config.yaml \
-  --resume \
+  --provision \
   --run-dir packages/nanolab/runs/canary
 ```
 
 Do **not** pipe this through `tee` — the pipe masks the exit status and a failed run reports success. Redirect instead: `> release.log 2>&1` and read the file, or watch it directly.
 
-Expected: nodes 001–007 skip on verified evidence, `008.build-amd64-images` runs the six native builds through the shared Dockerfile, and the run proceeds to publish and attest.
+Expected: all 45 nodes run. `008.build-amd64-images` now builds the six native images through the shared Dockerfile inside the bake, with no separate `release.images.native.*` steps.
+
+**If node 008 or 027 dies opaquely 30-60 minutes in, suspect memory before anything else.** Six GraalVM `nativeCompile` runs now execute concurrently inside one bake (bounded by `max_parallelism: 4`) where they used to be six sequential Gradle steps. nanoFaaS sets `-Os` globally but no `-J-Xmx`, and BuildKit `RUN` steps get no memory cgroup, so each `native-image` sizes its heap against the VM's full 32 GiB. The fix needs no code change: lower `max_parallelism` in `scenarios-v2/release.yaml` and re-run. Nothing bad can be published this way — a bake failure raises inside `work()` before any receipt is written.
 
 - [ ] **Step 4: Verify no infrastructure survived**
 
