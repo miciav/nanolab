@@ -2,9 +2,13 @@ workflow: release
 functions:
   - word-stats-java
 release:
-  version: v0.18.1
+  version: v0.18.2
   profile: azure-d8s-v5+d2s-v5-amd64-native-loadtest-v1
-  max_parallelism: 4
+  # Six GraalVM nativeCompile runs now share one bake instead of running as
+  # sequential Gradle steps. BuildKit gives RUN steps no memory cgroup and
+  # nanoFaaS sets no -J-Xmx, so each native-image sizes its heap against the
+  # VM's full 32 GiB. Two at a time fits; four is where OOM becomes plausible.
+  max_parallelism: 2
   benchmark_runs: 3
   throughput_max_loss_percent: 10.0
   p95_max_increase_percent: 15.0

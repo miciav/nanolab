@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from nanolab.functions.catalog import list_functions
-from nanolab.images.plan import build_image_plan
+from nanolab.images.plan import NATIVE_JAVA_DOCKERFILE, build_image_plan
 
 
 NANOFAAS_ROOT = Path(os.environ["NANOFAAS_ROOT"]).resolve()
@@ -133,13 +133,29 @@ def test_each_discovered_function_dockerfile_maps_to_one_target() -> None:
     assert len(mapped) == len(function_dockerfiles)
 
 
-def test_plan_partitions_cells_into_bake_and_gradle_without_loss() -> None:
+def test_plan_cells_expand_symmetrically_per_architecture() -> None:
+    """Every cell bakes from a Dockerfile now; assert the expansion rule, not a count.
+
+    Each target contributes exactly its declared flavors as cells, and the
+    resulting (target, flavor) shape is identical on both architectures.
+    """
     plan = _plan()
 
-    assert len(plan.bake_cells) + len(plan.gradle_cells) == len(plan.cells)
-    assert set(plan.bake_cells).isdisjoint(plan.gradle_cells)
-    assert {cell.build_kind for cell in plan.bake_cells} == {"bake"}
-    assert {cell.build_kind for cell in plan.gradle_cells} == {"gradle"}
+    shapes_by_architecture = {
+        architecture: frozenset(
+            (cell.target.name, cell.flavor)
+            for cell in plan.cells
+            if cell.architecture == architecture
+        )
+        for architecture in ("amd64", "arm64")
+    }
+    assert shapes_by_architecture["amd64"]
+    assert shapes_by_architecture["amd64"] == shapes_by_architecture["arm64"]
+    for target in plan.targets:
+        cell_flavors = frozenset(
+            cell.flavor for cell in plan.cells if cell.target.name == target.name
+        )
+        assert cell_flavors == frozenset(target.flavors)
 
 
 def test_target_selector_filters_before_cell_expansion() -> None:
@@ -161,58 +177,12 @@ def test_target_selector_rejects_unknown_names() -> None:
         _plan(selectors=("missing",))
 
 
-def test_spring_native_cells_expose_gradle_buildpack_specs() -> None:
-    plan = _plan(selectors=("control-plane", "java-roman-numeral"))
-    control_plane = next(
-        cell
-        for cell in plan.gradle_cells
-        if cell.target.name == "control-plane" and cell.architecture == "amd64"
-    )
-    roman_numeral = next(
-        cell
-        for cell in plan.gradle_cells
-        if cell.target.name == "java-roman-numeral" and cell.architecture == "arm64"
-    )
-
-    assert control_plane.gradle_command == (
-        "./gradlew",
-        ":control-plane:bootBuildImage",
-        f"-PcontrolPlaneImage={control_plane.image}",
-        "-PimagePlatform=linux/amd64",
-        "-PcontrolPlaneModules=all",
-    )
-    assert roman_numeral.gradle_command == (
-        "./gradlew",
-        ":functions:java:roman-numeral:bootBuildImage",
-        f"-PfunctionImage={roman_numeral.image}",
-        "-PimagePlatform=linux/arm64",
-        "-PimageBuilder=dashaun/builder:tiny",
-        "-PimageRunImage=paketobuildpacks/run-jammy-tiny:latest",
-    )
-
-
-def test_every_spring_native_arm64_cell_overrides_builder_and_run_image() -> None:
-    cells = [
-        cell
-        for cell in _plan().gradle_cells
-        if cell.architecture == "arm64"
-    ]
-
-    assert {cell.target.name for cell in cells} == _spring_targets()
-    for cell in cells:
-        assert "-PimageBuilder=dashaun/builder:tiny" in cell.gradle_command
-        assert (
-            "-PimageRunImage=paketobuildpacks/run-jammy-tiny:latest"
-            in cell.gradle_command
-        )
-
-
 def test_spring_jvm_cells_require_boot_jar_before_bake() -> None:
     plan = _plan(selectors=("control-plane", "java-warm-echo", "java-roman-numeral"))
     commands = {
         cell.target.name: cell.prerequisite_command
-        for cell in plan.bake_cells
-        if cell.architecture == "amd64"
+        for cell in plan.cells
+        if cell.architecture == "amd64" and cell.flavor == "jvm"
     }
 
     assert commands == {
@@ -252,6 +222,10 @@ def test_plan_discovers_functions_under_the_given_root(tmp_path: Path) -> None:
     (tmp_path / "functions/python/solo/function.yaml").write_text(
         "name: solo\nruntime: python\nfamily: solo\n", encoding="utf-8"
     )
+    # control-plane and java-warm-echo carry a native_build, so the shared
+    # native Dockerfile must exist too, or _validate_targets rejects the tree.
+    (tmp_path / NATIVE_JAVA_DOCKERFILE).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / NATIVE_JAVA_DOCKERFILE).write_text("FROM scratch\n", encoding="utf-8")
 
     plan = build_image_plan(tmp_path, "v0.0.1", registry=REGISTRY)
 
@@ -261,3 +235,64 @@ def test_plan_discovers_functions_under_the_given_root(tmp_path: Path) -> None:
     assert plan.target_names == frozenset(
         {"control-plane", "java-warm-echo", "watchdog", "python-solo"}
     )
+
+
+def test_java_native_cells_build_from_the_shared_native_dockerfile() -> None:
+    plan = _plan(architectures=("amd64",))
+    native = [
+        cell
+        for cell in plan.cells
+        if cell.flavor == "native" and cell.target.native_build is not None
+    ]
+    assert native, "expected Java native cells in the matrix"
+    for cell in native:
+        assert cell.dockerfile == NATIVE_JAVA_DOCKERFILE
+        assert cell.context == Path(".")
+        assert set(cell.build_args) == {"NATIVE_TASK", "NATIVE_BINARY", "GRADLE_ARGS"}
+
+
+def test_control_plane_native_cell_carries_the_script_build_args() -> None:
+    plan = _plan(architectures=("amd64",))
+    cell = next(
+        cell
+        for cell in plan.cells
+        if cell.target.name == "control-plane" and cell.flavor == "native"
+    )
+    assert cell.build_args == {
+        "NATIVE_TASK": ":control-plane:nativeCompile",
+        "NATIVE_BINARY": "platform/control-plane/build/native/nativeCompile/control-plane",
+        "GRADLE_ARGS": "-PcontrolPlaneModules=all",
+    }
+
+
+def test_java_function_native_cells_derive_task_and_binary_from_the_family() -> None:
+    plan = _plan(architectures=("amd64",))
+    checked = 0
+    for cell in plan.cells:
+        native = cell.target.native_build
+        if cell.flavor != "native" or native is None:
+            continue
+        if not cell.target.name.startswith("java-") or cell.target.name == "java-warm-echo":
+            continue
+        family = cell.target.name.removeprefix("java-")
+        assert native.task == f":functions:java:{family}:nativeCompile"
+        assert native.binary == Path(
+            f"functions/java/{family}/build/native/nativeCompile/{family}"
+        )
+        checked += 1
+    assert checked, "expected Java function native cells in the matrix"
+
+
+def test_no_cell_invokes_the_retired_buildpack_task() -> None:
+    for cell in _plan(architectures=("amd64",)).cells:
+        native = cell.target.native_build
+        assert native is None or "bootBuildImage" not in native.task
+
+
+def test_jvm_and_default_cells_keep_their_own_dockerfile_and_context() -> None:
+    for cell in _plan(architectures=("amd64",)).cells:
+        if cell.flavor == "native" and cell.target.native_build is not None:
+            continue
+        assert cell.dockerfile == cell.target.dockerfile
+        assert cell.context == cell.target.context
+        assert cell.build_args == {}

@@ -101,7 +101,7 @@ def arm64_build_commands(
         ),
     ]
     seen: set[str] = set()
-    for cell in plan.bake_cells:
+    for cell in plan.cells:
         prerequisite = cell.prerequisite_command
         if prerequisite is None or cell.target.name in seen:
             continue
@@ -133,16 +133,6 @@ def arm64_build_commands(
             role="arm-builder",
             remote_dir=remote_source_dir,
         )
-    )
-    commands.extend(
-        CommandTaskSpec(
-            task_id=f"release.arm64.native.{cell.target.name}",
-            summary=f"Build {cell.target.name} ARM64 native image",
-            argv=cell.gradle_command or (),
-            role="arm-builder",
-            remote_dir=remote_source_dir,
-        )
-        for cell in plan.gradle_cells
     )
     return tuple(commands)
 

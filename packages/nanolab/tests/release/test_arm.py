@@ -22,14 +22,28 @@ def _plan():  # noqa: ANN202
     )
 
 
-def test_arm64_plan_partitions_the_live_matrix_without_loss() -> None:
+def test_arm64_plan_covers_the_live_matrix_without_loss() -> None:
     """The matrix grows with the function catalog, so assert shape, not a count."""
     plan = _plan()
 
     assert plan.cells
-    assert len(plan.bake_cells) + len(plan.gradle_cells) == len(plan.cells)
-    assert set(plan.bake_cells).isdisjoint(plan.gradle_cells)
     assert {cell.architecture for cell in plan.cells} == {"arm64"}
+    assert len({(cell.target.name, cell.flavor) for cell in plan.cells}) == len(plan.cells)
+
+
+def test_arm64_commands_contain_no_gradle_image_builds() -> None:
+    commands = arm.arm64_build_commands(
+        _plan(),
+        builder_name="nanofaas-release-v0-18-0",
+        remote_bake_file="/srv/release/docker-bake-arm64.json",
+        remote_buildkit_config="/srv/release/buildkitd.toml",
+        remote_source_dir="/srv/source",
+        registry_upstream="203.0.113.10",
+    )
+
+    assert not any(spec.task_id.startswith("release.arm64.native.") for spec in commands)
+    assert not any("dashaun/builder" in " ".join(spec.argv) for spec in commands)
+    assert any(spec.task_id == "release.images.bake.arm64" for spec in commands)
 
 
 def test_arm64_commands_tunnel_the_registry_and_create_the_named_builder() -> None:
@@ -83,9 +97,9 @@ def test_arm64_commands_tunnel_the_registry_and_create_the_named_builder() -> No
         "--load",
         "docker-arm64",
     )
-    native = [command for command in commands if command.task_id.startswith("release.arm64.native")]
-    assert len(native) == len(plan.gradle_cells)
-    assert all("-PimagePlatform=linux/arm64" in command.argv for command in native)
+    # No separate native build step exists any more: the bake is the last command.
+    assert commands[-1] is bake
+    assert not any(command.task_id.startswith("release.arm64.native") for command in commands)
 
 
 def test_builder_bootstrap_must_explicitly_support_linux_arm64() -> None:
