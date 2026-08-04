@@ -260,7 +260,7 @@ def _prepare_plan(
 def _plan_specs(plan: ImagePlan, bake_file: Path, *, builder_role: str) -> tuple[CommandTaskSpec, ...]:
     specs: list[CommandTaskSpec] = []
     seen_prerequisites: set[str] = set()
-    for cell in plan.bake_cells:
+    for cell in plan.cells:
         command = cell.prerequisite_command
         if command is None or cell.target.name in seen_prerequisites:
             continue
@@ -274,7 +274,7 @@ def _plan_specs(plan: ImagePlan, bake_file: Path, *, builder_role: str) -> tuple
             )
         )
     for architecture in DEFAULT_ARCHITECTURES:
-        if any(cell.architecture == architecture for cell in plan.bake_cells):
+        if any(cell.architecture == architecture for cell in plan.cells):
             specs.append(
                 CommandTaskSpec(
                     task_id=f"images.bake.{architecture}",
@@ -291,15 +291,6 @@ def _plan_specs(plan: ImagePlan, bake_file: Path, *, builder_role: str) -> tuple
                     role=builder_role,  # type: ignore[arg-type]
                 )
             )
-    specs.extend(
-        CommandTaskSpec(
-            task_id=f"images.gradle.{cell.target.name}.{cell.architecture}",
-            summary=f"Build {cell.target.name} {cell.architecture} native image",
-            argv=cell.gradle_command or (),
-            role=builder_role,  # type: ignore[arg-type]
-        )
-        for cell in plan.gradle_cells
-    )
     return tuple(specs)
 
 

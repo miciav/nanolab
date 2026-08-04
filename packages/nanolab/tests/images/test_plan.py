@@ -133,13 +133,29 @@ def test_each_discovered_function_dockerfile_maps_to_one_target() -> None:
     assert len(mapped) == len(function_dockerfiles)
 
 
-def test_plan_partitions_cells_into_bake_and_gradle_without_loss() -> None:
-    """Every cell bakes from a Dockerfile now; nothing shells out to Gradle."""
+def test_plan_cells_expand_symmetrically_per_architecture() -> None:
+    """Every cell bakes from a Dockerfile now; assert the expansion rule, not a count.
+
+    Each target contributes exactly its declared flavors as cells, and the
+    resulting (target, flavor) shape is identical on both architectures.
+    """
     plan = _plan()
 
-    assert plan.bake_cells == plan.cells
-    assert plan.gradle_cells == ()
-    assert {cell.build_kind for cell in plan.bake_cells} == {"bake"}
+    shapes_by_architecture = {
+        architecture: frozenset(
+            (cell.target.name, cell.flavor)
+            for cell in plan.cells
+            if cell.architecture == architecture
+        )
+        for architecture in ("amd64", "arm64")
+    }
+    assert shapes_by_architecture["amd64"]
+    assert shapes_by_architecture["amd64"] == shapes_by_architecture["arm64"]
+    for target in plan.targets:
+        cell_flavors = frozenset(
+            cell.flavor for cell in plan.cells if cell.target.name == target.name
+        )
+        assert cell_flavors == frozenset(target.flavors)
 
 
 def test_target_selector_filters_before_cell_expansion() -> None:
@@ -165,7 +181,7 @@ def test_spring_jvm_cells_require_boot_jar_before_bake() -> None:
     plan = _plan(selectors=("control-plane", "java-warm-echo", "java-roman-numeral"))
     commands = {
         cell.target.name: cell.prerequisite_command
-        for cell in plan.bake_cells
+        for cell in plan.cells
         if cell.architecture == "amd64" and cell.flavor == "jvm"
     }
 

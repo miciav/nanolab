@@ -38,7 +38,7 @@ def test_bake_json_is_deterministic_and_has_expected_groups() -> None:
         "docker-arm64",
         "docker-all",
     ]
-    bake_per_arch = len(plan.bake_cells) // 2
+    bake_per_arch = len(plan.cells) // 2
     assert len(document["group"]["docker-amd64"]["targets"]) == bake_per_arch
     assert len(document["group"]["docker-arm64"]["targets"]) == bake_per_arch
     assert document["group"]["docker-all"]["targets"] == (
@@ -54,7 +54,7 @@ def test_bake_targets_have_unique_names_tags_and_single_platforms() -> None:
     targets = document["target"]
     tags = [target["tags"][0] for target in targets.values()]
 
-    assert len(targets) == len(plan.bake_cells)
+    assert len(targets) == len(plan.cells)
     assert len(targets) == len(set(targets))
     assert len(tags) == len(set(tags))
     assert all(len(target["tags"]) == 1 for target in targets.values())
@@ -99,9 +99,14 @@ def test_bake_selector_filters_targets_and_groups() -> None:
     }
 
 
-def test_bake_selector_rejects_non_bake_target_selection() -> None:
-    with pytest.raises(ValueError, match="selector has no Bake cells: java-word-stats"):
-        render_bake(_plan(), selectors=("java-word-stats",), flavors=("native",))
+def test_bake_selector_rejects_flavor_filter_with_no_matching_cells() -> None:
+    """Java targets always have Bake cells now, so the guard needs a target that
+    is real but whose flavors never include the requested one: watchdog only
+    ever builds the "default" flavor, so filtering it to "native" selects
+    nothing, and the guard in `render_bake` must still catch that.
+    """
+    with pytest.raises(ValueError, match="selector has no Bake cells: watchdog"):
+        render_bake(_plan(), selectors=("watchdog",), flavors=("native",))
 
 
 def test_generated_json_roundtrips_through_buildx_print(tmp_path: Path) -> None:
@@ -133,7 +138,7 @@ def test_generated_json_roundtrips_through_buildx_print(tmp_path: Path) -> None:
     )
 
     assert rendered.returncode == 0, rendered.stderr
-    assert len(json.loads(rendered.stdout)["target"]) == len(plan.bake_cells)
+    assert len(json.loads(rendered.stdout)["target"]) == len(plan.cells)
 
 
 def test_native_cells_render_with_root_context_and_build_args() -> None:

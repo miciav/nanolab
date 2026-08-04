@@ -23,7 +23,7 @@ def render_bake(
     selected_flavors = frozenset(flavors)
     cells = tuple(
         cell
-        for cell in plan.bake_cells
+        for cell in plan.cells
         if (not requested or cell.target.name in requested)
         and cell.flavor in selected_flavors
     )

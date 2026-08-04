@@ -347,7 +347,7 @@ def amd64_build_commands(
     """
     commands: list[CommandTaskSpec] = []
     seen: set[str] = set()
-    for cell in plan.bake_cells:
+    for cell in plan.cells:
         prerequisite = cell.prerequisite_command
         if prerequisite is None or cell.target.name in seen:
             continue
@@ -379,16 +379,6 @@ def amd64_build_commands(
             role="stack",
             remote_dir=remote_source_dir,
         )
-    )
-    commands.extend(
-        CommandTaskSpec(
-            task_id=f"release.images.native.{cell.target.name}",
-            summary=f"Build {cell.target.name} AMD64 native image",
-            argv=cell.gradle_command or (),
-            role="stack",
-            remote_dir=remote_source_dir,
-        )
-        for cell in plan.gradle_cells
     )
     return tuple(commands)
 

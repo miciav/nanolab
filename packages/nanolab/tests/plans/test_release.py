@@ -113,17 +113,17 @@ def test_amd64_build_phase_records_the_commands_it_will_run(
 
     argvs = [argv for argv, _role, _remote_dir in phase.phase_inputs["commands"]]
 
-    natives = [a for a in argvs if a[0] == "./gradlew" and "-PimagePlatform=linux/amd64" in a]
-    assert natives, "no native AMD64 gradle build"
-    # The cell's own command is the source of truth: every native build runs it
-    # whole, per-target extra arguments included. Only control-plane carries
-    # -PcontrolPlaneModules=all, and dropping it is what shipped in v0.18.1.
-    assert set(natives) == {
-        cell.gradle_command for cell in release_request.image_plan.gradle_cells
-    }
-    assert any("-PcontrolPlaneModules=all" in argv for argv in natives)
+    # No separate native Gradle build survives: every native cell bakes now,
+    # so nothing here shells out with a per-platform Gradle property.
+    assert not any(
+        argv[0] == "./gradlew" and "-PimagePlatform" in " ".join(argv) for argv in argvs
+    )
     assert any(argv[:3] == ("docker", "buildx", "bake") for argv in argvs)
-    assert any(argv[0] == "./gradlew" and "bootJar" in " ".join(argv) for argv in argvs)
+    # The JVM prerequisite is the source of truth: control-plane's carries its
+    # own extra argument, and dropping it is what shipped in v0.18.1.
+    prepares = [argv for argv in argvs if argv[0] == "./gradlew" and "bootJar" in " ".join(argv)]
+    assert prepares, "no JVM bootJar prepare command"
+    assert any("-PcontrolPlaneModules=all" in argv for argv in prepares)
     assert phase.expected_images == tuple(
         cell.image for cell in release_request.image_plan.cells
     )

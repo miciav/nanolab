@@ -11,7 +11,6 @@ from nanolab.release.versioning import normalize_version
 
 ImageArchitecture = Literal["amd64", "arm64"]
 ImageFlavor = Literal["jvm", "native", "default"]
-BuildKind = Literal["bake", "gradle"]
 
 DEFAULT_ARCHITECTURES: tuple[ImageArchitecture, ...] = ("amd64", "arm64")
 DEFAULT_REGISTRY = "localhost:5000/nanofaas"
@@ -51,7 +50,6 @@ class ImageCell:
     flavor: ImageFlavor
     tag: str
     image: str
-    build_kind: BuildKind
 
     @property
     def platform(self) -> str:
@@ -89,7 +87,7 @@ class ImageCell:
 
     @property
     def prerequisite_command(self) -> tuple[str, ...] | None:
-        if self.build_kind != "bake" or self.flavor != "jvm":
+        if self.flavor != "jvm":
             return None
         return ("./gradlew", *self.target.jvm_prerequisite_arguments)
 
@@ -104,14 +102,6 @@ class ImagePlan:
     @property
     def target_names(self) -> frozenset[str]:
         return frozenset(target.name for target in self.targets)
-
-    @property
-    def bake_cells(self) -> tuple[ImageCell, ...]:
-        return tuple(cell for cell in self.cells if cell.build_kind == "bake")
-
-    @property
-    def gradle_cells(self) -> tuple[ImageCell, ...]:
-        return tuple(cell for cell in self.cells if cell.build_kind == "gradle")
 
 
 def build_image_plan(
@@ -268,5 +258,4 @@ def _cell(
         flavor=flavor,
         tag=tag,
         image=f"{registry}/{target.name}:{tag}",
-        build_kind="bake",
     )

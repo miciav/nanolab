@@ -57,12 +57,17 @@ def test_images_plan_writes_bake_json_and_renders_bake_and_native_tasks(
     assert result.exit_code == 0, result.output
     bake_file = tmp_path / "docker-bake.json"
     bake = json.loads(bake_file.read_text(encoding="utf-8"))
-    assert set(bake["target"]) == {"control-plane-amd64-jvm"}
+    # The native cell bakes from the shared Dockerfile now; it is not a
+    # separate Gradle target.
+    assert set(bake["target"]) == {
+        "control-plane-amd64-jvm",
+        "control-plane-amd64-native",
+    }
     assert (
         f"docker buildx bake --file {bake_file} --print docker-amd64"
         in result.output
     )
-    assert "./gradlew :control-plane:bootBuildImage" in result.output
+    assert "./gradlew :control-plane:bootJar" in result.output
 
 
 def test_images_plan_honors_flavor_selector(tmp_path: Path) -> None:
@@ -110,9 +115,10 @@ def test_images_plan_supports_native_only_target_selection(tmp_path: Path) -> No
 
     assert result.exit_code == 0, result.output
     bake = json.loads((tmp_path / "docker-bake.json").read_text(encoding="utf-8"))
-    assert bake["target"] == {}
-    assert "docker buildx bake" not in result.output
-    assert "./gradlew :control-plane:bootBuildImage" in result.output
+    # The native cell bakes from the shared Dockerfile now; no Gradle step at all.
+    assert set(bake["target"]) == {"control-plane-amd64-native"}
+    assert "docker buildx bake" in result.output
+    assert "./gradlew" not in result.output
 
 
 def test_images_plan_rejects_target_flavor_without_cells(tmp_path: Path) -> None:
@@ -269,7 +275,7 @@ def test_images_build_deduplicates_repeated_architecture_selection(
     task_ids = [line.split(maxsplit=1)[0] for line in result.output.splitlines()]
     assert len(task_ids) == len(set(task_ids))
     assert task_ids.count("images.bake.amd64") == 1
-    assert task_ids.count("images.gradle.control-plane.amd64") == 1
+    assert not any(task_id.startswith("images.gradle.") for task_id in task_ids)
     assert sorted(task_id for task_id in task_ids if task_id.startswith("images.push.")) == [
         "images.push.control-plane.amd64.jvm",
         "images.push.control-plane.amd64.native",

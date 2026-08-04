@@ -50,7 +50,10 @@ def test_source_tests_reuse_gradle_and_uv_and_pin_container_toolchains() -> None
         assert command.remote_dir == "/srv/nanofaas-source"
 
 
-def test_amd64_build_commands_prepare_bake_and_build_natively() -> None:
+def test_amd64_build_commands_prepare_jvm_cells_and_bake_everything() -> None:
+    """Native cells no longer get a separate build step: the bake already
+    covers them, since every cell is a Bake cell now.
+    """
     plan = build_image_plan(NANOFAAS_ROOT, "v9.9.9", architectures=("amd64",))
 
     commands = release_build.amd64_build_commands(
@@ -82,12 +85,24 @@ def test_amd64_build_commands_prepare_bake_and_build_natively() -> None:
         "--load",
         "docker-amd64",
     )
-    # Native cells carry the whole gradle_command, not a subset.
-    natives = [c for c in commands if c.task_id.startswith("release.images.native.")]
-    assert natives, "no native build generated"
-    for command, cell in zip(natives, plan.gradle_cells, strict=True):
-        assert command.argv == cell.gradle_command
+    # No separate native build step exists any more; the bake is the last command.
+    assert bake_index == len(commands) - 1
     assert all(c.role == "stack" and c.remote_dir == "/remote/source" for c in commands)
+
+
+def test_amd64_commands_contain_no_gradle_image_builds() -> None:
+    plan = build_image_plan(NANOFAAS_ROOT, "v9.9.9", architectures=("amd64",))
+
+    commands = release_build.amd64_build_commands(
+        plan,
+        builder_name="release-amd64-9.9.9",
+        remote_bake_file="/remote/docker-bake.json",
+        remote_source_dir="/remote/source",
+    )
+
+    assert not any(spec.task_id.startswith("release.images.native.") for spec in commands)
+    assert not any("bootBuildImage" in " ".join(spec.argv) for spec in commands)
+    assert any(spec.task_id == "release.images.bake.amd64" for spec in commands)
 
 
 def test_sonata_owned_arm_resources_are_not_recreated_and_every_image_is_pushed(
