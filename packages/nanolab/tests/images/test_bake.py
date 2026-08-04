@@ -134,3 +134,36 @@ def test_generated_json_roundtrips_through_buildx_print(tmp_path: Path) -> None:
 
     assert rendered.returncode == 0, rendered.stderr
     assert len(json.loads(rendered.stdout)["target"]) == len(plan.bake_cells)
+
+
+def test_native_cells_render_with_root_context_and_build_args() -> None:
+    rendered = render_bake(_plan())
+    target = rendered["target"]["control-plane-amd64-native"]
+    assert target["context"] == "."
+    assert target["dockerfile"] == "deploy/native-java/Dockerfile"
+    assert target["args"] == {
+        "NATIVE_TASK": ":control-plane:nativeCompile",
+        "NATIVE_BINARY": "platform/control-plane/build/native/nativeCompile/control-plane",
+        "GRADLE_ARGS": "-PcontrolPlaneModules=all",
+    }
+    assert target["platforms"] == ["linux/amd64"]
+
+
+def test_jvm_cells_render_without_an_args_key() -> None:
+    target = render_bake(_plan())["target"]["control-plane-amd64-jvm"]
+    assert target["context"] == "platform/control-plane"
+    assert target["dockerfile"] == "Dockerfile"
+    assert "args" not in target
+
+
+def test_every_native_java_cell_reaches_the_bake_groups() -> None:
+    plan = _plan()
+    rendered = render_bake(plan)
+    expected = {
+        f"{cell.target.name}-{cell.architecture}-native"
+        for cell in plan.cells
+        if cell.flavor == "native" and cell.target.native_build is not None
+    }
+    assert expected, "expected Java native cells in the matrix"
+    grouped = set(rendered["group"]["docker-all"]["targets"])
+    assert expected <= grouped

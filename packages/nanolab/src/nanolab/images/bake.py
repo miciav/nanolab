@@ -63,13 +63,17 @@ def _bake_name(cell: ImageCell) -> str:
     return f"{cell.target.name}-{cell.architecture}-{cell.flavor}"
 
 
-def _bake_target(cell: ImageCell) -> dict[str, list[str] | str]:
-    dockerfile = cell.target.dockerfile
-    if cell.target.context != Path("."):
-        dockerfile = dockerfile.relative_to(cell.target.context)
-    return {
-        "context": cell.target.context.as_posix(),
+def _bake_target(cell: ImageCell) -> dict[str, list[str] | str | dict[str, str]]:
+    dockerfile = cell.dockerfile
+    if cell.context != Path("."):
+        dockerfile = dockerfile.relative_to(cell.context)
+    target: dict[str, list[str] | str | dict[str, str]] = {
+        "context": cell.context.as_posix(),
         "dockerfile": dockerfile.as_posix(),
         "platforms": [cell.platform],
         "tags": [cell.image],
     }
+    args = cell.build_args
+    if args:
+        target["args"] = args
+    return target
