@@ -148,10 +148,15 @@ uv run pydeps nanolab
 
 ## Image releases
 
-`nanolab images` renders and builds the 52-cell image matrix
-anywhere without publishing. Official releases run only through
-`nanolab run scenarios-v2/release.yaml` on the pinned Azure profile, after
-`nanolab release prepare` has committed the version. The standalone release
-configuration is in [`release.yaml`](release.yaml).
-GitHub Actions never publishes images, and local/Multipass/Proxmox builds
-cannot promote to GHCR.
+`nanolab images` renders and builds the full image matrix anywhere without
+publishing. Java native images build through nanoFaaS's shared
+`deploy/native-java/Dockerfile`, parameterized by `NATIVE_TASK`,
+`NATIVE_BINARY` and `GRADLE_ARGS` — the same contract as
+`scripts/native-java-image.sh`. The Spring Boot buildpack path was retired in
+nanoFaaS `c3179fbb` and now throws on use.
+
+Official releases run only through `nanolab run scenarios-v2/release.yaml` on
+the pinned Azure profile, after `nanolab release prepare` has committed the
+version. The standalone release configuration is in
+[`release.yaml`](release.yaml). GitHub Actions never publishes images, and
+local/Multipass/Proxmox builds cannot promote to GHCR.
