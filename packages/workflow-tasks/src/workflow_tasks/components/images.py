@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import shlex
 from collections.abc import Mapping
-from pathlib import Path
 from types import MappingProxyType
 
 from workflow_tasks.components.context import ScenarioExecutionContext
@@ -37,20 +35,6 @@ def function_image_specs(
 
 def _frozen_env() -> Mapping[str, str]:
     return MappingProxyType({})
-
-
-def _dockerfile_for_runtime_kind(runtime_kind: str, family: str) -> Path:
-    dockerfile_map = {
-        "exec": Path(f"functions/bash/{family}/Dockerfile"),
-        "go": Path(f"functions/go/{family}/Dockerfile"),
-        "java-lite": Path(f"functions/java/{family}-lite/Dockerfile"),
-        "javascript": Path(f"functions/javascript/{family}/Dockerfile"),
-        "python": Path(f"functions/python/{family}/Dockerfile"),
-    }
-    try:
-        return dockerfile_map[runtime_kind]
-    except KeyError as exc:  # pragma: no cover - defensive guard
-        raise ValueError(f"Unsupported function runtime: {runtime_kind!r}") from exc
 
 
 _RUST_CP_DIR = (
@@ -141,94 +125,8 @@ def plan_build_core(context: ScenarioExecutionContext) -> tuple[ScenarioOperatio
     return tuple(operations)
 
 
-def _prune_image_op(fn_key: str, image: str) -> RemoteCommandOperation:
-    # Remove local image layers after push to prevent disk exhaustion across multiple GraalVM builds.
-    # Legacy Docker builder leaves large dangling layers; prune reclaims them immediately.
-    cmd = f"docker image rm {shlex.quote(image)} && docker image prune -f"
-    return RemoteCommandOperation(
-        operation_id=f"images.prune_selected_functions.{fn_key}",
-        summary=f"Prune {fn_key} local image",
-        argv=("bash", "-c", cmd),
-        env=_frozen_env(),
-        execution_target="vm",
-    )
-
-
-def plan_build_selected_functions(
-    context: ScenarioExecutionContext,
-) -> tuple[ScenarioOperation, ...]:
-    selected_specs = function_image_specs(
-        context.resolved_scenario,
-        warm_echo_image(context.local_registry),
-    )
-    operations: list[ScenarioOperation] = []
-    for image, runtime_kind, family, fn_key in selected_specs:
-        if runtime_kind == "java":
-            operations.append(
-                RemoteCommandOperation(
-                    operation_id=f"images.build_selected_functions.{fn_key}",
-                    summary=f"Build {fn_key} function image",
-                    argv=(
-                        "./gradlew",
-                        f":functions:java:{family}:bootBuildImage",
-                        f"-PfunctionImage={image}",
-                        "--no-daemon",
-                        "-q",
-                    ),
-                    env=_frozen_env(),
-                    execution_target="vm",
-                )
-            )
-            operations.append(
-                RemoteCommandOperation(
-                    operation_id=f"images.push_selected_functions.{fn_key}",
-                    summary=f"Push {fn_key} function image",
-                    argv=("docker", "push", image),
-                    env=_frozen_env(),
-                    execution_target="vm",
-                )
-            )
-            operations.append(_prune_image_op(fn_key, image))
-            continue
-
-        operations.append(
-            RemoteCommandOperation(
-                operation_id=f"images.build_selected_functions.{fn_key}",
-                summary=f"Build {fn_key} function image",
-                argv=(
-                    "docker",
-                    "build",
-                    "-f",
-                    str(_dockerfile_for_runtime_kind(runtime_kind, family)),
-                    "-t",
-                    image,
-                    ".",
-                ),
-                env=_frozen_env(),
-                execution_target="vm",
-            )
-        )
-        operations.append(
-            RemoteCommandOperation(
-                operation_id=f"images.push_selected_functions.{fn_key}",
-                summary=f"Push {fn_key} function image",
-                argv=("docker", "push", image),
-                env=_frozen_env(),
-                execution_target="vm",
-            )
-        )
-        operations.append(_prune_image_op(fn_key, image))
-    return tuple(operations)
-
-
 BUILD_CORE = ScenarioComponentDefinition(
     component_id="images.build_core",
     summary="Build core images",
     planner=plan_build_core,
-)
-
-BUILD_SELECTED_FUNCTIONS = ScenarioComponentDefinition(
-    component_id="images.build_selected_functions",
-    summary="Build selected function images",
-    planner=plan_build_selected_functions,
 )

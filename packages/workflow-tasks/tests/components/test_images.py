@@ -6,11 +6,9 @@ from pathlib import Path
 from workflow_tasks.components.context import ScenarioExecutionContext
 from workflow_tasks.components.images import (
     BUILD_CORE,
-    BUILD_SELECTED_FUNCTIONS,
     control_image,
     function_image_specs,
     plan_build_core,
-    plan_build_selected_functions,
     warm_echo_image,
 )
 from workflow_tasks.vm.models import VmRequest
@@ -98,14 +96,5 @@ def test_plan_build_core_rust_skips_boot_jars() -> None:
     assert "images.build_core.control_image" in ids
 
 
-def test_plan_build_selected_functions_emits_build_push_prune() -> None:
-    fns = [_Fn(key="echo", family="echo", runtime="java", image="reg:5000/echo:e2e")]
-    ids = [op.operation_id for op in plan_build_selected_functions(_ctx(functions=fns))]
-    assert "images.build_selected_functions.echo" in ids
-    assert "images.push_selected_functions.echo" in ids
-    assert any(i.startswith("images.prune_selected_functions") for i in ids)
-
-
 def test_component_definitions_wire_planners() -> None:
     assert BUILD_CORE.planner is plan_build_core
-    assert BUILD_SELECTED_FUNCTIONS.planner is plan_build_selected_functions
