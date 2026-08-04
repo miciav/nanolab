@@ -15,7 +15,7 @@ from pathlib import Path
 from nanolab.release.remote_retry import retry_on_connection_death
 from nanolab.images.plan import ImageCell, build_image_plan
 from nanolab.release.versioning import normalize_version
-from nanolab.release.state import ArtifactEvidence
+from nanolab.release.model import ArtifactEvidence
 
 
 PUBLISH_PHASES = ("publish-architectures", "publish-manifests", "publish-aliases")
@@ -168,6 +168,12 @@ def publish_architecture_images(
                 "skopeo",
                 "copy",
                 "--preserve-digests",
+                # Buildx attaches a provenance manifest, so every source tag is
+                # an index. Without this skopeo copies only the instance built
+                # for the copying host, and --preserve-digests then preserves
+                # that instance's digest instead of the index digest the
+                # release measured and gated.
+                "--multi-arch=all",
                 "--src-tls-verify=false",
                 f"--dest-authfile={authfile}",
                 f"docker://{_pin(copy.source, source_digests)}",

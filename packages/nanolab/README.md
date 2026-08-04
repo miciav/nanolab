@@ -150,7 +150,8 @@ uv run pydeps nanolab
 
 `nanolab images` renders and builds the 52-cell image matrix
 anywhere without publishing. Official releases run only through
-`nanolab release` on the pinned Azure profile. The standalone release
+`nanolab run scenarios-v2/release.yaml` on the pinned Azure profile, after
+`nanolab release prepare` has committed the version. The standalone release
 configuration is in [`release.yaml`](release.yaml).
 GitHub Actions never publishes images, and local/Multipass/Proxmox builds
 cannot promote to GHCR.

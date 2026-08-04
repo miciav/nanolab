@@ -1,26 +1,30 @@
 """Compile a release scenario into a Sonata workflow.
 
-The release pipeline defined in `nanolab release run` replays here as a
-linear DAG built from the Task and Resource primitives defined in sonata-tasks.
-Each phase that iterates over image cells is a composite Steps node so the
-workflow surface remains coarse-grained and selectable.
+The release pipeline is a linear DAG built from the Task and Resource
+primitives defined in sonata-tasks. Each phase that iterates over image cells
+is a composite Steps node so the workflow surface stays coarse-grained and
+selectable.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, replace
 import json
 from pathlib import Path
 from typing import Any
 
 import yaml
-from sonata_engine import Evidence, JournalConfig, Verifier, Workflow
+from sonata_engine import Evidence, JournalConfig, Steps, Verifier, Workflow
 from sonata_tasks.buildx import buildx_builder_resource
+from sonata_tasks.command import CommandTask
+from sonata_tasks.cosign import CosignTask
 from sonata_tasks.release_composites import (
-    amd64_build_composite,
+    attest_composite,
+    command_specs_composite,
     registry_push_composite,
-    source_tests_composite,
 )
+from sonata_tasks.transfer import FileTransferTask
 from nanolab.plans import loadtest as loadtest_plan
 from sonata_tasks.registry_tunnel import registry_tunnel_resource
 from workflow_tasks.execution.bindings import RoleBoundCommandTaskExecutor
@@ -33,7 +37,7 @@ from nanolab.images.plan import DEFAULT_REGISTRY, ImagePlan, build_image_plan
 from nanolab.release.arm import build_arm64_image_plan
 from nanolab.release import arm as release_arm
 from nanolab.release import build as release_build
-from nanolab.release.build import extract_commit_tree
+from nanolab.release.build import amd64_build_commands, extract_commit_tree
 from nanolab.release.environment import validate_release_environment
 from nanolab.release.evidence import release_evidence_verifiers
 from nanolab.release.benchmark import (
@@ -48,22 +52,23 @@ from nanolab.release import attest as release_attest
 from nanolab.release import publish as release_publish
 from nanolab.release.metrics import build_release_record
 from nanolab.release.resources import (
-    arm_build_inputs_resource,
+    build_inputs_resource,
     build_release_resources,
     build_release_source_resources,
     cosign_credentials_resource,
     ghcr_credentials_resource,
     release_execution_guard,
 )
-from nanolab.release.run import (
+from nanolab.release.build import source_test_commands
+from nanolab.release.model import (
     Amd64ReleasePlan,
     BuilderConfiguration,
     CredentialFiles,
+    ReleaseIdentity,
     ReleaseSettings,
+    digest_path,
     git_state,
-    source_test_commands,
 )
-from nanolab.release.state import ReleaseIdentity, digest_path
 from nanolab.release.tasks import (
     aggregate_benchmarks_task,
     amd64_build_task,
@@ -74,6 +79,7 @@ from nanolab.release.tasks import (
     regression_gate_task,
     run_image_steps,
     run_source_steps,
+    run_steps,
     registry_artifacts_from_receipt,
     registry_evidence,
     source_test_task,
@@ -302,7 +308,9 @@ def build_release_workflow(
         arm_requires=(infrastructure.arm_builder,),
     )
     source_commands = source_test_commands(Path(source_dir))
-    source_steps = source_tests_composite(source_commands, executor=executor)
+    source_steps = command_specs_composite(
+        source_commands, executor=executor, title="Run source tests"
+    )
     source_tests = source_test_task(
         identity=identity,
         run_dir=request.run_dir,
@@ -318,48 +326,61 @@ def build_release_workflow(
                 for command in source_commands
             )
         },
-        work=lambda inputs: run_source_steps(source_steps, inputs),
+        work=lambda inputs: run_source_steps(
+            source_steps, inputs, source_archive=release_dir / "source.tar"
+        ),
     )
 
     # --- Phase 2: AMD64 Build ---
-    amd64_builder = buildx_builder_resource(
-        name=f"release-amd64-{request.version}",
-        executor=executor,
-        role="stack",
+    amd64_inputs = build_inputs_resource(
+        image_plan=request.image_plan,
+        max_parallelism=request.settings.max_parallelism,
+        run_dir=release_dir,
+        remote_root=remote_root,
+        provider=provider,
+        request=stack_req,
+        architecture="amd64",
         requires=(infrastructure.stack,),
     )
-    amd64_steps = amd64_build_composite(
-        request.image_plan,
+    amd64_builder_name = f"release-amd64-{request.version}"
+    amd64_builder = buildx_builder_resource(
+        name=amd64_builder_name,
         executor=executor,
         role="stack",
-        cwd=Path(source_dir),
+        requires=(infrastructure.stack, amd64_inputs),
+        buildkitd_config=f"{remote_root}/buildkitd-amd64.toml",
+        replace_existing=True,
     )
+    amd64_commands = amd64_build_commands(
+        request.image_plan,
+        builder_name=amd64_builder_name,
+        remote_bake_file=f"{remote_root}/docker-bake-amd64.json",
+        remote_source_dir=source_dir,
+    )
+    amd64_steps = command_specs_composite(
+        amd64_commands, executor=executor, title="Build AMD64 images"
+    )
+    release_images = tuple(cell.image for cell in request.image_plan.cells)
     amd64_build = amd64_build_task(
         identity=identity,
         run_dir=request.run_dir,
         phase_inputs={
-            "cells": tuple(
-                (
-                    cell.image,
-                    cell.architecture,
-                    cell.flavor,
-                    cell.build_kind,
-                    str(cell.target.dockerfile),
-                    str(cell.target.context),
-                    cell.gradle_command,
-                )
-                for cell in request.image_plan.cells
+            "commands": tuple(
+                (command.argv, command.role, str(command.remote_dir))
+                for command in amd64_commands
             ),
             "maxParallelism": request.settings.max_parallelism,
             "sourceDir": source_dir,
         },
         prerequisites=(source_tests.receipt,),
+        expected_images=release_images,
         work=lambda inputs: run_image_steps(
             amd64_steps,
             inputs,
             executor,
-            tuple(cell.image for cell in request.image_plan.cells),
+            release_images,
             registry=False,
+            architecture="amd64",
         ),
     )
 
@@ -370,7 +391,6 @@ def build_release_workflow(
         role="stack",
         tls_verify=False,
     )
-    release_images = tuple(cell.image for cell in request.image_plan.cells)
     registry_push = registry_push_task(
         identity=identity,
         run_dir=request.run_dir,
@@ -455,13 +475,14 @@ def build_release_workflow(
         request.version,
         registry=request.image_plan.registry,
     )
-    arm_inputs = arm_build_inputs_resource(
+    arm_inputs = build_inputs_resource(
         image_plan=arm_plan,
         max_parallelism=request.settings.max_parallelism,
         run_dir=release_dir,
         remote_root=remote_root,
         provider=provider,
         request=arm_req,
+        architecture="arm64",
         requires=(infrastructure.arm_builder,),
     )
     tunnel = registry_tunnel_resource(
@@ -475,7 +496,7 @@ def build_release_workflow(
         executor=executor,
         role="arm-builder",
         requires=(infrastructure.arm_builder, arm_inputs),
-        buildkitd_config=f"{remote_root}/buildkitd.toml",
+        buildkitd_config=f"{remote_root}/buildkitd-arm64.toml",
         validate=release_arm.require_arm64_builder,
         replace_existing=True,
     )
@@ -493,7 +514,7 @@ def build_release_workflow(
             max_parallelism=request.settings.max_parallelism,
         ),
         bake_file=release_dir / "docker-bake-arm64.json",
-        buildkit_config=release_dir / "buildkitd.toml",
+        buildkit_config=release_dir / "buildkitd-arm64.toml",
         performance_root=request.performance_root,
         credentials=request.credentials,
     )
@@ -512,7 +533,7 @@ def build_release_workflow(
                 provider,
                 arm_req,
                 f"{remote_root}/docker-bake-arm64.json",
-                f"{remote_root}/buildkitd.toml",
+                f"{remote_root}/buildkitd-arm64.toml",
                 source_dir,
                 registry_upstream="",
                 stage_inputs=False,
@@ -711,6 +732,19 @@ def build_release_workflow(
 
     predicate_file = release_dir / "predicate.json"
     remote_predicate = f"{remote_root}/predicate.json"
+    remote_sboms = f"{remote_root}/sboms"
+    remote_public_key = f"{remote_sboms}/cosign.pub"
+
+    def _pinned(images: Mapping[str, str]) -> tuple[str, ...]:
+        """Collapse tags and aliases onto the unique set of pinned digests.
+
+        Aliases point at the same digest as their native manifest, so signing
+        by reference would sign the same artifact several times.
+        """
+        pinned: dict[str, None] = {}
+        for reference, digest in sorted(images.items()):
+            pinned.setdefault(f"{reference.rsplit(':', 1)[0]}@{digest}", None)
+        return tuple(pinned)
 
     def attest_images(inputs: Any) -> tuple[Evidence, ...]:
         if cosign is None:
@@ -732,26 +766,89 @@ def build_release_workflow(
             ),
             encoding="utf-8",
         )
-        result = provider.exec_argv(
-            stack_req, ("mkdir", "-p", remote_root), env=None, cwd=None, dry_run=False
+        credentials = inputs.resource(cosign).value
+        if credentials.password_file is None:
+            raise ValueError("cosign attestation requires a staged password file")
+        docker_config = docker_credentials(inputs).docker_config
+
+        # One-shot setup: the SBOM directory (whose parent is the release root
+        # the predicate lands in), the predicate itself, and the public half of
+        # the signing key -- `cosign verify` rejects the encrypted private key.
+        # None of it is per-image, so none of it belongs in the composite.
+        # ponytail: re-runs on resume; four cheap calls against six per digest.
+        prelude = (
+            CommandTask(
+                title="Create remote SBOM directory",
+                argv=("mkdir", "-p", remote_sboms),
+                executor=executor,
+                role="stack",
+            ),
+            FileTransferTask(
+                provider=provider,
+                request=stack_req,
+                source=predicate_file,
+                destination=remote_predicate,
+                title="Transfer release predicate",
+            ),
+            CosignTask(
+                operation="public-key",
+                image="",
+                key_file=credentials.key_file,
+                password_file=str(credentials.password_file),
+                docker_config=docker_config,
+                output_file=remote_public_key,
+                executor=executor,
+                role="stack",
+            ),
+            # cosign public-key redirects to a file, so a failure that
+            # still exits 0 leaves an empty key that makes every later
+            # `verify` fail for the wrong reason. Check what landed.
+            CommandTask(
+                title="Verify derived cosign public key",
+                argv=("grep", "-q", "PUBLIC KEY", remote_public_key),
+                executor=executor,
+                role="stack",
+            ),
         )
-        if int(getattr(result, "return_code", 0)) != 0:
-            raise RuntimeError("create remote attestation directory failed")
-        result = provider.transfer_to(
-            stack_req, source=predicate_file, destination=remote_predicate
+        for step in prelude:
+            # All four overwrite rather than append, so re-entering one is safe
+            # -- and a `failed` record on a non-idempotent step makes the next
+            # `--resume` raise instead of retrying it. The grep guard exists
+            # because `cosign public-key` can fail while exiting 0, so this is
+            # a path with a known failure mode, not a theoretical one.
+            step.idempotent = True
+        run_steps(Steps(title="Stage attestation inputs", steps=prelude), inputs)
+
+        pinned = _pinned(images)
+        signed: list[Evidence] = []
+        run_steps(
+            attest_composite(
+                pinned,
+                signed=signed,
+                predicate_remote=remote_predicate,
+                sbom_dir_remote=remote_sboms,
+                public_key_remote=remote_public_key,
+                cosign_key=credentials.key_file,
+                password_file=str(credentials.password_file),
+                docker_config=docker_config,
+                executor=executor,
+                role="stack",
+            ),
+            inputs,
         )
-        if int(getattr(result, "return_code", 0)) != 0:
-            raise RuntimeError("transfer release predicate failed")
-        release_attest.attest_release_images(
-            provider,
-            stack_req,
-            images=images,
-            predicate_remote=remote_predicate,
-            sbom_dir_remote=f"{remote_root}/sboms",
-            cosign=inputs.resource(cosign).value,
-            docker_config=docker_credentials(inputs).docker_config,
+
+        # One entry per digest this run signed, emitted by the group that did
+        # the signing -- not synthesized from `pinned`, which is a list of work
+        # to do rather than work that happened.
+        # ponytail: a group the journal skipped appends nothing, so a resumed
+        # phase's receipt claims only what it re-signed. That under-claims and
+        # never over-claims; carrying a skipped group's evidence forward would
+        # need the engine to hand a composite the evidence behind a skip, and
+        # `Steps.run` only ever sees `TaskExecution.outcome`, which is None.
+        return (
+            Evidence("file-digest", str(predicate_file), digest_path(predicate_file)),
+            *signed,
         )
-        return (Evidence("file-digest", str(predicate_file), digest_path(predicate_file)),)
 
     attest = attest_task(
         identity=identity,
@@ -775,7 +872,6 @@ def build_release_workflow(
         )
         require_attestation_predicate(attest.receipt, predicate_file, expected_predicate)
         artifacts = release_attest.finalize_release(
-            None,
             record=release_record(),
             performance_root=request.performance_root,
         )
@@ -802,7 +898,12 @@ def build_release_workflow(
     )
     wf.add(  # pyright: ignore[reportArgumentType]
         amd64_build,
-        requires=(infrastructure.stack, sources.stack, amd64_builder),
+        requires=(
+            infrastructure.stack,
+            sources.stack,
+            amd64_inputs,
+            amd64_builder,
+        ),
     )
     wf.add(registry_push, requires=(infrastructure.stack,))  # pyright: ignore[reportArgumentType]
     for benchmark in benchmark_runs:
@@ -832,6 +933,10 @@ def build_release_workflow(
             arm_inputs,
         ),
     )
+    # ARM64 gets a smoke phase and AMD64 does not, on purpose: the three
+    # benchmark runs exercise every AMD64 image from the local registry and
+    # fail if one does not start, so AMD64 is smoke-tested by the loadtest.
+    # Nothing runs the ARM64 images otherwise, so they need their own.
     wf.add(  # pyright: ignore[reportArgumentType]
         arm64_smoke,
         requires=(infrastructure.stack, infrastructure.arm_builder, tunnel),
