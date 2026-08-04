@@ -297,7 +297,14 @@ class _ArmWorkflowProvider:
         if argv[0] == "sha256sum":
             digest = self.remote_digests[argv[1]].removeprefix("sha256:")
             return SimpleNamespace(return_code=0, stdout=f"{digest}  {argv[1]}\n", stderr="")
-        if self.failure == "build" and "./gradlew" in rendered and "Image=" in rendered:
+        if (
+            self.failure == "build"
+            and "docker buildx bake" in rendered
+            and "docker-arm64" in rendered
+        ):
+            # Native images no longer get their own Gradle build step: every
+            # cell (JVM, native, default) bakes together in this one command,
+            # so this is where an "individual build" failure now surfaces.
             return SimpleNamespace(return_code=1, stdout="", stderr="individual build failed")
         if self.failure == "push" and "docker push" in rendered:
             return SimpleNamespace(return_code=1, stdout="", stderr="push failed")
