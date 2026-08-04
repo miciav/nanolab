@@ -2,7 +2,7 @@ workflow: release
 functions:
   - word-stats-java
 release:
-  version: v0.18.1
+  version: v0.18.2
   profile: azure-d8s-v5+d2s-v5-amd64-native-loadtest-v1
   max_parallelism: 4
   benchmark_runs: 3
