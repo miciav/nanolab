@@ -7,7 +7,13 @@ from types import SimpleNamespace
 
 import pytest
 import yaml
-from sonata_engine import Resource, Task, TaskInputs, TaskOutcome
+from sonata_engine import (
+    Resource,
+    Task,
+    TaskInputs,
+    TaskOutcome,
+    UnknownRetainedResourceError,
+)
 from sonata_engine import Workflow as SonataWorkflow
 from typer.testing import CliRunner
 
@@ -481,6 +487,36 @@ def test_teardown_releases_what_a_kept_run_left_behind(release_cli_harness) -> N
 
     assert result.exit_code == 0, result.output
     assert destroyed == ["nanofaas-azure-release"]
+
+
+def test_teardown_reports_in_vm_resources_without_failing(
+    release_cli_harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """In-VM state the teardown cannot rebuild is a note, not a failure.
+
+    Buildx builders, the registry tunnel and the staged source are recorded as
+    retained but live inside the VMs this command destroys. Exiting non-zero
+    every time would train the operator to ignore the one run that mattered.
+    """
+    assert release_cli_harness.invoke("--provision", "--keep").exit_code == 0
+    destroyed: list[str] = []
+    _teardown_harness(release_cli_harness, destroyed)
+    monkeypatch.setattr(
+        product_module,
+        "release_retained",
+        lambda *_a, **_k: (_ for _ in ()).throw(
+            UnknownRetainedResourceError(
+                "journal records retained resources the caller did not supply: "
+                "Acquire release-amd64-v9.9.9 buildx builder"
+            )
+        ),
+    )
+
+    result = release_cli_harness.invoke("--teardown")
+
+    assert result.exit_code == 0, result.output
+    assert "release-amd64-v9.9.9 buildx builder" in result.output
+    assert "went with them" in result.output
 
 
 def test_teardown_is_idempotent(release_cli_harness) -> None:

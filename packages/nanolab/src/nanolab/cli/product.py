@@ -11,7 +11,13 @@ from typing import cast
 
 import typer
 import yaml
-from sonata_engine import CompiledWorkflow, Selection, SelectionError, release_retained
+from sonata_engine import (
+    CompiledWorkflow,
+    Selection,
+    SelectionError,
+    UnknownRetainedResourceError,
+    release_retained,
+)
 from sonata_engine import Workflow as SonataWorkflow
 from sonata_engine.journal import JournalConfig
 from sonata_engine.workflow.context import bind_workflow_sink as bind_sonata_sink
@@ -159,11 +165,24 @@ def _teardown_release(
     provider = vm_provider_for_environment(environment_config, paths.tool_root)
     resources = build_release_resources(environment_config, paths.nanofaas_root, provider)
     by_title = {resource.title: resource for resource in (*resources.vms, resources.endpoints)}
+    unknown: UnknownRetainedResourceError | None = None
     with release_run_lock(release_lock_path(environment_config)):
-        released = release_retained(by_title, journal)
+        try:
+            released = release_retained(by_title, journal)
+        except UnknownRetainedResourceError as error:
+            # Sonata releases everything it was given before reporting the rest,
+            # and the rest is always in-VM state: buildx builders, the registry
+            # tunnel, the staged source. Destroying the VMs above took them with
+            # it, so this is a note, not a failure -- a teardown that exits
+            # non-zero every time is a teardown nobody reads.
+            unknown = error
+            released = ()
     for title in released:
         typer.echo(f"released: {title}")
-    if not released:
+    if unknown is not None:
+        typer.echo(f"note: {unknown}")
+        typer.echo("those live inside the released VMs and went with them")
+    if not released and unknown is None:
         typer.echo("nothing to tear down: the journal records nothing still held")
 
 
