@@ -6,7 +6,7 @@ import time
 
 import typer
 from sonata_engine.workflow.events import WorkflowEvent as SonataWorkflowEvent
-from workflow_tasks.workflow.events import WorkflowEvent
+from sonata_tasks.workflow.events import WorkflowEvent
 
 # Two engines, one console renderer: workflow_tasks says running/completed,
 # Sonata says started/passed. The events are structurally identical, so the

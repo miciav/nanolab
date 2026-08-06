@@ -12,8 +12,8 @@ from nanolab.tui.models import TuiPhaseSnapshot
 from nanolab.tui.workflow import TuiWorkflowSink, WorkflowDashboard, WorkflowKeyListener
 from sonata_engine.workflow.context import bind_workflow_sink as bind_sonata_sink
 from tui_toolkit.console import console as default_console
-from workflow_tasks import bind_workflow_sink
-from workflow_tasks.workflow.event_builders import build_task_event
+from sonata_tasks.workflow.context import bind_workflow_sink
+from sonata_tasks.workflow.event_builders import build_task_event
 
 
 class TuiWorkflowController:

@@ -26,7 +26,7 @@ from nanolab.release.evidence import RECEIPT_KINDS
 from nanolab.release.model import GitState
 from nanolab.release.versioning import read_project_version
 from nanolab.workspace.paths import ToolPaths
-from workflow_tasks.vm.models import VmInfo
+from sonata_tasks.vm.models import VmInfo
 
 from ..conftest import RejectingProvider
 

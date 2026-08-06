@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 
 from nanolab.cli.progress import ConsoleProgressSink
 from sonata_engine.workflow.events import WorkflowEvent as SonataWorkflowEvent
-from workflow_tasks.workflow.events import WorkflowEvent
+from sonata_tasks.workflow.events import WorkflowEvent
 
 
 def test_console_progress_reports_task_status_and_elapsed_time() -> None:

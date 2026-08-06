@@ -16,15 +16,15 @@ from sonata_tasks.offload_loadtest import (
     build_offload_loadtest_workflow,
 )
 from sonata_tasks.platform import PlatformFunction, PlatformRequest
-from workflow_tasks.components.helm import control_plane_helm_values
+from sonata_tasks.components.helm import control_plane_helm_values
 from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
 from sonata_tasks.loadtest.models import K6Config
 from sonata_tasks.loadtest.offload_conservation import evaluate_conservation
 from sonata_tasks.loadtest.ports import RemoteFileFetcher
 from sonata_tasks.loadtest.tasks import FetchVmResults, RunK6
 from sonata_tasks.tasks.models import CommandTaskSpec
-from workflow_tasks.vm.models import VmRequest
-from workflow_tasks.vm.multipass import resolve_connection_host
+from sonata_tasks.vm.models import VmRequest
+from sonata_tasks.vm.multipass import resolve_connection_host
 
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig

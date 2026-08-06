@@ -1,4 +1,4 @@
-from workflow_tasks.workflow.events import WorkflowEvent
+from sonata_tasks.workflow.events import WorkflowEvent
 
 
 def test_fake_sink_collects_emitted_events(fake_sink) -> None:

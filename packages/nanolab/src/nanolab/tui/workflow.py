@@ -20,8 +20,8 @@ from nanolab.tui.event_aggregator import WorkflowEventAggregator
 from nanolab.tui.models import TuiPhaseSnapshot, TuiWorkflowSnapshot
 from sonata_engine.workflow.events import WorkflowEvent as SonataWorkflowEvent
 from tui_toolkit import render_screen_frame
-from workflow_tasks.workflow.events import WorkflowEvent
-from workflow_tasks.workflow.models import WorkflowState
+from sonata_tasks.workflow.events import WorkflowEvent
+from sonata_tasks.workflow.models import WorkflowState
 
 
 @dataclass

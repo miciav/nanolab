@@ -11,22 +11,22 @@ from sonata_tasks.command import CommandTask
 from sonata_tasks.helm import HelmReleaseSpec, helm_release_resource
 from sonata_tasks.process import managed_process_resource
 from sonata_tasks.vm import vm_resource
-from workflow_tasks.components.bootstrap import (
+from sonata_tasks.components.bootstrap import (
     plan_k3s_install,
     plan_repo_sync_to_vm,
     plan_vm_provision_base,
     retarget_bootstrap_operation,
 )
-from workflow_tasks.components.context import ScenarioExecutionContext
-from workflow_tasks.components.helm import control_plane_helm_values
-from workflow_tasks.components.images import control_image
-from workflow_tasks.components.operations import RemoteCommandOperation, ScenarioOperation
+from sonata_tasks.components.context import ScenarioExecutionContext
+from sonata_tasks.components.helm import control_plane_helm_values
+from sonata_tasks.components.images import control_image
+from sonata_tasks.components.operations import RemoteCommandOperation, ScenarioOperation
 from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
 from sonata_tasks.execution.roles import ExecutionRole
 from sonata_tasks.vm.adapters import VmLifecycleAdapter
 from sonata_tasks.vm.models import VmConfig, VmInfo, VmRequest, vm_remote_home
-from workflow_tasks.vm.multipass import _find_ssh_private_key_path
-from workflow_tasks.vm.orchestrator import VmOrchestrator
+from sonata_tasks.vm.multipass import _find_ssh_private_key_path
+from sonata_tasks.vm.orchestrator import VmOrchestrator
 
 from nanolab.cli.vm_provider import vm_provider_for_environment, vm_request_for_role
 from nanolab.config.environment import EnvironmentConfig

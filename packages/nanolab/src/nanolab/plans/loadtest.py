@@ -19,7 +19,7 @@ from sonata_tasks.loadtest import (
     loadtest_composite,
 )
 from sonata_tasks.platform import PlatformRequest
-from workflow_tasks.components.helm import control_plane_helm_values
+from sonata_tasks.components.helm import control_plane_helm_values
 from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
 from sonata_tasks.execution.roles import ExecutionRole
 from sonata_tasks.loadtest.autoscaling import (

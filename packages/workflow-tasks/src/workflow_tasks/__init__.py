@@ -1,7 +1,9 @@
-"""workflow-tasks — task execution primitives and workflow event infrastructure.
+"""workflow-tasks — the legacy workflow engine.
 
-Zero external dependencies. Configure once via bind_workflow_sink(); every
-call to step/success/fail routes to the active sink.
+The task primitives, components, VM providers, load-test machinery, and the
+event bus moved to `sonata_tasks`; this package keeps the legacy `core`
+engine (`Task`/`Workflow`) for the remaining legacy execution paths, plus
+the task-type re-exports for API stability.
 """
 from __future__ import annotations
 
@@ -11,46 +13,6 @@ from workflow_tasks.core.task import Task
 from workflow_tasks.core.workflow import Workflow
 from sonata_tasks.tasks.executors import HostCommandTaskExecutor, VmCommandTaskExecutor
 from sonata_tasks.tasks.models import CommandTaskSpec, ExecutionTarget, TaskResult, TaskStatus
-from workflow_tasks.workflow.context import (
-    bind_workflow_context,
-    bind_workflow_sink,
-    get_workflow_context,
-    has_workflow_sink,
-)
-from workflow_tasks.workflow.event_builders import build_log_event, build_phase_event, build_task_event
-from workflow_tasks.workflow.events import WorkflowContext, WorkflowEvent, WorkflowSink
-from workflow_tasks.workflow.models import TaskDefinition, TaskRun, WorkflowRun, WorkflowState
-from workflow_tasks.workflow.reporting import (
-    fail,
-    phase,
-    skip,
-    status,
-    step,
-    success,
-    warning,
-    workflow_log,
-    workflow_step,
-)
-from workflow_tasks.vm import (
-    AzureVmAdapter,
-    AzureVmProvider,
-    DestroyVm,
-    EnsureVmRunning,
-    MultipassVmAdapter,
-    MultipassVmProvider,
-    OrchestratorVmRunner,
-    ProxmoxVmAdapter,
-    ProxmoxVmProvider,
-    VmConfig,
-    VmFileFetcher,
-    VmInfo,
-    VmLifecycle,
-    VmLifecycleAdapter,
-    VmLifecycleProtocol,
-    VmRequest,
-    vm_request_from_env,
-)
-from workflow_tasks.infra.ansible import RunPlaybook, install_k6_task
 
 __all__ = [
     "__version__",
@@ -59,21 +21,4 @@ __all__ = [
     # tasks
     "CommandTaskSpec", "ExecutionTarget", "TaskResult", "TaskStatus",
     "HostCommandTaskExecutor", "VmCommandTaskExecutor",
-    # workflow types
-    "WorkflowContext", "WorkflowEvent", "WorkflowSink",
-    "WorkflowState", "WorkflowRun", "TaskDefinition", "TaskRun",
-    # workflow runtime
-    "bind_workflow_sink", "bind_workflow_context", "get_workflow_context", "has_workflow_sink",
-    "build_task_event", "build_phase_event", "build_log_event",
-    "phase", "step", "success", "warning", "skip", "fail",
-    "workflow_log", "workflow_step", "status",
-    # vm
-    "VmConfig", "VmInfo", "VmLifecycle", "VmRequest", "vm_request_from_env",
-    "VmLifecycleProtocol",
-    "EnsureVmRunning", "DestroyVm",
-    "MultipassVmProvider", "AzureVmProvider", "ProxmoxVmProvider",
-    "OrchestratorVmRunner", "VmFileFetcher",
-    "VmLifecycleAdapter", "MultipassVmAdapter", "AzureVmAdapter", "ProxmoxVmAdapter",
-    "RunPlaybook",
-    "install_k6_task",
 ]

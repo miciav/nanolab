@@ -1,8 +1,8 @@
 import pytest
 
 from nanolab.tui.event_aggregator import WorkflowEventAggregator
-from workflow_tasks.workflow.event_builders import build_log_event, build_task_event
-from workflow_tasks.workflow.models import WorkflowState
+from sonata_tasks.workflow.event_builders import build_log_event, build_task_event
+from sonata_tasks.workflow.models import WorkflowState
 
 
 def test_event_aggregator_maps_task_started_event_to_running_step() -> None:

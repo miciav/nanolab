@@ -7,7 +7,7 @@ from sonata_engine import Workflow
 from sonata_tasks.compose import DockerComposeProject, docker_compose_resource
 from sonata_tasks.validate import ValidateFunction as SonataFunction
 from sonata_tasks.validate import ValidateWorkflowRequest, build_validate_workflow
-from workflow_tasks.components.helm import control_plane_helm_values
+from sonata_tasks.components.helm import control_plane_helm_values
 from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
 
 from nanolab.config.scenario import ScenarioConfig

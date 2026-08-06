@@ -3,8 +3,8 @@ from __future__ import annotations
 import time
 
 from sonata_engine.workflow.events import WorkflowEvent as SonataWorkflowEvent
-from workflow_tasks.workflow.events import WorkflowEvent
-from workflow_tasks.workflow.models import WorkflowState
+from sonata_tasks.workflow.events import WorkflowEvent
+from sonata_tasks.workflow.models import WorkflowState
 from nanolab.tui.models import (
     TuiPhaseSnapshot,
     TuiWorkflowSnapshot,

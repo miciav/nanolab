@@ -3,9 +3,9 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from workflow_tasks import VmRequest
-from workflow_tasks.vm.azure import AzureVmProvider
-from workflow_tasks.vm.proxmox import ProxmoxVmProvider
+from sonata_tasks.vm.models import VmRequest
+from sonata_tasks.vm.azure import AzureVmProvider
+from sonata_tasks.vm.proxmox import ProxmoxVmProvider
 
 from nanolab.config.environment import EnvironmentConfig, ExecutionRole
 

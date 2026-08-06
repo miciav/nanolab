@@ -6,17 +6,13 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
+from sonata_tasks.tasks.executors import HostCommandTaskExecutor
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
-from workflow_tasks import (
-    DestroyVm,
-    EnsureVmRunning,
-    HostCommandTaskExecutor,
-    VmConfig,
-    VmLifecycleAdapter,
-    VmRequest,
-    Workflow,
-)
-from workflow_tasks.components.bootstrap import (
+from sonata_tasks.vm.adapters import VmLifecycleAdapter
+from sonata_tasks.vm.models import VmConfig, VmRequest
+from sonata_tasks.vm.tasks import DestroyVm, EnsureVmRunning
+from workflow_tasks import Workflow
+from sonata_tasks.components.bootstrap import (
     plan_assets_sync_to_vm,
     plan_k3s_configure_registry,
     plan_k3s_install,
@@ -26,13 +22,13 @@ from workflow_tasks.components.bootstrap import (
     plan_vm_provision_base,
     retarget_bootstrap_operation,
 )
-from workflow_tasks.components.context import ScenarioExecutionContext
-from workflow_tasks.components.operations import RemoteCommandOperation
-from workflow_tasks.components.operations import ScenarioOperation
+from sonata_tasks.components.context import ScenarioExecutionContext
+from sonata_tasks.components.operations import RemoteCommandOperation
+from sonata_tasks.components.operations import ScenarioOperation
 from workflow_tasks.core.task import Task
-from workflow_tasks.shell import SubprocessShell
-from workflow_tasks.vm.orchestrator import VmOrchestrator
-from workflow_tasks.vm.models import VmInfo, vm_remote_home
+from sonata_tasks.shell import SubprocessShell
+from sonata_tasks.vm.orchestrator import VmOrchestrator
+from sonata_tasks.vm.models import VmInfo, vm_remote_home
 
 from nanolab.config import EnvironmentConfig, ScenarioConfig
 from nanolab.config.environment import ExecutionRole

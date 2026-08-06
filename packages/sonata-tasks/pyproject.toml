@@ -18,7 +18,12 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-sonata_tasks = ["py.typed"]
+sonata_tasks = [
+    "py.typed",
+    "infra/ansible_assets/ansible.cfg",
+    "infra/ansible_assets/requirements.txt",
+    "infra/ansible_assets/playbooks/*.yml",
+]
 
 [dependency-groups]
 dev = [

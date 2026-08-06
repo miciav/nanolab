@@ -12,7 +12,9 @@ from unittest.mock import MagicMock
 import pytest
 from rich.console import Console
 from rich.table import Table
-from workflow_tasks import WorkflowEvent, bind_workflow_sink, step, workflow_log
+from sonata_tasks.workflow.context import bind_workflow_sink
+from sonata_tasks.workflow.events import WorkflowEvent
+from sonata_tasks.workflow.reporting import step, workflow_log
 
 import nanolab.tui.app as tui_app
 import nanolab.tui.workflow_controller as workflow_controller_module

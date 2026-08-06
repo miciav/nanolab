@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from workflow_tasks.core.task import Task
-from workflow_tasks.workflow.reporting import workflow_step
+from sonata_tasks.workflow.reporting import workflow_step
 
 
 @dataclass

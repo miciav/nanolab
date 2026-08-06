@@ -13,7 +13,7 @@ import yaml
 from sonata_engine import JournalConfig, Resource, Selection
 from sonata_tasks.execution.bindings import RoleBindings
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
-from workflow_tasks.vm.models import VmInfo
+from sonata_tasks.vm.models import VmInfo
 
 import nanolab.plans.release as release_plan
 import nanolab.release.resources as release_resources

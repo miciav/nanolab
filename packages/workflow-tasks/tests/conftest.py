@@ -4,7 +4,7 @@ from contextlib import contextmanager
 
 import pytest
 
-from workflow_tasks.workflow.events import WorkflowEvent
+from sonata_tasks.workflow.events import WorkflowEvent
 
 
 class FakeSink:

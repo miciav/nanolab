@@ -7,7 +7,7 @@ from pathlib import Path
 import sys
 from unittest.mock import MagicMock, patch
 
-from workflow_tasks.shell import (
+from sonata_tasks.shell import (
     RecordingShell,
     ScriptedShell,
     ShellExecutionResult,

@@ -11,7 +11,7 @@ import pytest
 import yaml
 
 from nanolab.release.versioning import read_project_version
-from workflow_tasks.workflow.events import WorkflowEvent
+from sonata_tasks.workflow.events import WorkflowEvent
 
 # Typer force-enables Rich terminal rendering (ANSI highlighting of option-like
 # tokens such as "--provision") whenever GITHUB_ACTIONS/FORCE_COLOR/PY_COLORS is

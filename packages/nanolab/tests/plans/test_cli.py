@@ -5,11 +5,11 @@ from dataclasses import dataclass, field
 import pytest
 import yaml
 from sonata_engine import Selection
-from workflow_tasks.components import bootstrap
+from sonata_tasks.components import bootstrap
 from sonata_tasks.execution.bindings import RoleBindings
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
-from workflow_tasks.vm import multipass
-from workflow_tasks.vm.models import VmRequest
+from sonata_tasks.vm import multipass
+from sonata_tasks.vm.models import VmRequest
 
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig

@@ -13,10 +13,10 @@ from sonata_tasks.tasks.executors import (
     VmCommandResult,
     VmCommandTaskExecutor,
 )
-from workflow_tasks.shell import SubprocessShell
-from workflow_tasks.vm.models import VmRequest, vm_remote_home
-from workflow_tasks.vm.multipass import resolve_connection_host
-from workflow_tasks.vm.runners import OrchestratorVmRunner, VmFileFetcher
+from sonata_tasks.shell import SubprocessShell
+from sonata_tasks.vm.models import VmRequest, vm_remote_home
+from sonata_tasks.vm.multipass import resolve_connection_host
+from sonata_tasks.vm.runners import OrchestratorVmRunner, VmFileFetcher
 
 from nanolab.cli.vm_provider import (
     vm_provider_for_environment,

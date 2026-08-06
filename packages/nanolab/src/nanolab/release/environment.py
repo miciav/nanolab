@@ -16,7 +16,7 @@ import tempfile
 from nanolab.config import EnvironmentConfig
 from nanolab.config.environment import ExecutionRole
 from nanolab.release.versioning import normalize_version, verify_version_consistency
-from workflow_tasks.vm.models import VmRequest
+from sonata_tasks.vm.models import VmRequest
 
 
 _STACK_VM_SIZE = "Standard_D8s_v5"

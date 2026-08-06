@@ -4,7 +4,7 @@ from rich.console import Console
 
 from nanolab.tui.event_aggregator import WorkflowEventAggregator
 from nanolab.tui.workflow import TuiWorkflowSink, WorkflowDashboard, WorkflowStepState
-from workflow_tasks.workflow.event_builders import build_log_event, build_task_event
+from sonata_tasks.workflow.event_builders import build_log_event, build_task_event
 
 
 def rendered_text(dashboard: WorkflowDashboard, *, width: int = 120) -> str:

@@ -10,7 +10,7 @@ from typing import Any, Callable, Generic, TypeVar
 from sonata_engine import Resource, TaskInputs
 from sonata_tasks.vm import vm_resource
 from sonata_tasks.compensation import best_effort
-from workflow_tasks.components.bootstrap import (
+from sonata_tasks.components.bootstrap import (
     plan_assets_sync_to_vm,
     plan_k3s_configure_registry,
     plan_k3s_install,
