@@ -3,7 +3,7 @@ from __future__ import annotations
 from types import MappingProxyType
 from typing import get_args
 
-from workflow_tasks.tasks.models import (
+from sonata_tasks.tasks.models import (
     CommandTaskSpec,
     ExecutionTarget,
     TaskResult,

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from workflow_tasks.loadtest.autoscaling import HttpReplicaProbe, VerifyAutoscalingReplicas
+from sonata_tasks.loadtest.autoscaling import HttpReplicaProbe, VerifyAutoscalingReplicas
 
 
 @dataclass
@@ -47,7 +47,7 @@ def test_http_replica_probe_reads_provider_neutral_status(monkeypatch) -> None:
         assert timeout == 4.0
         return Response()
 
-    monkeypatch.setattr("workflow_tasks.loadtest.autoscaling.httpx.get", get)
+    monkeypatch.setattr("sonata_tasks.loadtest.autoscaling.httpx.get", get)
     probe = HttpReplicaProbe(
         endpoint="http://127.0.0.1:8080/",
         function_name="word stats/java",
@@ -62,7 +62,7 @@ def test_http_replica_probe_reads_provider_neutral_status(monkeypatch) -> None:
 
 
 def test_verify_autoscaling_replicas_observes_scale_up_and_down(monkeypatch) -> None:
-    monkeypatch.setattr("workflow_tasks.loadtest.autoscaling.time.sleep", lambda _: None)
+    monkeypatch.setattr("sonata_tasks.loadtest.autoscaling.time.sleep", lambda _: None)
     runner = _Runner(["1", "1", "2", "2", "0"])
     task = VerifyAutoscalingReplicas(
         task_id="autoscaling.verify_replicas",
@@ -86,7 +86,7 @@ def test_verify_autoscaling_replicas_observes_scale_up_and_down(monkeypatch) -> 
 
 
 def test_verify_autoscaling_replicas_quotes_shell_arguments(monkeypatch) -> None:
-    monkeypatch.setattr("workflow_tasks.loadtest.autoscaling.time.sleep", lambda _: None)
+    monkeypatch.setattr("sonata_tasks.loadtest.autoscaling.time.sleep", lambda _: None)
     runner = _Runner(["2", "2", "0"])
     task = VerifyAutoscalingReplicas(
         task_id="autoscaling.verify_replicas",
@@ -109,7 +109,7 @@ def test_verify_autoscaling_replicas_quotes_shell_arguments(monkeypatch) -> None
 
 
 def test_verify_autoscaling_replicas_accepts_scale_down_on_final_poll(monkeypatch) -> None:
-    monkeypatch.setattr("workflow_tasks.loadtest.autoscaling.time.sleep", lambda _: None)
+    monkeypatch.setattr("sonata_tasks.loadtest.autoscaling.time.sleep", lambda _: None)
     runner = _Runner(["2", "2", "1", "0"])
     task = VerifyAutoscalingReplicas(
         task_id="autoscaling.verify_replicas",
@@ -130,7 +130,7 @@ def test_verify_autoscaling_replicas_accepts_scale_down_on_final_poll(monkeypatc
 
 
 def test_verify_autoscaling_replicas_fails_when_scale_up_never_exceeds_one(monkeypatch) -> None:
-    monkeypatch.setattr("workflow_tasks.loadtest.autoscaling.time.sleep", lambda _: None)
+    monkeypatch.setattr("sonata_tasks.loadtest.autoscaling.time.sleep", lambda _: None)
     runner = _Runner(["1", "1", "1", "1"])
     task = VerifyAutoscalingReplicas(
         task_id="autoscaling.verify_replicas",
@@ -154,7 +154,7 @@ def test_verify_autoscaling_replicas_fails_when_scale_up_never_exceeds_one(monke
 
 
 def test_verify_autoscaling_replicas_fails_when_scale_down_never_reaches_zero(monkeypatch) -> None:
-    monkeypatch.setattr("workflow_tasks.loadtest.autoscaling.time.sleep", lambda _: None)
+    monkeypatch.setattr("sonata_tasks.loadtest.autoscaling.time.sleep", lambda _: None)
     runner = _Runner(["2", "2", "2", "2", "1"])
     task = VerifyAutoscalingReplicas(
         task_id="autoscaling.verify_replicas",
@@ -187,7 +187,7 @@ class _FailingRunner:
 
 
 def test_replica_probe_reports_missing_deployment_clearly() -> None:
-    from workflow_tasks.loadtest.autoscaling import ReplicaProbe
+    from sonata_tasks.loadtest.autoscaling import ReplicaProbe
 
     probe = ReplicaProbe(
         runner=_FailingRunner('Error from server (NotFound): deployments.apps "fn-x" not found'),
@@ -205,7 +205,7 @@ def test_replica_probe_reports_missing_deployment_clearly() -> None:
 
 
 def test_replica_probe_propagates_kubectl_errors() -> None:
-    from workflow_tasks.loadtest.autoscaling import ReplicaProbe
+    from sonata_tasks.loadtest.autoscaling import ReplicaProbe
 
     probe = ReplicaProbe(
         runner=_FailingRunner("Unable to connect to the server: dial tcp: lookup ..."),
@@ -222,7 +222,7 @@ def test_replica_probe_propagates_kubectl_errors() -> None:
 
 
 def test_replica_probe_treats_empty_jsonpath_output_as_zero() -> None:
-    from workflow_tasks.loadtest.autoscaling import ReplicaProbe
+    from sonata_tasks.loadtest.autoscaling import ReplicaProbe
 
     probe = ReplicaProbe(
         runner=_Runner([""]),  # readyReplicas is absent from status when 0
@@ -234,7 +234,7 @@ def test_replica_probe_treats_empty_jsonpath_output_as_zero() -> None:
 
 
 def test_replica_watcher_records_max_while_running() -> None:
-    from workflow_tasks.loadtest.autoscaling import ReplicaProbe, ReplicaWatcher
+    from sonata_tasks.loadtest.autoscaling import ReplicaProbe, ReplicaWatcher
 
     runner = _Runner(["1", "1", "2", "3", "2", "1"])
     probe = ReplicaProbe(
@@ -256,7 +256,7 @@ def test_replica_watcher_records_max_while_running() -> None:
 
 
 def test_replica_watcher_survives_probe_errors() -> None:
-    from workflow_tasks.loadtest.autoscaling import ReplicaProbe, ReplicaWatcher
+    from sonata_tasks.loadtest.autoscaling import ReplicaProbe, ReplicaWatcher
 
     probe = ReplicaProbe(
         runner=_FailingRunner("Unable to connect to the server"),
@@ -274,7 +274,7 @@ def test_replica_watcher_survives_probe_errors() -> None:
 
 
 def test_run_k6_with_replica_watch_starts_and_stops_watcher_around_run() -> None:
-    from workflow_tasks.loadtest.autoscaling import RunK6WithReplicaWatch
+    from sonata_tasks.loadtest.autoscaling import RunK6WithReplicaWatch
 
     events: list[str] = []
 
@@ -304,7 +304,7 @@ def test_run_k6_with_replica_watch_starts_and_stops_watcher_around_run() -> None
 
 
 def test_run_k6_with_replica_watch_stops_watcher_on_k6_failure() -> None:
-    from workflow_tasks.loadtest.autoscaling import RunK6WithReplicaWatch
+    from sonata_tasks.loadtest.autoscaling import RunK6WithReplicaWatch
 
     events: list[str] = []
 
@@ -333,7 +333,7 @@ def test_run_k6_with_replica_watch_stops_watcher_on_k6_failure() -> None:
 
 
 def test_verify_uses_watcher_max_and_skips_scale_up_polling(monkeypatch) -> None:
-    monkeypatch.setattr("workflow_tasks.loadtest.autoscaling.time.sleep", lambda _: None)
+    monkeypatch.setattr("sonata_tasks.loadtest.autoscaling.time.sleep", lambda _: None)
 
     class _WatcherStub:
         max_observed = 3
@@ -380,7 +380,7 @@ def test_verify_result_requires_a_completed_run(monkeypatch) -> None:
 
 
 def test_scale_up_failure_message_includes_watcher_probe_errors(monkeypatch) -> None:
-    monkeypatch.setattr("workflow_tasks.loadtest.autoscaling.time.sleep", lambda _: None)
+    monkeypatch.setattr("sonata_tasks.loadtest.autoscaling.time.sleep", lambda _: None)
 
     class _WatcherStub:
         max_observed = 0
@@ -411,7 +411,7 @@ def test_scale_up_failure_message_includes_watcher_probe_errors(monkeypatch) -> 
 
 
 def test_fetch_autoscaling_summary_creates_parent_and_fetches(tmp_path) -> None:
-    from workflow_tasks.loadtest.autoscaling import FetchAutoscalingSummary
+    from sonata_tasks.loadtest.autoscaling import FetchAutoscalingSummary
 
     fetched: list[tuple[str, object]] = []
 

@@ -12,6 +12,7 @@ dependencies = [
     "azure-vm-sdk @ git+https://github.com/miciav/azure-vm-sdk.git@cb159a5",
     "proxmox-sdk @ git+https://github.com/miciav/proxmox-sdk.git@9e20703",
     "shellcraft @ git+https://github.com/miciav/shellcraft.git@b6547835aac88d058810c7b9a592ad442c54ac99",
+    "sonata-tasks",
 ]
 
 [project.scripts]
@@ -40,6 +41,9 @@ dev = [
     "pytest-cov>=6.0",
     "ruff>=0.15.12",
 ]
+
+[tool.uv.sources]
+sonata-tasks = { workspace = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

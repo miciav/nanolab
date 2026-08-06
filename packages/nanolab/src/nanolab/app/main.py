@@ -5,7 +5,6 @@ import sys
 import typer
 from rich.traceback import install as install_rich_tracebacks
 
-from nanolab.cli.images import install_image_commands
 from nanolab.cli.product import install_product_commands
 from nanolab.cli.release import install_release_commands
 from nanolab.tui.setup import setup_ui
@@ -24,7 +23,6 @@ def tui() -> None:
 
 
 install_product_commands(app)
-install_image_commands(app)
 install_release_commands(app)
 
 

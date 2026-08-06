@@ -5,12 +5,12 @@ from pathlib import Path
 from typing import Any
 
 from sonata_engine import Resource, Workflow
-from workflow_tasks.execution.bindings import (
+from sonata_tasks.execution.bindings import (
     CommandTaskExecutor,
     RoleBindings,
     RoleBoundCommandTaskExecutor,
 )
-from workflow_tasks.execution.roles import ExecutionRole
+from sonata_tasks.execution.roles import ExecutionRole
 
 from sonata_tasks.cli_function import (
     CliFunctionApplyTask,

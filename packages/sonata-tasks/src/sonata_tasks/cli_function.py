@@ -3,8 +3,8 @@ from __future__ import annotations
 import shlex
 from pathlib import Path
 
-from workflow_tasks.execution.bindings import CommandTaskExecutor
-from workflow_tasks.execution.roles import ExecutionRole
+from sonata_tasks.execution.bindings import CommandTaskExecutor
+from sonata_tasks.execution.roles import ExecutionRole
 
 from sonata_tasks.command import CommandTask
 from sonata_tasks.invocation import verify_invocation

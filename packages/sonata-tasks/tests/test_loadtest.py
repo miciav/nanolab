@@ -10,9 +10,9 @@ import pytest
 from sonata_engine import TaskInputs, Workflow
 from sonata_engine.errors import NoUpstreamValueError
 from sonata_engine.workflow.context import bind_workflow_sink
-from workflow_tasks.loadtest.autoscaling import AutoscalingSummary
-from workflow_tasks.loadtest.models import K6RunResult, TimeWindow
-from workflow_tasks.tasks.models import CommandTaskSpec, TaskResult
+from sonata_tasks.loadtest.autoscaling import AutoscalingSummary
+from sonata_tasks.loadtest.models import K6RunResult, TimeWindow
+from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 from sonata_tasks.command import CommandTask
 from sonata_tasks.loadtest import (
@@ -282,7 +282,7 @@ def test_loadtest_reuses_the_platform_validate_deploys() -> None:
     """The two workflows differ only in what they do once the platform is up, so
     the eight deployment units are the shared half rather than a second copy."""
     from sonata_engine import Workflow as SonataWorkflow
-    from workflow_tasks.execution.bindings import RoleBindings
+    from sonata_tasks.execution.bindings import RoleBindings
 
     from sonata_tasks.loadtest import build_loadtest_workflow
 
@@ -309,7 +309,7 @@ def test_loadtest_reuses_the_platform_validate_deploys() -> None:
 
 
 def test_a_failed_load_test_still_deregisters_what_it_registered() -> None:
-    from workflow_tasks.execution.bindings import RoleBindings
+    from sonata_tasks.execution.bindings import RoleBindings
 
     from sonata_tasks.loadtest import build_loadtest_workflow, loadtest_composite
 

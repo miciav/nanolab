@@ -1,23 +1,6 @@
-from workflow_tasks.loadtest.models import (
-    K6Config,
-    K6RunResult,
-    K6Stage,
-    PrometheusQuery,
-    TimeWindow,
-)
-from workflow_tasks.loadtest.ports import PrometheusClient, RemoteFileFetcher
-from workflow_tasks.loadtest.tasks import (
-    CapturePrometheusSnapshot,
-    FetchVmResults,
-    RunK6,
-    WriteK6Report,
-)
-from workflow_tasks.loadtest.prometheus import query_prometheus_range_series
-from workflow_tasks.loadtest.adapters import HttpPrometheusClient
+"""Legacy load-test helpers that remain on the legacy engine.
 
-__all__ = [
-    "K6Config", "K6RunResult", "K6Stage", "PrometheusQuery", "TimeWindow",
-    "RemoteFileFetcher", "PrometheusClient",
-    "RunK6", "FetchVmResults", "CapturePrometheusSnapshot", "WriteK6Report",
-    "query_prometheus_range_series", "HttpPrometheusClient",
-]
+The k6/autoscaling/prometheus/offload-conservation implementations moved to
+`sonata_tasks.loadtest`; what stays here is only `two_vm.py`, used by the
+legacy helm component.
+"""

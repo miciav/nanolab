@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 from sonata_engine import Resource, TaskInputs
-from workflow_tasks.vm.models import VmConfig, VmInfo
+from sonata_tasks.vm.models import VmConfig, VmInfo
 
 from sonata_tasks.vm import vm_resource
 

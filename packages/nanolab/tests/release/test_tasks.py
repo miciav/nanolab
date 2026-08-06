@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 from sonata_engine import Evidence, JournalConfig, TaskInputs, TaskOutcome, Workflow
-from workflow_tasks.tasks.models import TaskResult
+from sonata_tasks.tasks.models import TaskResult
 
 from nanolab.release.evidence import file_digest_verifier, receipt_artifacts
 from nanolab.release import tasks as release_tasks

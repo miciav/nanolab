@@ -9,8 +9,8 @@ from typing import Any, Protocol
 from urllib.parse import quote
 
 import httpx
-from workflow_tasks.loadtest.ports import RemoteFileFetcher
-from workflow_tasks.tasks.executors import VmCommandRunner
+from sonata_tasks.loadtest.ports import RemoteFileFetcher
+from sonata_tasks.tasks.executors import VmCommandRunner
 
 
 class Runnable(Protocol):

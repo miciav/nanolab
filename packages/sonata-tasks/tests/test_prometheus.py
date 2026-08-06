@@ -5,11 +5,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from workflow_tasks.loadtest.prometheus import query_prometheus_range_series
+from sonata_tasks.loadtest.prometheus import query_prometheus_range_series
 
 
 def test_query_range_series_raises_on_http_error() -> None:
-    with patch("workflow_tasks.loadtest.prometheus.httpx.get") as mock_get:
+    with patch("sonata_tasks.loadtest.prometheus.httpx.get") as mock_get:
         mock_get.side_effect = Exception("connection refused")
         with pytest.raises(RuntimeError, match="prometheus api request failed"):
             query_prometheus_range_series(
@@ -37,7 +37,7 @@ def test_query_range_series_returns_parsed_points() -> None:
         },
     }
 
-    with patch("workflow_tasks.loadtest.prometheus.httpx.get", return_value=mock_response):
+    with patch("sonata_tasks.loadtest.prometheus.httpx.get", return_value=mock_response):
         result = query_prometheus_range_series(
             "http://localhost:9090",
             "http_requests_total",
@@ -51,7 +51,7 @@ def test_query_range_series_returns_parsed_points() -> None:
 
 
 def test_query_prometheus_server_time_parses_time_scalar(monkeypatch) -> None:
-    from workflow_tasks.loadtest import prometheus
+    from sonata_tasks.loadtest import prometheus
 
     monkeypatch.setattr(
         prometheus,

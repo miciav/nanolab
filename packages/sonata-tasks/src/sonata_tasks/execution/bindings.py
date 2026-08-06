@@ -3,8 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Literal, Protocol
 
-from workflow_tasks.execution.roles import ExecutionRole
-from workflow_tasks.tasks.models import CommandTaskSpec, TaskResult
+from sonata_tasks.execution.roles import ExecutionRole
+from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 
 class CommandTaskExecutor(Protocol):

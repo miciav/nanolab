@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Protocol
 
-from workflow_tasks.tasks.models import CommandTaskSpec, TaskResult
+from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 
 class CommandRunResult(Protocol):

@@ -1,4 +1,4 @@
-from workflow_tasks.loadtest.offload_conservation import evaluate_conservation
+from sonata_tasks.loadtest.offload_conservation import evaluate_conservation
 
 OFFLOADABLE = "word-stats-java"
 CONTROL = "json-transform-java"

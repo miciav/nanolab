@@ -9,11 +9,8 @@ __version__ = "0.1.0"
 
 from workflow_tasks.core.task import Task
 from workflow_tasks.core.workflow import Workflow
-from workflow_tasks.tasks.adapters import RemoteCommandOperationLike, operation_to_task_spec
-from workflow_tasks.tasks.command_task import CommandTask, command_task_from_operation
-from workflow_tasks.tasks.executors import HostCommandTaskExecutor, VmCommandTaskExecutor
-from workflow_tasks.tasks.models import CommandTaskSpec, ExecutionTarget, TaskResult, TaskStatus
-from workflow_tasks.tasks.rendering import render_shell_command, render_task_command
+from sonata_tasks.tasks.executors import HostCommandTaskExecutor, VmCommandTaskExecutor
+from sonata_tasks.tasks.models import CommandTaskSpec, ExecutionTarget, TaskResult, TaskStatus
 from workflow_tasks.workflow.context import (
     bind_workflow_context,
     bind_workflow_sink,
@@ -53,26 +50,6 @@ from workflow_tasks.vm import (
     VmRequest,
     vm_request_from_env,
 )
-from workflow_tasks.loadtest import (
-    CapturePrometheusSnapshot,
-    FetchVmResults,
-    HttpPrometheusClient,
-    K6Config,
-    K6RunResult,
-    K6Stage,
-    PrometheusClient,
-    PrometheusQuery,
-    RemoteFileFetcher,
-    RunK6,
-    TimeWindow,
-    WriteK6Report,
-    query_prometheus_range_series,
-)
-from workflow_tasks.loadtest.loadgen_sequence import (
-    LoadgenBodyInputs,
-    build_loadgen_body_tasks,
-    make_loadtest_k6_config,
-)
 from workflow_tasks.infra.ansible import RunPlaybook, install_k6_task
 
 __all__ = [
@@ -82,9 +59,6 @@ __all__ = [
     # tasks
     "CommandTaskSpec", "ExecutionTarget", "TaskResult", "TaskStatus",
     "HostCommandTaskExecutor", "VmCommandTaskExecutor",
-    "render_shell_command", "render_task_command",
-    "RemoteCommandOperationLike", "operation_to_task_spec",
-    "CommandTask", "command_task_from_operation",
     # workflow types
     "WorkflowContext", "WorkflowEvent", "WorkflowSink",
     "WorkflowState", "WorkflowRun", "TaskDefinition", "TaskRun",
@@ -102,12 +76,4 @@ __all__ = [
     "VmLifecycleAdapter", "MultipassVmAdapter", "AzureVmAdapter", "ProxmoxVmAdapter",
     "RunPlaybook",
     "install_k6_task",
-    # loadtest
-    "K6Config", "K6Stage", "K6RunResult", "TimeWindow", "PrometheusQuery",
-    "RemoteFileFetcher", "PrometheusClient",
-    "RunK6", "FetchVmResults", "CapturePrometheusSnapshot", "WriteK6Report",
-    "query_prometheus_range_series", "HttpPrometheusClient",
-    "make_loadtest_k6_config",
-    "LoadgenBodyInputs",
-    "build_loadgen_body_tasks",
 ]

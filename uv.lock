@@ -1088,7 +1088,6 @@ version = "0.1.0"
 source = { editable = "packages/sonata-tasks" }
 dependencies = [
     { name = "sonata-engine" },
-    { name = "workflow-tasks" },
 ]
 
 [package.dev-dependencies]
@@ -1102,10 +1101,7 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [
-    { name = "sonata-engine", git = "https://github.com/miciav/sonata.git?rev=818d53e6375f71930eb0a198ffb1dfc84cc6b077" },
-    { name = "workflow-tasks", editable = "packages/workflow-tasks" },
-]
+requires-dist = [{ name = "sonata-engine", git = "https://github.com/miciav/sonata.git?rev=818d53e6375f71930eb0a198ffb1dfc84cc6b077" }]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1231,6 +1227,7 @@ dependencies = [
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "shellcraft" },
+    { name = "sonata-tasks" },
 ]
 
 [package.dev-dependencies]
@@ -1253,6 +1250,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.9.2" },
     { name = "pydantic-settings", specifier = ">=2.5" },
     { name = "shellcraft", git = "https://github.com/miciav/shellcraft.git?rev=b6547835aac88d058810c7b9a592ad442c54ac99" },
+    { name = "sonata-tasks", editable = "packages/sonata-tasks" },
 ]
 
 [package.metadata.requires-dev]

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 from sonata_engine import Evidence, Steps, Workflow
-from workflow_tasks.tasks.models import CommandTaskSpec, TaskResult
+from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 from sonata_tasks import release_composites
 from sonata_tasks.release_composites import (

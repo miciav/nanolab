@@ -27,7 +27,7 @@ from sonata_tasks.release_composites import (
 from sonata_tasks.transfer import FileTransferTask
 from nanolab.plans import loadtest as loadtest_plan
 from sonata_tasks.registry_tunnel import registry_tunnel_resource
-from workflow_tasks.execution.bindings import RoleBoundCommandTaskExecutor
+from sonata_tasks.execution.bindings import RoleBoundCommandTaskExecutor
 
 from nanolab.cli.execution import build_role_bindings
 from nanolab.cli.vm_provider import vm_provider_for_environment, vm_request_for_role

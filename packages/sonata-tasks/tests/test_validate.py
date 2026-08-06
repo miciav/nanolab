@@ -7,8 +7,8 @@ from typing import Any
 import pytest
 from sonata_engine import Resource, TaskInputs, Workflow
 from sonata_engine.workflow.context import bind_workflow_sink
-from workflow_tasks.execution.bindings import RoleBindings
-from workflow_tasks.tasks.models import CommandTaskSpec, TaskResult
+from sonata_tasks.execution.bindings import RoleBindings
+from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 from sonata_tasks.validate import (
     ValidateFunction,

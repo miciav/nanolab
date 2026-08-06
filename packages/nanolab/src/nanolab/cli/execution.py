@@ -6,13 +6,14 @@ import shlex
 from typing import cast
 
 from multipass import MultipassClient
-from workflow_tasks.execution.bindings import RetargetingCommandTaskExecutor, RoleBindings
-from workflow_tasks.tasks.executors import (
+from sonata_tasks.execution.bindings import RetargetingCommandTaskExecutor, RoleBindings
+from sonata_tasks.tasks.executors import (
     HostCommandRunner,
     HostCommandTaskExecutor,
     VmCommandResult,
     VmCommandTaskExecutor,
 )
+from workflow_tasks.shell import SubprocessShell
 from workflow_tasks.vm.models import VmRequest, vm_remote_home
 from workflow_tasks.vm.multipass import resolve_connection_host
 from workflow_tasks.vm.runners import OrchestratorVmRunner, VmFileFetcher
@@ -23,7 +24,6 @@ from nanolab.cli.vm_provider import (
 )
 from nanolab.config.environment import EnvironmentConfig, RoleTarget
 from nanolab.config.scenario import BackendName
-from nanolab.core.task_shell_adapter import ShellCommandTaskRunner
 from nanolab.workspace.paths import default_tool_paths
 
 
@@ -202,7 +202,7 @@ def build_role_bindings(
     vm_provider: object | None = None,
     repo_root: Path | None = None,
 ) -> tuple[RoleBindings, _RemoteFetcher | VmFileFetcher | None]:
-    command_runner = runner or ShellCommandTaskRunner()
+    command_runner = runner or SubprocessShell()
     host = HostCommandTaskExecutor(command_runner)
     if environment.provider == "local":
         return RoleBindings(host=host, stack=host, loadgen=host, cloud=host, arm_builder=host), None

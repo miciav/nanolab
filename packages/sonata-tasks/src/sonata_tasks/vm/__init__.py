@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from sonata_engine import Resource, TaskInputs
-from workflow_tasks.vm.adapters import VmLifecycleAdapter
-from workflow_tasks.vm.models import VmConfig, VmInfo
-from workflow_tasks.vm.tasks import DestroyVm, EnsureVmRunning
+from sonata_tasks.vm.adapters import VmLifecycleAdapter
+from sonata_tasks.vm.models import VmConfig, VmInfo
+from sonata_tasks.vm.tasks import DestroyVm, EnsureVmRunning
 
 from sonata_tasks.compensation import compensated_resource
 

@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from workflow_tasks.loadtest.models import K6Config, K6RunResult, K6Stage, PrometheusQuery, TimeWindow
-from workflow_tasks.loadtest.tasks import (
+from sonata_tasks.loadtest.models import K6Config, K6RunResult, K6Stage, PrometheusQuery, TimeWindow
+from sonata_tasks.loadtest.tasks import (
     CapturePrometheusSnapshot,
     FetchVmResults,
     RunK6,
@@ -449,7 +449,7 @@ def test_write_k6_report_works_without_prometheus_snapshot(tmp_path: Path) -> No
 def test_write_loadtest_summary_combines_k6_prometheus_and_autoscaling(
     tmp_path: Path,
 ) -> None:
-    from workflow_tasks.loadtest.autoscaling import AutoscalingSummary
+    from sonata_tasks.loadtest.autoscaling import AutoscalingSummary
 
     (tmp_path / "metrics").mkdir()
     (tmp_path / "k6-summary.json").write_text(

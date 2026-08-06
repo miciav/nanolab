@@ -5,7 +5,6 @@ description = "nanoFaaS workflow tasks built on the Sonata engine."
 requires-python = ">=3.12"
 dependencies = [
     "sonata-engine @ git+https://github.com/miciav/sonata.git@818d53e6375f71930eb0a198ffb1dfc84cc6b077",
-    "workflow-tasks",
 ]
 
 [build-system]
@@ -30,9 +29,6 @@ dev = [
     "pytest-cov>=6.0",
     "ruff>=0.15.12",
 ]
-
-[tool.uv.sources]
-workflow-tasks = { workspace = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -15,9 +15,11 @@ def test_public_api_exports_executors() -> None:
     assert hasattr(workflow_tasks, "VmCommandTaskExecutor")
 
 
-def test_public_api_exports_command_task() -> None:
-    assert hasattr(workflow_tasks, "CommandTask")
-    assert hasattr(workflow_tasks, "command_task_from_operation")
+def test_public_api_no_longer_exports_the_operation_bridge() -> None:
+    # The operation→spec adapters moved into nanolab's provisioning path.
+    assert not hasattr(workflow_tasks, "CommandTask")
+    assert not hasattr(workflow_tasks, "command_task_from_operation")
+    assert not hasattr(workflow_tasks, "operation_to_task_spec")
 
 
 def test_public_api_exports_workflow_types() -> None:
@@ -53,20 +55,13 @@ def test_public_api_exports_vm_tasks() -> None:
 
 
 def test_public_api_exports_loadtest_tasks() -> None:
-    assert hasattr(workflow_tasks, "K6Config")
-    assert hasattr(workflow_tasks, "K6Stage")
-    assert hasattr(workflow_tasks, "K6RunResult")
-    assert hasattr(workflow_tasks, "TimeWindow")
-    assert hasattr(workflow_tasks, "PrometheusQuery")
-    assert hasattr(workflow_tasks, "RemoteFileFetcher")
-    assert hasattr(workflow_tasks, "PrometheusClient")
-    assert not hasattr(workflow_tasks, "InstallK6")
+    # The k6/autoscaling/prometheus/offload-conservation cluster moved to
+    # sonata_tasks.loadtest; the legacy package re-exports nothing anymore.
+    assert not hasattr(workflow_tasks, "K6Config")
+    assert not hasattr(workflow_tasks, "RunK6")
+    assert not hasattr(workflow_tasks, "HttpPrometheusClient")
     assert hasattr(workflow_tasks, "RunPlaybook")
     assert hasattr(workflow_tasks, "install_k6_task")
-    assert hasattr(workflow_tasks, "RunK6")
-    assert hasattr(workflow_tasks, "FetchVmResults")
-    assert hasattr(workflow_tasks, "CapturePrometheusSnapshot")
-    assert hasattr(workflow_tasks, "WriteK6Report")
 
 
 def test_public_api_exports_vm_infrastructure() -> None:
@@ -78,7 +73,7 @@ def test_public_api_exports_vm_infrastructure() -> None:
     assert hasattr(workflow_tasks, "VmLifecycleAdapter")
     assert hasattr(workflow_tasks, "MultipassVmAdapter")
     assert hasattr(workflow_tasks, "AzureVmAdapter")
-    assert hasattr(workflow_tasks, "HttpPrometheusClient")
+    assert not hasattr(workflow_tasks, "HttpPrometheusClient")
 
 
 def test_public_api_exports_proxmox_provider() -> None:

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 
-from workflow_tasks.loadtest.models import (
+from sonata_tasks.loadtest.models import (
     K6Config,
     K6RunResult,
     K6Stage,

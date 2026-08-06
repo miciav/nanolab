@@ -6,9 +6,9 @@ from pathlib import Path
 from typing import override
 
 from sonata_engine import Task, TaskInputs, TaskOutcome
-from workflow_tasks.execution.bindings import CommandTaskExecutor
-from workflow_tasks.execution.roles import ExecutionRole
-from workflow_tasks.tasks.models import TaskResult
+from sonata_tasks.execution.bindings import CommandTaskExecutor
+from sonata_tasks.execution.roles import ExecutionRole
+from sonata_tasks.tasks.models import TaskResult
 
 from sonata_tasks.command import CommandTask
 

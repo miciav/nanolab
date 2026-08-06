@@ -26,9 +26,9 @@ import re
 from typing import Any
 
 from sonata_engine import Evidence, ReusableTask, Steps, Task, TaskInputs, TaskOutcome
-from workflow_tasks.execution.bindings import CommandTaskExecutor
-from workflow_tasks.execution.roles import ExecutionRole
-from workflow_tasks.tasks.models import CommandTaskSpec
+from sonata_tasks.execution.bindings import CommandTaskExecutor
+from sonata_tasks.execution.roles import ExecutionRole
+from sonata_tasks.tasks.models import CommandTaskSpec
 
 from sonata_tasks.command import CommandTask
 from sonata_tasks.cosign import COSIGN_IMAGE, CosignTask

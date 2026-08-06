@@ -13,8 +13,8 @@ from nanolab.plans.offload_loadtest import (
     EvaluateOffloadConservation,
     build_offload_loadtest_plan,
 )
-from workflow_tasks.execution.bindings import RoleBindings
-from workflow_tasks.tasks.models import CommandTaskSpec, TaskResult
+from sonata_tasks.execution.bindings import RoleBindings
+from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 NANOFAAS_ROOT = Path(os.environ["NANOFAAS_ROOT"]).resolve()
 NANOLAB_ROOT = Path(__file__).resolve().parents[2]

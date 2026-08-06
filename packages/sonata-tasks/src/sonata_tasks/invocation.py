@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from workflow_tasks.tasks.models import TaskResult
+from sonata_tasks.tasks.models import TaskResult
 
 
 def verify_invocation(result: TaskResult) -> None:

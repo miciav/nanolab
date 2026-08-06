@@ -20,25 +20,25 @@ from sonata_tasks.loadtest import (
 )
 from sonata_tasks.platform import PlatformRequest
 from workflow_tasks.components.helm import control_plane_helm_values
-from workflow_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
-from workflow_tasks.execution.roles import ExecutionRole
-from workflow_tasks.loadtest.autoscaling import (
+from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
+from sonata_tasks.execution.roles import ExecutionRole
+from sonata_tasks.loadtest.autoscaling import (
     HttpReplicaProbe,
     ReplicaProbe,
     ReplicaWatcher,
     ReplicaStatusProbe,
     VerifyAutoscalingReplicas,
 )
-from workflow_tasks.loadtest.models import K6Config, K6Stage, PrometheusQuery
-from workflow_tasks.loadtest.ports import PrometheusClient, RemoteFileFetcher
-from workflow_tasks.loadtest.tasks import (
+from sonata_tasks.loadtest.models import K6Config, K6Stage, PrometheusQuery
+from sonata_tasks.loadtest.ports import PrometheusClient, RemoteFileFetcher
+from sonata_tasks.loadtest.tasks import (
     CapturePrometheusSnapshot,
     FetchVmResults,
     RunK6,
     WriteK6Report,
     WriteLoadtestSummary,
 )
-from workflow_tasks.tasks.models import CommandTaskSpec
+from sonata_tasks.tasks.models import CommandTaskSpec
 
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig

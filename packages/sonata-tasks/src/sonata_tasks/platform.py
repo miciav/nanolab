@@ -6,10 +6,10 @@ from pathlib import Path
 from typing import Any, Literal, cast
 
 from sonata_engine import Resource, Steps, Workflow
-from workflow_tasks.execution.bindings import (
+from sonata_tasks.execution.bindings import (
     CommandTaskExecutor,
 )
-from workflow_tasks.execution.roles import ExecutionRole
+from sonata_tasks.execution.roles import ExecutionRole
 
 from sonata_tasks.command import CommandTask
 from sonata_tasks.compensation import compensated_resource

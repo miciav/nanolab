@@ -21,7 +21,7 @@ from sonata_engine import (
 from sonata_engine import Workflow as SonataWorkflow
 from sonata_engine.journal import JournalConfig
 from sonata_engine.workflow.context import bind_workflow_sink as bind_sonata_sink
-from workflow_tasks.loadtest.adapters import HttpPrometheusClient
+from sonata_tasks.loadtest.adapters import HttpPrometheusClient
 from workflow_tasks.workflow.context import bind_workflow_sink
 
 from nanolab.cli import diagnostics

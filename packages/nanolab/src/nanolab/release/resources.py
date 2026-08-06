@@ -18,8 +18,8 @@ from workflow_tasks.components.bootstrap import (
     plan_registry_ensure_container,
     plan_vm_provision_base,
 )
-from workflow_tasks.vm.adapters import VmLifecycleAdapter
-from workflow_tasks.vm.models import VmConfig, VmInfo, VmRequest, vm_remote_home
+from sonata_tasks.vm.adapters import VmLifecycleAdapter
+from sonata_tasks.vm.models import VmConfig, VmInfo, VmRequest, vm_remote_home
 
 from nanolab.cli.provisioning import (
     _context,

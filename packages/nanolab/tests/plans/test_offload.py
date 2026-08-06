@@ -5,8 +5,8 @@ import pytest
 
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.plans.offload import build_offload_plan
-from workflow_tasks.execution.bindings import RoleBindings
-from workflow_tasks.tasks.models import TaskResult
+from sonata_tasks.execution.bindings import RoleBindings
+from sonata_tasks.tasks.models import TaskResult
 
 
 NANOFAAS_ROOT = Path(os.environ["NANOFAAS_ROOT"]).resolve()

@@ -4,8 +4,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from unittest.mock import patch
 
-from workflow_tasks.loadtest.adapters import HttpPrometheusClient
-from workflow_tasks.loadtest.models import TimeWindow
+from sonata_tasks.loadtest.adapters import HttpPrometheusClient
+from sonata_tasks.loadtest.models import TimeWindow
 
 
 def _make_window() -> TimeWindow:
@@ -20,7 +20,7 @@ def test_http_prometheus_client_calls_query_range_series() -> None:
     window = _make_window()
 
     with patch(
-        "workflow_tasks.loadtest.adapters.query_prometheus_range_series",
+        "sonata_tasks.loadtest.adapters.query_prometheus_range_series",
         return_value=fake_points,
     ) as mock_fn:
         client = HttpPrometheusClient(url="http://prometheus:9090")

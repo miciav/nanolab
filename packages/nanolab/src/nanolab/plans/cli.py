@@ -21,10 +21,10 @@ from workflow_tasks.components.context import ScenarioExecutionContext
 from workflow_tasks.components.helm import control_plane_helm_values
 from workflow_tasks.components.images import control_image
 from workflow_tasks.components.operations import RemoteCommandOperation, ScenarioOperation
-from workflow_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
-from workflow_tasks.execution.roles import ExecutionRole
-from workflow_tasks.vm.adapters import VmLifecycleAdapter
-from workflow_tasks.vm.models import VmConfig, VmInfo, VmRequest, vm_remote_home
+from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
+from sonata_tasks.execution.roles import ExecutionRole
+from sonata_tasks.vm.adapters import VmLifecycleAdapter
+from sonata_tasks.vm.models import VmConfig, VmInfo, VmRequest, vm_remote_home
 from workflow_tasks.vm.multipass import _find_ssh_private_key_path
 from workflow_tasks.vm.orchestrator import VmOrchestrator
 

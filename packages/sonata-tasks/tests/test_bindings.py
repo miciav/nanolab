@@ -4,12 +4,12 @@ from dataclasses import dataclass
 
 import pytest
 
-from workflow_tasks.execution.bindings import (
+from sonata_tasks.execution.bindings import (
     RetargetingCommandTaskExecutor,
     RoleBindings,
     RoleBoundCommandTaskExecutor,
 )
-from workflow_tasks.tasks.models import CommandTaskSpec, TaskResult
+from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 
 @dataclass

@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass, field
 
 from sonata_engine import TaskInputs
-from workflow_tasks.tasks.models import CommandTaskSpec, TaskResult
+from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 from sonata_tasks.cli_function import CliFunctionApplyTask, CliFunctionDeleteTask
 from sonata_tasks.http_function import HttpFunctionDeleteTask, HttpFunctionRegisterTask

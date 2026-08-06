@@ -17,12 +17,12 @@ from sonata_tasks.offload_loadtest import (
 )
 from sonata_tasks.platform import PlatformFunction, PlatformRequest
 from workflow_tasks.components.helm import control_plane_helm_values
-from workflow_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
-from workflow_tasks.loadtest.models import K6Config
-from workflow_tasks.loadtest.offload_conservation import evaluate_conservation
-from workflow_tasks.loadtest.ports import RemoteFileFetcher
-from workflow_tasks.loadtest.tasks import FetchVmResults, RunK6
-from workflow_tasks.tasks.models import CommandTaskSpec
+from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
+from sonata_tasks.loadtest.models import K6Config
+from sonata_tasks.loadtest.offload_conservation import evaluate_conservation
+from sonata_tasks.loadtest.ports import RemoteFileFetcher
+from sonata_tasks.loadtest.tasks import FetchVmResults, RunK6
+from sonata_tasks.tasks.models import CommandTaskSpec
 from workflow_tasks.vm.models import VmRequest
 from workflow_tasks.vm.multipass import resolve_connection_host
 

@@ -6,14 +6,14 @@ from pathlib import Path
 from typing import Any, override
 
 from sonata_engine import Resource, Steps, Task, TaskInputs, TaskOutcome, Workflow
-from workflow_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
-from workflow_tasks.loadtest.autoscaling import (
+from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
+from sonata_tasks.loadtest.autoscaling import (
     AutoscalingSummary,
     ReplicaWatcher,
     VerifyAutoscalingReplicas,
 )
-from workflow_tasks.loadtest.models import K6RunResult, TimeWindow
-from workflow_tasks.loadtest.tasks import (
+from sonata_tasks.loadtest.models import K6RunResult, TimeWindow
+from sonata_tasks.loadtest.tasks import (
     CapturePrometheusSnapshot,
     FetchVmResults,
     RunK6,
@@ -24,10 +24,10 @@ from workflow_tasks.loadtest.tasks import (
 from sonata_tasks.command import CommandTask
 from sonata_tasks.platform import PlatformRequest, add_platform
 
-# Sonata steps over the load-test implementations in `workflow_tasks.loadtest`,
-# which are ordinary classes with a `run()` and no dependency on the legacy
-# engine — so they are reused rather than rewritten. What changes is how they
-# find each other's results.
+# Sonata steps over the load-test implementations in the sibling submodules
+# (`.tasks`, `.autoscaling`, `.models`), which are ordinary classes with a
+# `run()` and no dependency on the legacy engine — so they are reused rather
+# than rewritten. What changes is how they find each other's results.
 
 
 @dataclass(frozen=True, slots=True)

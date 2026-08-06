@@ -7,9 +7,9 @@ from pathlib import Path
 import pytest
 from sonata_engine import Steps, TaskInputs, Workflow
 from sonata_engine.errors import NoUpstreamValueError
-from workflow_tasks.execution.bindings import RoleBindings
-from workflow_tasks.loadtest.models import K6RunResult
-from workflow_tasks.tasks.models import CommandTaskSpec, TaskResult
+from sonata_tasks.execution.bindings import RoleBindings
+from sonata_tasks.loadtest.models import K6RunResult
+from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 from sonata_tasks.command import CommandTask
 from sonata_tasks.loadtest import LoadtestOutcome

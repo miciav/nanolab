@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from workflow_tasks.tasks.executors import HostCommandTaskExecutor, VmCommandTaskExecutor
-from workflow_tasks.tasks.models import CommandTaskSpec
+from sonata_tasks.tasks.executors import HostCommandTaskExecutor, VmCommandTaskExecutor
+from sonata_tasks.tasks.models import CommandTaskSpec
 
 
 @dataclass(frozen=True)

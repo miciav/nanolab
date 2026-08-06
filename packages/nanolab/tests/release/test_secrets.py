@@ -7,8 +7,6 @@ import traceback
 
 import pytest
 from sonata_engine import TaskInputs, TaskOutcome, Workflow
-from workflow_tasks.tasks.models import CommandTaskSpec
-from workflow_tasks.tasks.rendering import render_task_command
 
 from nanolab.release.secrets import validate_secret_file
 from nanolab.release.resources import ghcr_credentials_resource
@@ -184,18 +182,7 @@ def test_credential_resource_cleans_on_success_with_keep(tmp_path: Path) -> None
 
 
 def _rendered_commands(provider: _Provider) -> str:
-    return "\n".join(
-        render_task_command(
-            CommandTaskSpec(
-                task_id=f"release.credentials.{index}",
-                summary="Release credential operation",
-                argv=argv,
-                target="vm",
-                env=env or {},
-            )
-        )
-        for index, (argv, env) in enumerate(provider.exec_calls)
-    )
+    return "\n".join(" ".join(argv) for argv, env in provider.exec_calls)
 
 
 def test_validate_secret_file_accepts_private_regular_file(tmp_path: Path) -> None:

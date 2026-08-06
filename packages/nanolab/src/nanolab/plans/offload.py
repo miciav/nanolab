@@ -12,7 +12,7 @@ from sonata_tasks.offload import (
     build_offload_workflow,
 )
 from sonata_tasks.process import managed_process_resource
-from workflow_tasks.execution.bindings import RoleBindings
+from sonata_tasks.execution.bindings import RoleBindings
 
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.plans.validate import _resolve_function

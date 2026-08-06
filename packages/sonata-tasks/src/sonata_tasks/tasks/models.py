@@ -6,7 +6,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Literal
 
-from workflow_tasks.execution.roles import ExecutionRole
+from sonata_tasks.execution.roles import ExecutionRole
 
 ExecutionTarget = Literal["host", "vm"]
 TaskStatus = Literal["pending", "running", "passed", "failed", "skipped"]

@@ -4,9 +4,9 @@ from dataclasses import dataclass, field, replace
 
 import pytest
 from sonata_engine import Resource, Selection
-from workflow_tasks.execution.bindings import RoleBindings
-from workflow_tasks.execution.roles import ExecutionRole
-from workflow_tasks.tasks.models import CommandTaskSpec, TaskResult
+from sonata_tasks.execution.bindings import RoleBindings
+from sonata_tasks.execution.roles import ExecutionRole
+from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 from sonata_tasks.cli import CliFunction, CliWorkflowRequest, build_cli_workflow
 from sonata_tasks.command import CommandTask

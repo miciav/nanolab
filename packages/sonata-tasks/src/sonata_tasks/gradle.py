@@ -4,8 +4,8 @@ from collections.abc import Mapping
 from pathlib import Path
 from types import MappingProxyType
 
-from workflow_tasks.execution.bindings import CommandTaskExecutor
-from workflow_tasks.execution.roles import ExecutionRole
+from sonata_tasks.execution.bindings import CommandTaskExecutor
+from sonata_tasks.execution.roles import ExecutionRole
 
 from sonata_tasks.command import CommandTask
 

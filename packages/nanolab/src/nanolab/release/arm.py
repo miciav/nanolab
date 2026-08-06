@@ -8,7 +8,7 @@ from pathlib import Path
 
 from nanolab.images.plan import ImageCell, ImagePlan, build_image_plan
 from nanolab.release.model import ArtifactEvidence
-from workflow_tasks.tasks.models import CommandTaskSpec
+from sonata_tasks.tasks.models import CommandTaskSpec
 
 
 ARM64_PHASES = ("arm64-build", "arm64-smoke")

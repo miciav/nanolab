@@ -6,9 +6,9 @@ from pathlib import Path
 from typing import override
 
 from sonata_engine import Task, TaskInputs, TaskOutcome
-from workflow_tasks.execution.bindings import CommandTaskExecutor
-from workflow_tasks.execution.roles import ExecutionRole
-from workflow_tasks.tasks.models import CommandTaskSpec, TaskResult
+from sonata_tasks.execution.bindings import CommandTaskExecutor
+from sonata_tasks.execution.roles import ExecutionRole
+from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 Argv = tuple[str, ...] | Callable[[TaskInputs], tuple[str, ...]]
 
@@ -18,7 +18,7 @@ class CommandTask(Task[TaskResult]):
     """One command, run through a role-bound executor, as a Sonata task.
 
     Sonata deliberately owns no remote execution, so the executor comes from
-    `workflow_tasks`. What this class adds is the Sonata contract: a title the
+    `sonata_tasks.execution`. What this class adds is the Sonata contract: a title the
     compiler slugifies into the task's identity, and a `TaskOutcome` carrying
     the command result as an in-process value.
 

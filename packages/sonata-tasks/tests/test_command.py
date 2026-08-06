@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 from sonata_engine import Resource, TaskInputs, TaskOutcome
-from workflow_tasks.tasks.models import CommandTaskSpec, TaskResult
-from workflow_tasks.vm.models import VmInfo
+from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
+from sonata_tasks.vm.models import VmInfo
 
 from sonata_tasks.command import CommandTask
 

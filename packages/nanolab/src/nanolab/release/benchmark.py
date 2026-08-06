@@ -25,7 +25,7 @@ from nanolab.release.metrics import (
 )
 from nanolab.release.build import _registry_digest_map, _write_json
 from nanolab.release.model import Amd64ReleasePlan, ArtifactEvidence, digest_path
-from workflow_tasks.loadtest.adapters import HttpPrometheusClient
+from sonata_tasks.loadtest.adapters import HttpPrometheusClient
 
 if TYPE_CHECKING:
     from nanolab.plans.release import ReleaseRequest

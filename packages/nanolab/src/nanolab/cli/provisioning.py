@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from collections.abc import Callable, Generator, Iterable
 from contextlib import contextmanager
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
+from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 from workflow_tasks import (
     DestroyVm,
     EnsureVmRunning,
@@ -14,7 +15,6 @@ from workflow_tasks import (
     VmLifecycleAdapter,
     VmRequest,
     Workflow,
-    command_task_from_operation,
 )
 from workflow_tasks.components.bootstrap import (
     plan_assets_sync_to_vm,
@@ -30,6 +30,7 @@ from workflow_tasks.components.context import ScenarioExecutionContext
 from workflow_tasks.components.operations import RemoteCommandOperation
 from workflow_tasks.components.operations import ScenarioOperation
 from workflow_tasks.core.task import Task
+from workflow_tasks.shell import SubprocessShell
 from workflow_tasks.vm.orchestrator import VmOrchestrator
 from workflow_tasks.vm.models import VmInfo, vm_remote_home
 
@@ -39,7 +40,6 @@ from nanolab.cli.vm_provider import (
     vm_provider_for_environment,
     vm_request_for_role,
 )
-from nanolab.core.task_shell_adapter import ShellCommandTaskRunner
 from nanolab.workspace.paths import discover_tool_root
 
 
@@ -112,16 +112,58 @@ def _context(repo_root: Path, request: VmRequest) -> ScenarioExecutionContext:
     )
 
 
+@dataclass
+class _OperationTask:
+    """A legacy-Engine Task running one RemoteCommandOperation via an executor."""
+
+    task_id: str
+    title: str
+    spec: CommandTaskSpec
+    executor: HostCommandTaskExecutor
+
+    def run(self) -> TaskResult:
+        result = self.executor.run(self.spec)
+        if result.status != "passed":
+            detail = result.stderr.strip() or result.stdout.strip() or "no output"
+            raise RuntimeError(
+                f"{self.task_id} failed (exit {result.return_code}): {detail}"
+            )
+        return result
+
+
+def _operation_task(
+    operation: RemoteCommandOperation,
+    executor: HostCommandTaskExecutor,
+    *,
+    title: str | None = None,
+) -> _OperationTask:
+    target = "vm" if operation.execution_target == "vm" else "host"
+    spec = CommandTaskSpec(
+        task_id=operation.operation_id,
+        summary=operation.summary,
+        argv=tuple(operation.argv),
+        target=target,
+        env=dict(operation.env),
+        remote_dir=None,
+    )
+    return _OperationTask(
+        task_id=spec.task_id,
+        title=title if title is not None else spec.summary,
+        spec=spec,
+        executor=executor,
+    )
+
+
 def _run_operations(
     orchestrator: Any,
     operations: Iterable[RemoteCommandOperation],
     *,
     role: str,
 ) -> None:
-    runner = getattr(orchestrator, "shell", None) or ShellCommandTaskRunner()
+    runner = getattr(orchestrator, "shell", None) or SubprocessShell()
     executor = HostCommandTaskExecutor(runner)
     tasks: list[Task] = [
-        command_task_from_operation(
+        _operation_task(
             replace(operation, operation_id=f"provision.{role}.{operation.operation_id}"),
             executor,
         )

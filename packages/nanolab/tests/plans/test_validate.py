@@ -8,8 +8,8 @@ from nanolab.plans.validate import (
     build_validate_plan,
 )
 from sonata_engine import Workflow
-from workflow_tasks.execution.bindings import RoleBindings
-from workflow_tasks.tasks.models import CommandTaskSpec, TaskResult
+from sonata_tasks.execution.bindings import RoleBindings
+from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 
 DEPLOYMENT_PAYLOAD = (

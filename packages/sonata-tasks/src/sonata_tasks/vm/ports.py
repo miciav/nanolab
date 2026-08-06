@@ -1,0 +1,10 @@
+from __future__ import annotations
+
+from typing import Protocol
+
+from sonata_tasks.vm.models import VmConfig, VmInfo
+
+
+class VmLifecycleProtocol(Protocol):
+    def ensure_running(self, config: VmConfig) -> VmInfo: ...
+    def destroy(self, info: VmInfo) -> None: ...

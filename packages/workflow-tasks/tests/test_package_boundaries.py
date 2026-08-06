@@ -45,10 +45,8 @@ def test_workflow_tasks_does_not_import_nanolab() -> None:
 
 
 def test_tasks_subpackage_does_not_import_workflow() -> None:
-    import workflow_tasks.tasks.adapters  # noqa: F401
-    import workflow_tasks.tasks.executors  # noqa: F401
-    import workflow_tasks.tasks.models  # noqa: F401
-    import workflow_tasks.tasks.rendering  # noqa: F401
+    # models/executors live in sonata_tasks now; only the re-export package remains.
+    import workflow_tasks.tasks  # noqa: F401
     # If we got here without importing workflow subpackage transitively, we're good.
     # The import-linter contract enforces this at the CI gate.
 

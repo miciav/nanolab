@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Protocol, override
 
 from sonata_engine import Resource, Steps, Task, TaskInputs, TaskOutcome, Workflow
-from workflow_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
+from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
 
 from sonata_tasks.loadtest import LoadtestOutcome, load_outcome
 from sonata_tasks.platform import PlatformRequest, add_platform

@@ -4,9 +4,9 @@ from collections.abc import Callable
 from typing import Any
 
 from sonata_engine import Resource, TaskInputs
-from workflow_tasks.execution.bindings import CommandTaskExecutor
-from workflow_tasks.execution.roles import ExecutionRole
-from workflow_tasks.tasks.models import TaskResult
+from sonata_tasks.execution.bindings import CommandTaskExecutor
+from sonata_tasks.execution.roles import ExecutionRole
+from sonata_tasks.tasks.models import TaskResult
 
 from sonata_tasks.command import CommandTask
 from sonata_tasks.compensation import best_effort

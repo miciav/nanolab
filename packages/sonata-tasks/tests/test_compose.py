@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 from sonata_engine import Workflow
-from workflow_tasks.tasks.models import CommandTaskSpec, TaskResult
+from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 from sonata_tasks.command import CommandTask
 from sonata_tasks.compose import DockerComposeProject, docker_compose_resource

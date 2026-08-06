@@ -1,8 +1,7 @@
-# tools/workflow-tasks/src/workflow_tasks/loadtest/adapters.py
 from __future__ import annotations
 
-from workflow_tasks.loadtest.models import TimeWindow
-from workflow_tasks.loadtest.prometheus import (
+from sonata_tasks.loadtest.models import TimeWindow
+from sonata_tasks.loadtest.prometheus import (
     query_prometheus_range_series,
     query_prometheus_server_time,
 )

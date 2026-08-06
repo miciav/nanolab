@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 
 import pytest
 from sonata_engine import Resource, TaskInputs
-from workflow_tasks.tasks.models import CommandTaskSpec, TaskResult
+from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 from sonata_tasks.cli_function import CliFunctionInvokeTask
 from sonata_tasks.http_function import HttpFunctionInvokeTask

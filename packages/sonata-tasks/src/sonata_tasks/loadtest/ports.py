@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
-from workflow_tasks.loadtest.models import TimeWindow
+from sonata_tasks.loadtest.models import TimeWindow
 
 
 @runtime_checkable

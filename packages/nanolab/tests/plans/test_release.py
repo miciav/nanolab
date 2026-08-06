@@ -11,8 +11,8 @@ from types import SimpleNamespace
 import pytest
 import yaml
 from sonata_engine import JournalConfig, Resource, Selection
-from workflow_tasks.execution.bindings import RoleBindings
-from workflow_tasks.tasks.models import CommandTaskSpec, TaskResult
+from sonata_tasks.execution.bindings import RoleBindings
+from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 from workflow_tasks.vm.models import VmInfo
 
 import nanolab.plans.release as release_plan

@@ -2,7 +2,7 @@ from pathlib import Path
 
 from nanolab.cli.execution import build_role_bindings, resolve_loadtest_urls
 from nanolab.config.environment import EnvironmentConfig
-from workflow_tasks.tasks.models import CommandTaskSpec
+from sonata_tasks.tasks.models import CommandTaskSpec
 
 
 class RecordingRunner:

@@ -18,7 +18,7 @@ from nanolab.images.plan import ImagePlan
 from nanolab.release import arm
 from nanolab.release.model import Amd64ReleasePlan, ArtifactEvidence, digest_path, git_state
 from nanolab.release.remote_retry import retry_on_connection_death
-from workflow_tasks.tasks.models import CommandTaskSpec
+from sonata_tasks.tasks.models import CommandTaskSpec
 
 _GO_TOOLCHAIN = (
     "golang:1.24-alpine@sha256:757779acac4af1b349a20f357c7296097b4a0b89da4ad0e370b339060077282a"

@@ -8,13 +8,13 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from workflow_tasks.loadtest.models import PrometheusQuery, TimeWindow
-from workflow_tasks.loadtest.ports import PrometheusClient, RemoteFileFetcher
+from sonata_tasks.loadtest.models import PrometheusQuery, TimeWindow
+from sonata_tasks.loadtest.ports import PrometheusClient, RemoteFileFetcher
 
 if TYPE_CHECKING:
-    from workflow_tasks.loadtest.autoscaling import VerifyAutoscalingReplicas
-    from workflow_tasks.loadtest.models import K6Config, K6RunResult
-    from workflow_tasks.tasks.executors import VmCommandRunner
+    from sonata_tasks.loadtest.autoscaling import VerifyAutoscalingReplicas
+    from sonata_tasks.loadtest.models import K6Config, K6RunResult
+    from sonata_tasks.tasks.executors import VmCommandRunner
 
 
 def _build_k6_argv(config: "K6Config") -> tuple[str, ...]:
@@ -51,7 +51,7 @@ class RunK6:
     _result: "K6RunResult | None" = field(default=None, init=False, repr=False, compare=False)
 
     def run(self) -> "K6RunResult":
-        from workflow_tasks.loadtest.models import K6RunResult
+        from sonata_tasks.loadtest.models import K6RunResult
 
         started_at = datetime.now(timezone.utc)
         result = self.runner.run_vm_command(
