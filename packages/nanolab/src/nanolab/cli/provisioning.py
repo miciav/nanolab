@@ -28,6 +28,7 @@ from sonata_tasks.provisioning import (
 )
 from sonata_tasks.vm.azure import AzureVmProvider
 from sonata_tasks.vm.models import VmRequest
+from sonata_tasks.vm.orchestrator import VmOrchestrator
 from sonata_tasks.vm.proxmox import ProxmoxVmProvider
 
 from nanolab.cli.vm_provider import vm_request_for_role
@@ -72,7 +73,7 @@ def _role_requests_and_operations(
     *,
     repo_root: Path,
 ) -> list[tuple[ExecutionRole, VmRequest, tuple[RemoteCommandOperation, ...]]]:
-    """The legacy per-role (role, request, operations) triples (provisioning.py lines 250-375)."""
+    """The legacy per-role (role, request, operations) triples."""
     loadtest_workflow = scenario.workflow in ("loadtest", "offload-loadtest", "release")
     dedicated_loadgen = loadtest_workflow and "loadgen" in environment.roles
     dedicated_cloud = scenario.workflow == "offload-loadtest" and "cloud" in environment.roles
@@ -210,8 +211,12 @@ def provision_environment(
         raise ValueError("--provision requires a non-local environment")
     if orchestrator_factory is not None:
         provider = orchestrator_factory(repo_root)
-    else:
+    elif environment.provider in {"azure", "proxmox"}:
         provider = provider_for(vm_request_for_role(environment, "stack"), repo_root)
+    else:
+        # multipass and external: VmOrchestrator SSH-pings external hosts and
+        # launches multipass instances, exactly as the legacy routing did.
+        provider = VmOrchestrator(repo_root)
 
     roles: list[ProvisionedRole] = []
     for role, request, operations in _role_requests_and_operations(

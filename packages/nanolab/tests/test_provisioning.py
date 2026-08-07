@@ -90,6 +90,25 @@ def test_multipass_k8s_provisioning_composes_lifecycle_and_bootstrap_tasks(
     assert orchestrator.events[-1] == ("teardown", "stack")
 
 
+def test_external_provisioning_without_factory_falls_back_to_orchestrator(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    orchestrator = RecordingOrchestrator()
+    monkeypatch.setattr("nanolab.cli.provisioning.VmOrchestrator", lambda _repo_root: orchestrator)
+
+    with provision_environment(
+        ScenarioConfig(workflow="cli", backend="k8s", functions=["word-stats-java"]),
+        EnvironmentConfig.model_validate(
+            {"provider": "external", "roles": {"stack": {"host": "vm.example"}}}
+        ),
+        repo_root=tmp_path,
+    ):
+        pass
+
+    assert orchestrator.events[0] == ("ensure", ("external", "vm.example"))
+    assert all(kind != "teardown" for kind, _ in orchestrator.events)
+
+
 def test_external_provisioning_reuses_ssh_host_without_teardown(tmp_path: Path) -> None:
     orchestrator = RecordingOrchestrator()
 
