@@ -9,8 +9,8 @@ from sonata_tasks.shell import (
     ShellExecutionResult,
     SubprocessShell,
 )
-from sonata_tasks.workflow.context import bind_workflow_sink
-from sonata_tasks.workflow.events import WorkflowEvent
+from sonata_engine.workflow.context import bind_workflow_sink
+from sonata_engine.workflow.events import WorkflowEvent
 
 
 def test_shell_execution_result_captures_stdout_stderr() -> None:

@@ -10,8 +10,8 @@ from shellcraft.backend import (
     SubprocessShell as _ShellcraftSubprocessShell,
 )
 
-from sonata_tasks.workflow.context import has_workflow_sink
-from sonata_tasks.workflow.reporting import workflow_log
+from sonata_engine.workflow.context import has_workflow_sink
+from sonata_engine.workflow.reporting import workflow_log
 
 __all__ = [
     "OutputListener",

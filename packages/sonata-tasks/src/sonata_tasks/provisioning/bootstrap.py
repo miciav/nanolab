@@ -17,7 +17,7 @@ from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 from sonata_tasks.vm.azure import AzureVmProvider
 from sonata_tasks.vm.models import VmRequest
 from sonata_tasks.vm.proxmox import ProxmoxVmProvider
-from sonata_tasks.workflow.reporting import workflow_step
+from sonata_engine.workflow.reporting import subtask
 
 
 def scenario_context(
@@ -98,7 +98,7 @@ def run_bootstrap_operations(
         for operation in operations
     ]
     for task in tasks:
-        with workflow_step(task_id=task.task_id, title=task.title):
+        with subtask(task_id=task.task_id, title=task.title):
             task.run()
 
 

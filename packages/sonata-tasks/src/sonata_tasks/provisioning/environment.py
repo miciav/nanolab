@@ -16,7 +16,7 @@ from sonata_tasks.provisioning.bootstrap import (
 from sonata_tasks.vm.adapters import VmLifecycleAdapter
 from sonata_tasks.vm.models import VmConfig, VmInfo, VmRequest, vm_remote_home
 from sonata_tasks.vm.tasks import DestroyVm, EnsureVmRunning
-from sonata_tasks.workflow.reporting import workflow_step
+from sonata_engine.workflow.reporting import subtask
 
 
 @dataclass(frozen=True)
@@ -43,7 +43,7 @@ def _ensure_vm(provider: object, request: VmRequest, *, role: str) -> VmRequest:
             disk=request.disk,
         ),
     )
-    with workflow_step(task_id=task.task_id, title=task.title):
+    with subtask(task_id=task.task_id, title=task.title):
         task.run()
     info = task.result
     return request.model_copy(
@@ -114,7 +114,7 @@ def provision_roles(
         if not keep:
             for task in reversed(cleanup_tasks):
                 try:
-                    with workflow_step(task_id=task.task_id, title=task.title):
+                    with subtask(task_id=task.task_id, title=task.title):
                         task.run()
                 except Exception as exc:
                     cleanup_errors.append(str(exc))
