@@ -27,8 +27,9 @@ from sonata_tasks.vm.adapters import VmLifecycleAdapter
 from sonata_tasks.vm.models import VmConfig, VmInfo, VmRequest, vm_remote_home
 from sonata_tasks.vm.multipass import _find_ssh_private_key_path
 from sonata_tasks.vm.orchestrator import VmOrchestrator
+from sonata_tasks.provisioning.providers import provider_for
 
-from nanolab.cli.vm_provider import vm_provider_for_environment, vm_request_for_role
+from nanolab.cli.vm_provider import vm_request_for_role
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.plans import _local_control_plane
@@ -228,7 +229,7 @@ def _stack_orchestrator(
     if orchestrator_factory is not None:
         return orchestrator_factory(repo_root)
     if environment.provider in ("azure", "proxmox"):
-        return vm_provider_for_environment(environment, repo_root)
+        return provider_for(vm_request_for_role(environment, "stack"), repo_root)
     return VmOrchestrator(repo_root)
 
 

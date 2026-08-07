@@ -23,13 +23,14 @@ from sonata_engine.journal import JournalConfig
 from sonata_engine.workflow.context import bind_workflow_sink as bind_sonata_sink
 from sonata_tasks.loadtest.adapters import HttpPrometheusClient
 from sonata_tasks.workflow.context import bind_workflow_sink
+from sonata_tasks.provisioning.providers import provider_for
 
 from nanolab.cli import diagnostics
 from nanolab.config import EnvironmentConfig, ScenarioConfig
 from nanolab.cli.execution import build_role_bindings, resolve_loadtest_urls
 from nanolab.cli.progress import ConsoleProgressSink
 from nanolab.cli.provisioning import provision_environment
-from nanolab.cli.vm_provider import vm_provider_for_environment
+from nanolab.cli.vm_provider import vm_request_for_role
 from nanolab.plans.offload import build_offload_plan
 from nanolab.plans.offload_loadtest import build_offload_loadtest_plan, format_offload_summary
 from nanolab.plans.cli import build_cli_plan
@@ -162,7 +163,7 @@ def _teardown_release(
         typer.echo(f"nothing to tear down: no release journal at {journal.path}")
         return
 
-    provider = vm_provider_for_environment(environment_config, paths.tool_root)
+    provider = provider_for(vm_request_for_role(environment_config, "stack"), paths.tool_root)
     resources = build_release_resources(environment_config, paths.nanofaas_root, provider)
     by_title = {resource.title: resource for resource in (*resources.vms, resources.endpoints)}
     unknown: UnknownRetainedResourceError | None = None
@@ -235,7 +236,7 @@ def _release_request(
         )
     except (ValueError, subprocess.CalledProcessError) as error:
         raise typer.BadParameter(str(error)) from None
-    return request, vm_provider_for_environment(request.environment, request.repo_root)
+    return request, provider_for(vm_request_for_role(request.environment, "stack"), request.repo_root)
 
 
 def _require_cli_endpoint(

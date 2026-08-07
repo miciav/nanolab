@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 
-from sonata_tasks.provisioning.providers import provider_for
 from sonata_tasks.vm.models import VmRequest
 
 from nanolab.config.environment import EnvironmentConfig, ExecutionRole
@@ -16,10 +14,6 @@ _DEFAULT_NAMES = {
     ("proxmox", "stack"): "nanofaas-proxmox",
     ("proxmox", "loadgen"): "nanofaas-proxmox-loadgen",
 }
-
-
-def vm_provider_for_environment(environment: EnvironmentConfig, repo_root: Path) -> object:
-    return provider_for(VmRequest(lifecycle=environment.provider), repo_root)
 
 
 def vm_request_for_role(

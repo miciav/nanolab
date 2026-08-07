@@ -171,7 +171,7 @@ def release_cli_harness(
         lambda _repo_root, _commit, _destination: nanofaas_root,
     )
     monkeypatch.setattr(
-        product_module, "vm_provider_for_environment", lambda *_args, **_kwargs: RejectingProvider()
+        product_module, "provider_for", lambda *_args, **_kwargs: RejectingProvider()
     )
 
     def build(request, *, provider=None):
@@ -473,7 +473,7 @@ def _teardown_harness(release_cli_harness, destroyed: list[str]):
             return reject
 
     release_cli_harness.monkeypatch.setattr(
-        product_module, "vm_provider_for_environment", lambda *_a, **_k: _Recorder()
+        product_module, "provider_for", lambda *_a, **_k: _Recorder()
     )
 
 

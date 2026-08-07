@@ -1,17 +1,12 @@
+"""Provisioning: translate nanolab config onto sonata_tasks provisioning resources."""
+
 from __future__ import annotations
 
-from collections.abc import Callable, Generator, Iterable
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
-from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from sonata_tasks.tasks.executors import HostCommandTaskExecutor
-from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
-from sonata_tasks.vm.adapters import VmLifecycleAdapter
-from sonata_tasks.vm.models import VmConfig, VmRequest
-from sonata_tasks.vm.tasks import DestroyVm, EnsureVmRunning
-from workflow_tasks import Workflow
 from sonata_tasks.components.bootstrap import (
     plan_assets_sync_to_vm,
     plan_k3s_configure_registry,
@@ -23,176 +18,26 @@ from sonata_tasks.components.bootstrap import (
     retarget_bootstrap_operation,
 )
 from sonata_tasks.components.context import ScenarioExecutionContext
-from sonata_tasks.components.operations import RemoteCommandOperation
-from sonata_tasks.components.operations import ScenarioOperation
-from workflow_tasks.core.task import Task
-from sonata_tasks.shell import SubprocessShell
-from sonata_tasks.vm.orchestrator import VmOrchestrator
-from sonata_tasks.vm.models import VmInfo, vm_remote_home
+from sonata_tasks.components.operations import RemoteCommandOperation, ScenarioOperation
+from sonata_tasks.provisioning import (
+    ProvisionedRole,
+    provider_for,
+    provision_roles,
+    remote_operations,
+    scenario_context,
+)
+from sonata_tasks.vm.azure import AzureVmProvider
+from sonata_tasks.vm.models import VmRequest
+from sonata_tasks.vm.proxmox import ProxmoxVmProvider
 
+from nanolab.cli.vm_provider import vm_request_for_role
 from nanolab.config import EnvironmentConfig, ScenarioConfig
 from nanolab.config.environment import ExecutionRole
-from nanolab.cli.vm_provider import (
-    vm_provider_for_environment,
-    vm_request_for_role,
-)
 from nanolab.workspace.paths import discover_tool_root
 
 
 def _request(environment: EnvironmentConfig, role: ExecutionRole, *, loadtest: bool) -> VmRequest:
     return vm_request_for_role(environment, role, loadtest=loadtest)
-
-
-def _ensure_vm(orchestrator: Any, request: VmRequest, *, role: str) -> VmRequest:
-    lifecycle = VmLifecycleAdapter(
-        orchestrator,
-        lifecycle=request.lifecycle,
-        credentials=request,
-    )
-    task = EnsureVmRunning(
-        task_id=f"provision.{role}.ensure",
-        title=f"Ensure {role} VM is running",
-        lifecycle=lifecycle,
-        config=VmConfig(
-            name=request.name or request.host or role,
-            cpus=request.cpus,
-            memory=request.memory,
-            disk=request.disk,
-        ),
-    )
-    Workflow(tasks=[task]).run()
-    info = task.result
-    resolved = request.model_copy(
-        update={
-            "lifecycle": "external",
-            "host": info.host,
-            "user": info.user,
-            "home": info.home,
-        }
-    )
-    return resolved
-
-
-def _destroy_task(orchestrator: Any, request: VmRequest, *, role: str) -> DestroyVm | None:
-    if request.lifecycle == "external":
-        return None
-    lifecycle = VmLifecycleAdapter(
-        orchestrator,
-        lifecycle=request.lifecycle,
-        credentials=request,
-    )
-    return DestroyVm(
-        task_id=f"provision.{role}.destroy",
-        title=f"Destroy {role} VM",
-        lifecycle=lifecycle,
-        info=VmInfo(
-            name=request.name or role,
-            host=request.host or "",
-            user=request.user,
-            home=vm_remote_home(request),
-        ),
-    )
-
-
-def _context(repo_root: Path, request: VmRequest) -> ScenarioExecutionContext:
-    return ScenarioExecutionContext(
-        repo_root=repo_root,
-        scenario_name="provision",
-        runtime="java",
-        namespace=None,
-        local_registry="localhost:5000",
-        resolved_scenario=None,
-        vm_request=request,
-        cleanup_vm=False,
-        assets_root=discover_tool_root() / "assets",
-    )
-
-
-@dataclass
-class _OperationTask:
-    """A legacy-Engine Task running one RemoteCommandOperation via an executor."""
-
-    task_id: str
-    title: str
-    spec: CommandTaskSpec
-    executor: HostCommandTaskExecutor
-
-    def run(self) -> TaskResult:
-        result = self.executor.run(self.spec)
-        if result.status != "passed":
-            detail = result.stderr.strip() or result.stdout.strip() or "no output"
-            raise RuntimeError(
-                f"{self.task_id} failed (exit {result.return_code}): {detail}"
-            )
-        return result
-
-
-def _operation_task(
-    operation: RemoteCommandOperation,
-    executor: HostCommandTaskExecutor,
-    *,
-    title: str | None = None,
-) -> _OperationTask:
-    target = "vm" if operation.execution_target == "vm" else "host"
-    spec = CommandTaskSpec(
-        task_id=operation.operation_id,
-        summary=operation.summary,
-        argv=tuple(operation.argv),
-        target=target,
-        env=dict(operation.env),
-        remote_dir=None,
-    )
-    return _OperationTask(
-        task_id=spec.task_id,
-        title=title if title is not None else spec.summary,
-        spec=spec,
-        executor=executor,
-    )
-
-
-def _run_operations(
-    orchestrator: Any,
-    operations: Iterable[RemoteCommandOperation],
-    *,
-    role: str,
-) -> None:
-    runner = getattr(orchestrator, "shell", None) or SubprocessShell()
-    executor = HostCommandTaskExecutor(runner)
-    tasks: list[Task] = [
-        _operation_task(
-            replace(operation, operation_id=f"provision.{role}.{operation.operation_id}"),
-            executor,
-        )
-        for operation in operations
-    ]
-    Workflow(tasks=tasks).run()
-
-
-def _retarget_cloud_operations(
-    environment: EnvironmentConfig,
-    orchestrator: Any,
-    context: ScenarioExecutionContext,
-    operations: Iterable[RemoteCommandOperation],
-) -> tuple[RemoteCommandOperation, ...]:
-    if environment.provider not in {"azure", "proxmox"}:
-        return tuple(operations)
-
-    request = context.vm_request
-    if environment.provider == "proxmox":
-        host, port = orchestrator.ssh_endpoint(request)
-    else:
-        host, port = orchestrator.connection_host(request), None
-    private_key = orchestrator.ssh_private_key_path(request)
-    return tuple(
-        retarget_bootstrap_operation(
-            operation,
-            context=context,
-            host=host,
-            port=port,
-            private_key=private_key,
-        )
-        for operation in operations
-    )
 
 
 def _stack_operations(
@@ -217,18 +62,138 @@ def _stack_operations(
         planners.extend([plan_loadtest_install_k6, plan_assets_sync_to_vm])
     if include_repo_sync:
         planners.append(plan_repo_sync_to_vm)
-    return _remote_operations(operation for planner in planners for operation in planner(context))
+    return remote_operations(operation for planner in planners for operation in planner(context))
 
 
-def _remote_operations(
-    operations: Iterable[ScenarioOperation],
-) -> tuple[RemoteCommandOperation, ...]:
-    resolved: list[RemoteCommandOperation] = []
-    for operation in operations:
-        if not isinstance(operation, RemoteCommandOperation):
-            raise TypeError(f"bootstrap operation is not a remote command: {operation}")
-        resolved.append(operation)
-    return tuple(resolved)
+def _role_requests_and_operations(
+    provider: object,
+    scenario: ScenarioConfig,
+    environment: EnvironmentConfig,
+    *,
+    repo_root: Path,
+) -> list[tuple[ExecutionRole, VmRequest, tuple[RemoteCommandOperation, ...]]]:
+    """The legacy per-role (role, request, operations) triples (provisioning.py lines 250-375)."""
+    loadtest_workflow = scenario.workflow in ("loadtest", "offload-loadtest", "release")
+    dedicated_loadgen = loadtest_workflow and "loadgen" in environment.roles
+    dedicated_cloud = scenario.workflow == "offload-loadtest" and "cloud" in environment.roles
+    dedicated_arm = "arm-builder" in environment.roles
+    assets_root = discover_tool_root() / "assets"
+
+    def context_for(request: VmRequest) -> ScenarioExecutionContext:
+        # Plan against the resolved-equivalent request: after ensure the request
+        # carries lifecycle "external" and the connection host, and the planners
+        # build inventories and rsync targets from exactly those two fields.
+        resolved = request.model_copy(
+            update={
+                "lifecycle": "external",
+                "host": request.host or f"{request.name}.internal",
+            }
+        )
+        return scenario_context(repo_root, resolved, assets_root)
+
+    def retarget(
+        context: ScenarioExecutionContext,
+        operations: tuple[RemoteCommandOperation, ...],
+    ) -> tuple[RemoteCommandOperation, ...]:
+        if environment.provider not in {"azure", "proxmox"}:
+            return operations
+        if isinstance(provider, (AzureVmProvider, ProxmoxVmProvider)):
+            # Real cloud providers re-retarget inside provision_roles, after
+            # ensure, from the resolved request; their endpoint helpers need
+            # the VM to exist, so they must not be called here.
+            return operations
+        request = context.vm_request
+        if environment.provider == "proxmox":
+            host, port = provider.ssh_endpoint(request)
+        else:
+            host, port = provider.connection_host(request), None
+        private_key = provider.ssh_private_key_path(request)
+        return tuple(
+            retarget_bootstrap_operation(
+                operation,
+                context=context,
+                host=host,
+                port=port,
+                private_key=private_key,
+            )
+            for operation in operations
+        )
+
+    triples: list[tuple[ExecutionRole, VmRequest, tuple[RemoteCommandOperation, ...]]] = []
+
+    stack_request = _request(environment, "stack", loadtest=loadtest_workflow)
+    stack_context = context_for(stack_request)
+    triples.append(
+        (
+            "stack",
+            stack_request,
+            retarget(
+                stack_context,
+                _stack_operations(
+                    scenario,
+                    stack_context,
+                    dedicated_loadgen=dedicated_loadgen,
+                    include_repo_sync=scenario.workflow != "release",
+                ),
+            ),
+        )
+    )
+
+    if dedicated_loadgen:
+        loadgen_request = _request(environment, "loadgen", loadtest=True)
+        loadgen_context = context_for(loadgen_request)
+        triples.append(
+            (
+                "loadgen",
+                loadgen_request,
+                retarget(
+                    loadgen_context,
+                    remote_operations(
+                        (
+                            *plan_loadtest_install_k6(loadgen_context),
+                            *plan_assets_sync_to_vm(loadgen_context),
+                            *(
+                                plan_repo_sync_to_vm(loadgen_context)
+                                if scenario.workflow != "release"
+                                else ()
+                            ),
+                        )
+                    ),
+                ),
+            )
+        )
+
+    if dedicated_cloud:
+        cloud_request = _request(environment, "cloud", loadtest=True)
+        cloud_context = context_for(cloud_request)
+        triples.append(
+            (
+                "cloud",
+                cloud_request,
+                retarget(
+                    cloud_context,
+                    _stack_operations(
+                        scenario,
+                        cloud_context,
+                        dedicated_loadgen=True,
+                        include_repo_sync=False,
+                    ),
+                ),
+            )
+        )
+
+    if dedicated_arm:
+        arm_request = _request(environment, "arm-builder", loadtest=False)
+        arm_context = context_for(arm_request)
+        triples.append(
+            (
+                "arm-builder",
+                arm_request,
+                remote_operations(plan_vm_provision_base(arm_context)),
+            )
+        )
+
+    return triples
 
 
 @contextmanager
@@ -243,157 +208,27 @@ def provision_environment(
 ) -> Generator[None, None, None]:
     if environment.provider == "local":
         raise ValueError("--provision requires a non-local environment")
-
     if orchestrator_factory is not None:
-        orchestrator = orchestrator_factory(repo_root)
-    elif environment.provider in {"azure", "proxmox"}:
-        orchestrator = vm_provider_for_environment(environment, repo_root)
+        provider = orchestrator_factory(repo_root)
     else:
-        orchestrator = VmOrchestrator(repo_root)
-    cleanup_tasks: list[DestroyVm] = []
-    main_error: BaseException | None = None
-    cleanup_error: Exception | None = None
-    try:
-        loadtest_workflow = scenario.workflow in ("loadtest", "offload-loadtest", "release")
-        dedicated_loadgen = loadtest_workflow and "loadgen" in environment.roles
-        stack_request = _request(environment, "stack", loadtest=loadtest_workflow)
-        stack_cleanup = _destroy_task(orchestrator, stack_request, role="stack")
-        if stack_cleanup is not None:
-            cleanup_tasks.append(stack_cleanup)
-        stack = _ensure_vm(
-            orchestrator,
-            stack_request,
-            role="stack",
-        )
-        loadgen_request: VmRequest | None = None
-        loadgen: VmRequest | None = None
-        if dedicated_loadgen:
-            loadgen_request = _request(environment, "loadgen", loadtest=True)
-            loadgen_cleanup = _destroy_task(orchestrator, loadgen_request, role="loadgen")
-            if loadgen_cleanup is not None:
-                cleanup_tasks.append(loadgen_cleanup)
-            loadgen = _ensure_vm(
-                orchestrator,
-                loadgen_request,
-                role="loadgen",
-            )
+        provider = provider_for(vm_request_for_role(environment, "stack"), repo_root)
 
-        dedicated_cloud = scenario.workflow == "offload-loadtest" and "cloud" in environment.roles
-        cloud_request: VmRequest | None = None
-        cloud: VmRequest | None = None
-        if dedicated_cloud:
-            cloud_request = _request(environment, "cloud", loadtest=True)
-            cloud_cleanup = _destroy_task(orchestrator, cloud_request, role="cloud")
-            if cloud_cleanup is not None:
-                cleanup_tasks.append(cloud_cleanup)
-            cloud = _ensure_vm(
-                orchestrator,
-                cloud_request,
-                role="cloud",
-            )
+    roles: list[ProvisionedRole] = []
+    for role, request, operations in _role_requests_and_operations(
+        provider, scenario, environment, repo_root=repo_root
+    ):
+        roles.append(ProvisionedRole(role=role, request=request, operations=operations))
 
-        dedicated_arm = "arm-builder" in environment.roles
-        arm_builder_request: VmRequest | None = None
-        arm_builder: VmRequest | None = None
-        if dedicated_arm:
-            arm_builder_request = _request(environment, "arm-builder", loadtest=False)
-            arm_cleanup = _destroy_task(
-                orchestrator, arm_builder_request, role="arm-builder"
-            )
-            if arm_cleanup is not None:
-                cleanup_tasks.append(arm_cleanup)
-            arm_builder = _ensure_vm(
-                orchestrator,
-                arm_builder_request,
-                role="arm-builder",
-            )
-
-        if post_ensure_verifier is not None:
-            post_ensure_verifier("stack", stack_request)
-            if loadgen_request is not None:
-                post_ensure_verifier("loadgen", loadgen_request)
-            if cloud_request is not None:
-                post_ensure_verifier("cloud", cloud_request)
-            if arm_builder_request is not None:
-                post_ensure_verifier("arm-builder", arm_builder_request)
-
-        stack_context = _context(repo_root, stack)
-        _run_operations(
-            orchestrator,
-            _retarget_cloud_operations(
-                environment,
-                orchestrator,
-                stack_context,
-                _stack_operations(
-                    scenario,
-                    stack_context,
-                    dedicated_loadgen=dedicated_loadgen,
-                    include_repo_sync=scenario.workflow != "release",
-                ),
-            ),
-            role="stack",
-        )
-
-        if arm_builder is not None:
-            arm_context = _context(repo_root, arm_builder)
-            _run_operations(
-                orchestrator,
-                _remote_operations(plan_vm_provision_base(arm_context)),
-                role="arm-builder",
-            )
-
-        if loadgen is not None:
-            context = _context(repo_root, loadgen)
-            _run_operations(
-                orchestrator,
-                _retarget_cloud_operations(
-                    environment,
-                    orchestrator,
-                    context,
-                    _remote_operations(
-                        (
-                            *plan_loadtest_install_k6(context),
-                            *plan_assets_sync_to_vm(context),
-                            *(plan_repo_sync_to_vm(context) if scenario.workflow != "release" else ()),
-                        )
-                    ),
-                ),
-                role="loadgen",
-            )
-
-        if cloud is not None:
-            cloud_context = _context(repo_root, cloud)
-            _run_operations(
-                orchestrator,
-                _retarget_cloud_operations(
-                    environment,
-                    orchestrator,
-                    cloud_context,
-                    _stack_operations(
-                        scenario,
-                        cloud_context,
-                        dedicated_loadgen=True,
-                        include_repo_sync=False,
-                    ),
-                ),
-                role="cloud",
-            )
+    with provision_roles(
+        provider,
+        tuple(roles),
+        repo_root=repo_root,
+        assets_root=discover_tool_root() / "assets",
+        keep=keep,
+        after_ensure=(
+            (lambda role, request: post_ensure_verifier(role, request))
+            if post_ensure_verifier is not None
+            else None
+        ),
+    ):
         yield
-    except BaseException as exc:
-        main_error = exc
-    finally:
-        try:
-            Workflow(
-                tasks=[],
-                cleanup_tasks=list(reversed(cleanup_tasks)),
-                keep_infrastructure=keep,
-            ).run()
-        except Exception as exc:
-            cleanup_error = exc
-
-    if main_error is not None:
-        if cleanup_error is not None:
-            raise RuntimeError(f"{main_error}\n\nCleanup errors:\n{cleanup_error}") from main_error
-        raise main_error
-    if cleanup_error is not None:
-        raise cleanup_error

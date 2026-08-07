@@ -1053,7 +1053,7 @@ def test_build_release_request_is_offline_and_builds_current_matrix(
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setattr(
         release_plan,
-        "vm_provider_for_environment",
+        "provider_for",
         lambda *_args, **_kwargs: pytest.fail("preflight constructed a cloud client"),
     )
     monkeypatch.setattr(

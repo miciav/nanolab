@@ -7,6 +7,7 @@ from typing import cast
 
 from multipass import MultipassClient
 from sonata_tasks.execution.bindings import RetargetingCommandTaskExecutor, RoleBindings
+from sonata_tasks.provisioning.providers import provider_for
 from sonata_tasks.tasks.executors import (
     HostCommandRunner,
     HostCommandTaskExecutor,
@@ -18,10 +19,7 @@ from sonata_tasks.vm.models import VmRequest, vm_remote_home
 from sonata_tasks.vm.multipass import resolve_connection_host
 from sonata_tasks.vm.runners import OrchestratorVmRunner, VmFileFetcher
 
-from nanolab.cli.vm_provider import (
-    vm_provider_for_environment,
-    vm_request_for_role,
-)
+from nanolab.cli.vm_provider import vm_request_for_role
 from nanolab.config.environment import EnvironmentConfig, RoleTarget
 from nanolab.config.scenario import BackendName
 from nanolab.workspace.paths import default_tool_paths
@@ -73,8 +71,8 @@ def resolve_loadtest_urls(
                 host = f"<proxmox-guest-ip:{request.name}>"
                 discovered_prometheus = f"http://<proxmox-prometheus:{request.name}>"
         else:
-            provider = vm_provider or vm_provider_for_environment(
-                environment, default_tool_paths().nanofaas_root
+            provider = vm_provider or provider_for(
+                request, default_tool_paths().nanofaas_root
             )
             if environment.provider == "azure":
                 host = provider.connection_host(request)  # type: ignore[attr-defined]
@@ -208,8 +206,9 @@ def build_role_bindings(
         return RoleBindings(host=host, stack=host, loadgen=host, cloud=host, arm_builder=host), None
 
     if environment.provider in {"azure", "proxmox"}:
-        provider = vm_provider or vm_provider_for_environment(
-            environment, repo_root or default_tool_paths().nanofaas_root
+        provider = vm_provider or provider_for(
+            vm_request_for_role(environment, "stack", loadtest=True),
+            repo_root or default_tool_paths().nanofaas_root,
         )
 
         def provider_remote(role: str):

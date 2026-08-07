@@ -25,12 +25,13 @@ from sonata_tasks.release_composites import (
     registry_push_composite,
 )
 from sonata_tasks.transfer import FileTransferTask
+from sonata_tasks.provisioning.providers import provider_for
 from nanolab.plans import loadtest as loadtest_plan
 from sonata_tasks.registry_tunnel import registry_tunnel_resource
 from sonata_tasks.execution.bindings import RoleBoundCommandTaskExecutor
 
 from nanolab.cli.execution import build_role_bindings
-from nanolab.cli.vm_provider import vm_provider_for_environment, vm_request_for_role
+from nanolab.cli.vm_provider import vm_request_for_role
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.images.plan import DEFAULT_REGISTRY, ImagePlan, build_image_plan
@@ -279,7 +280,7 @@ def build_release_workflow(
         raise ValueError("release image plan version does not match the requested project version")
 
     if provider is None:
-        provider = vm_provider_for_environment(env, request.repo_root)
+        provider = provider_for(vm_request_for_role(env, "stack"), request.repo_root)
     infrastructure = build_release_resources(
         env, nanofaas, provider, requires=(execution_guard,)
     )
