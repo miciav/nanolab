@@ -23,7 +23,7 @@ def test_dashboard_renders_summary_phases_logs_breadcrumb_and_footer() -> None:
     )
     dashboard.apply_event(
         build_task_event(
-            kind="task.running",
+            kind="task.started",
             flow_id="e2e",
             task_id="vm.ensure",
             title="Ensure VM is running",
@@ -55,12 +55,12 @@ def test_dashboard_renders_nested_child_without_replacing_planned_rows() -> None
     )
     dashboard.apply_event(
         build_task_event(
-            kind="task.running", flow_id="e2e", task_id="verify", title="Run verification"
+            kind="task.started", flow_id="e2e", task_id="verify", title="Run verification"
         )
     )
     dashboard.apply_event(
         build_task_event(
-            kind="task.completed",
+            kind="task.passed",
             flow_id="e2e",
             task_id="health",
             parent_task_id="verify",
@@ -135,7 +135,7 @@ def test_dashboard_syncs_from_snapshot_without_aliasing() -> None:
     sink = TuiWorkflowSink(aggregator)
     sink.emit(
         build_task_event(
-            kind="task.running", flow_id="e2e", task_id="build", title="Build images"
+            kind="task.started", flow_id="e2e", task_id="build", title="Build images"
         )
     )
     sink.emit(build_log_event(flow_id="e2e", task_id="build", line="docker push ok"))

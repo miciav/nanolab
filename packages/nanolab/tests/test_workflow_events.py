@@ -45,7 +45,7 @@ def test_logged_process_output_preserves_parent_task_identity_from_context() -> 
 
 def test_build_task_event_supports_parent_task_identity() -> None:
     event = build_task_event(
-        kind="task.running",
+        kind="task.started",
         flow_id="e2e.k3s_junit_curl",
         task_id="verify.control_plane_health",
         parent_task_id="tests.run_k3s_curl_checks",
@@ -58,7 +58,7 @@ def test_build_task_event_supports_parent_task_identity() -> None:
 
 def test_build_task_event_leaves_root_level_parentless_without_parent_identity() -> None:
     event = build_task_event(
-        kind="task.running",
+        kind="task.started",
         flow_id="e2e.k8s_vm",
         task_id="images.build_core",
         title="Building core images",

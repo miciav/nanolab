@@ -7,11 +7,10 @@ import time
 import typer
 from sonata_engine.workflow.events import WorkflowEvent
 
-# Two vocabularies, one console renderer: sonata_tasks said running/completed,
-# sonata_engine says started/passed. The events are structurally identical, so
-# the sink only has to accept both vocabularies.
-_RUNNING_KINDS = frozenset({"task.running", "task.started"})
-_TERMINAL_KINDS = frozenset({"task.completed", "task.passed", "task.failed"})
+# One vocabulary, one console renderer: the engine bus emits task.started,
+# task.passed and task.failed, and the sink renders status from those.
+_RUNNING_KINDS = frozenset({"task.started"})
+_TERMINAL_KINDS = frozenset({"task.passed", "task.failed"})
 
 
 class ConsoleProgressSink:

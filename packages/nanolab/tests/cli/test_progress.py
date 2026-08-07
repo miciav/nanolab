@@ -9,9 +9,9 @@ def test_console_progress_reports_task_status_and_elapsed_time() -> None:
     times = iter((10.0, 12.5, 20.0, 21.0))
     sink = ConsoleProgressSink(write=lines.append, clock=lambda: next(times))
 
-    sink.emit(_event("task.running", "build.jvm", "Build JVM"))
-    sink.emit(_event("task.completed", "build.jvm", "Build JVM"))
-    sink.emit(_event("task.running", "helm.deploy", "Deploy Helm"))
+    sink.emit(_event("task.started", "build.jvm", "Build JVM"))
+    sink.emit(_event("task.passed", "build.jvm", "Build JVM"))
+    sink.emit(_event("task.started", "helm.deploy", "Deploy Helm"))
     sink.emit(_event("task.failed", "helm.deploy", "Deploy Helm", "timeout"))
 
     assert lines == [

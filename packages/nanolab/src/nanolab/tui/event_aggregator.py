@@ -91,8 +91,8 @@ class WorkflowEventAggregator:
         for phase in self._phases:
             complete_phase(phase)
 
-    # sonata_tasks emitted running/completed, sonata_engine emits
-    # started/passed. One aggregator reads both vocabularies.
+    # The engine bus emits the single task vocabulary (started/passed/failed,
+    # plus skipped and log.line); one aggregator reads it.
     def handle_event(self, event: WorkflowEvent) -> None:
         if event.kind == "log.line":
             if event.task_id:
@@ -107,7 +107,7 @@ class WorkflowEventAggregator:
         if event.kind == "task.pending":
             self._phase_for_event(event)
             return
-        if event.kind in ("task.running", "task.started"):
+        if event.kind == "task.started":
             self.append_log(
                 f"[step] {event.title or event.task_id or 'Task'}"
                 + (f" ({event.detail})" if event.detail else "")
@@ -116,7 +116,7 @@ class WorkflowEventAggregator:
             if phase is not None:
                 self._mark_phase_running(phase)
             return
-        if event.kind in ("task.completed", "task.passed"):
+        if event.kind == "task.passed":
             self.append_log(
                 f"[ok] {event.title or event.task_id or 'Task'}"
                 + (f" ({event.detail})" if event.detail else "")

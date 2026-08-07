@@ -10,7 +10,7 @@ def test_event_aggregator_maps_task_started_event_to_running_step() -> None:
 
     bridge.handle_event(
         build_task_event(
-            kind="task.running",
+            kind="task.started",
             flow_id="e2e.k8s_vm",
             task_id="vm.ensure_running",
             title="Ensure VM is running",
@@ -90,7 +90,7 @@ def test_event_aggregator_reuses_planned_placeholder_when_log_arrives_before_tas
     )
     bridge.handle_event(
         build_task_event(
-            kind="task.running",
+            kind="task.started",
             flow_id="e2e.k8s_vm",
             task_id="images.build_core",
             title="Build core images",
@@ -159,7 +159,7 @@ def test_event_aggregator_does_not_mark_lower_planned_step_success_when_higher_s
 
     bridge.handle_event(
         build_task_event(
-            kind="task.running",
+            kind="task.started",
             flow_id="e2e.k8s_vm",
             task_id="vm.ensure_running",
             title="Ensure VM is running",
@@ -167,7 +167,7 @@ def test_event_aggregator_does_not_mark_lower_planned_step_success_when_higher_s
     )
     bridge.handle_event(
         build_task_event(
-            kind="task.running",
+            kind="task.started",
             flow_id="e2e.k8s_vm",
             task_id="vm.provision_base",
             title="Provision base VM dependencies",
@@ -192,7 +192,7 @@ def test_nested_verify_events_do_not_create_new_top_level_rows() -> None:
 
     bridge.handle_event(
         build_task_event(
-            kind="task.running",
+            kind="task.started",
             flow_id="e2e.k3s_junit_curl",
             task_id="vm.ensure_running",
             title="Ensure VM is running",
@@ -200,7 +200,7 @@ def test_nested_verify_events_do_not_create_new_top_level_rows() -> None:
     )
     bridge.handle_event(
         build_task_event(
-            kind="task.running",
+            kind="task.started",
             flow_id="e2e.k3s_junit_curl",
             task_id="vm.provision_base_dependencies",
             title="Provision base VM dependencies",
@@ -208,7 +208,7 @@ def test_nested_verify_events_do_not_create_new_top_level_rows() -> None:
     )
     bridge.handle_event(
         build_task_event(
-            kind="task.running",
+            kind="task.started",
             flow_id="e2e.k3s_junit_curl",
             task_id="vm.sync_project",
             title="Sync project to VM",
@@ -216,7 +216,7 @@ def test_nested_verify_events_do_not_create_new_top_level_rows() -> None:
     )
     bridge.handle_event(
         build_task_event(
-            kind="task.running",
+            kind="task.started",
             flow_id="e2e.k3s_junit_curl",
             task_id="tests.run_k3s_curl_checks",
             title="Run k3s-junit-curl verification",
@@ -224,7 +224,7 @@ def test_nested_verify_events_do_not_create_new_top_level_rows() -> None:
     )
     bridge.handle_event(
         build_task_event(
-            kind="task.running",
+            kind="task.started",
             flow_id="e2e.k3s_junit_curl",
             task_id="verify.control_plane_health",
             parent_task_id="tests.run_k3s_curl_checks",
@@ -234,7 +234,7 @@ def test_nested_verify_events_do_not_create_new_top_level_rows() -> None:
     )
     bridge.handle_event(
         build_task_event(
-            kind="task.running",
+            kind="task.started",
             flow_id="e2e.k3s_junit_curl",
             task_id="verify.prometheus_metrics",
             parent_task_id="tests.run_k3s_curl_checks",
@@ -275,7 +275,7 @@ def test_parent_task_id_routes_child_under_parent_even_when_labels_match() -> No
 
     bridge.handle_event(
         build_task_event(
-            kind="task.running",
+            kind="task.started",
             flow_id="e2e.k3s_junit_curl",
             task_id="tests.run_k3s_curl_checks",
             title="Run k3s-junit-curl verification",
@@ -283,7 +283,7 @@ def test_parent_task_id_routes_child_under_parent_even_when_labels_match() -> No
     )
     bridge.handle_event(
         build_task_event(
-            kind="task.running",
+            kind="task.started",
             flow_id="e2e.k3s_junit_curl",
             task_id="verify.control_plane_health",
             parent_task_id="tests.run_k3s_curl_checks",
@@ -310,7 +310,7 @@ def test_parentless_task_event_does_not_attach_to_active_row() -> None:
 
     bridge.handle_event(
         build_task_event(
-            kind="task.running",
+            kind="task.started",
             flow_id="e2e.k3s_junit_curl",
             task_id="tests.run_k3s_curl_checks",
             title="Run k3s-junit-curl verification",
@@ -318,7 +318,7 @@ def test_parentless_task_event_does_not_attach_to_active_row() -> None:
     )
     bridge.handle_event(
         build_task_event(
-            kind="task.running",
+            kind="task.started",
             flow_id="e2e.k3s_junit_curl",
             task_id="verify.prometheus_metrics",
             title="Verify",
@@ -346,7 +346,7 @@ def test_unresolved_parent_task_does_not_fall_back_to_planned_row() -> None:
 
     bridge.handle_event(
         build_task_event(
-            kind="task.running",
+            kind="task.started",
             flow_id="e2e.k3s_junit_curl",
             task_id="verify.control_plane_health",
             parent_task_id="tests.missing_parent",
@@ -371,7 +371,7 @@ def test_complete_running_phases_terminalizes_nested_children(
     bridge = WorkflowEventAggregator(planned_steps=["Run verification"])
     bridge.handle_event(
         build_task_event(
-            kind="task.running",
+            kind="task.started",
             flow_id="e2e.k3s_junit_curl",
             task_id="tests.run_verification",
             title="Run verification",
@@ -379,7 +379,7 @@ def test_complete_running_phases_terminalizes_nested_children(
     )
     bridge.handle_event(
         build_task_event(
-            kind="task.running",
+            kind="task.started",
             flow_id="e2e.k3s_junit_curl",
             task_id="verify.health",
             parent_task_id="tests.run_verification",
@@ -427,8 +427,7 @@ def test_non_positive_log_limit_is_rejected(log_limit: int) -> None:
 
 
 def test_the_tui_sink_binds_to_sonata_and_reads_its_task_vocabulary() -> None:
-    from sonata_engine.workflow.context import active_sink
-    from sonata_engine.workflow.context import bind_workflow_sink as bind_sonata_sink
+    from sonata_engine.workflow.context import active_sink, bind_workflow_sink
     from sonata_engine.workflow.events import WorkflowEvent as SonataEvent
 
     from nanolab.tui.event_aggregator import WorkflowEventAggregator
@@ -437,7 +436,7 @@ def test_the_tui_sink_binds_to_sonata_and_reads_its_task_vocabulary() -> None:
     aggregator = WorkflowEventAggregator(planned_steps=["Build nanofaas-cli"])
     sink = TuiWorkflowSink(aggregator)
 
-    with bind_sonata_sink(sink):
+    with bind_workflow_sink(sink):
         bound_sink = active_sink()
         assert bound_sink is sink
         bound_sink.emit(

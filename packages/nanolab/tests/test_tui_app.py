@@ -25,12 +25,11 @@ from nanolab.tui.workflow_controller import TuiWorkflowController
 
 
 def _step(label: str) -> None:
-    # sonata_tasks' reporting.step emitted task.running to the active sink;
-    # the engine has no step() helper, so the fakes emit the same event
+    # The engine has no step() helper; the fakes emit the start event
     # through its builders.
     sink = active_sink()
     if sink is not None:
-        sink.emit(build_task_event(kind="task.running", title=label))
+        sink.emit(build_task_event(kind="task.started", title=label))
 
 
 class ScriptedChooser:
@@ -997,7 +996,7 @@ def test_nonlocal_loadtest_runs_provision_build_and_cleanup_inside_live_sink(
     assert preview.run_calls == 0
     assert workflow.run_calls == 1
     assert [(event.kind, event.title, event.line) for event in controller.sink.events] == [
-        ("task.running", "Provision stack", ""),
+        ("task.started", "Provision stack", ""),
         ("log.line", "", "cleanup complete"),
     ]
 
@@ -1053,7 +1052,7 @@ def test_provision_cleanup_error_reaches_real_controller_dashboard_and_acknowled
     )._workflow_menu("cli-container.yaml")
 
     assert [(event.kind, event.title, event.line) for event in emitted[:2]] == [
-        ("task.running", "Provision stack", ""),
+        ("task.started", "Provision stack", ""),
         ("log.line", "", "cleanup started"),
     ]
     assert emitted[-1].kind == "task.failed"

@@ -121,7 +121,7 @@ def test_action_failure_uses_next_pending_phase_not_completed_phase() -> None:
         captured.append(dashboard)
         sink.emit(
             build_task_event(
-                kind="task.completed",
+                kind="task.passed",
                 flow_id="test",
                 task_id="first",
                 title="Step one",
@@ -160,7 +160,7 @@ def test_action_failure_terminalizes_running_parent_and_nested_child() -> None:
         captured.append(dashboard)
         sink.emit(
             build_task_event(
-                kind="task.running",
+                kind="task.started",
                 flow_id="test",
                 task_id="parent",
                 title="Step one",
@@ -168,7 +168,7 @@ def test_action_failure_terminalizes_running_parent_and_nested_child() -> None:
         )
         sink.emit(
             build_task_event(
-                kind="task.running",
+                kind="task.started",
                 flow_id="test",
                 task_id="child",
                 parent_task_id="parent",

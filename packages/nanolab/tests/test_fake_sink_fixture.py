@@ -2,7 +2,7 @@ from sonata_engine.workflow.events import WorkflowEvent
 
 
 def test_fake_sink_collects_emitted_events(fake_sink) -> None:
-    event = WorkflowEvent(kind="task.running", flow_id="test.flow", title="hello")
+    event = WorkflowEvent(kind="task.started", flow_id="test.flow", title="hello")
     fake_sink.emit(event)
     assert len(fake_sink.events) == 1
     assert fake_sink.events[0].title == "hello"
