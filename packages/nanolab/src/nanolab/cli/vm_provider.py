@@ -3,9 +3,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from sonata_tasks.provisioning.providers import provider_for
 from sonata_tasks.vm.models import VmRequest
-from sonata_tasks.vm.azure import AzureVmProvider
-from sonata_tasks.vm.proxmox import ProxmoxVmProvider
 
 from nanolab.config.environment import EnvironmentConfig, ExecutionRole
 
@@ -20,11 +19,7 @@ _DEFAULT_NAMES = {
 
 
 def vm_provider_for_environment(environment: EnvironmentConfig, repo_root: Path) -> object:
-    if environment.provider == "azure":
-        return AzureVmProvider(repo_root)
-    if environment.provider == "proxmox":
-        return ProxmoxVmProvider(repo_root)
-    raise ValueError(f"{environment.provider} does not use a cloud VM provider")
+    return provider_for(VmRequest(lifecycle=environment.provider), repo_root)
 
 
 def vm_request_for_role(
