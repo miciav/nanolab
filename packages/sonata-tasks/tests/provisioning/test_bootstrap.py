@@ -3,9 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import pytest
-
-from sonata_tasks.components.context import ScenarioExecutionContext
 from sonata_tasks.components.operations import RemoteCommandOperation
 from sonata_tasks.provisioning.bootstrap import (
     remote_operations,
@@ -87,3 +84,45 @@ def test_retarget_cloud_operations_branches_on_provider_not_lifecycle() -> None:
     )
     retargeted = retarget_cloud_operations(provider, context, [op])
     assert "ansible_port=22" in retargeted[0].argv
+
+
+def test_retarget_cloud_operations_repoints_synthetic_host_for_non_cloud() -> None:
+    # Multipass plans target the synthetic "{name}.internal" host; the
+    # post-ensure retarget must land the real connection host in both the
+    # ansible inventory and the rsync target.
+    context = scenario_context(
+        Path("/repo"),
+        VmRequest(lifecycle="external", name="stack", host="10.0.0.5"),
+        Path("/assets"),
+    )
+    ops = (
+        RemoteCommandOperation(
+            operation_id="base",
+            summary="base",
+            argv=("ansible-playbook", "-i", "stack.internal,", "playbook.yml"),
+        ),
+        RemoteCommandOperation(
+            operation_id="repo.sync_to_vm",
+            summary="sync",
+            argv=("rsync", "-az", "repo/", "ubuntu@stack.internal:/home/ubuntu/nanofaas/"),
+        ),
+    )
+    retargeted = retarget_cloud_operations(object(), context, ops)
+    assert retargeted[0].argv[retargeted[0].argv.index("-i") + 1] == "10.0.0.5,"
+    assert retargeted[1].argv[-1] == "ubuntu@10.0.0.5:/home/ubuntu/nanofaas/"
+
+
+def test_retarget_cloud_operations_skips_placeholder_resolution() -> None:
+    # When the resolved host is still the synthetic placeholder there is no
+    # real host to substitute, and pre-ensure retargets must be preserved.
+    context = scenario_context(
+        Path("/repo"),
+        VmRequest(lifecycle="external", name="stack", host="stack.internal"),
+        Path("/assets"),
+    )
+    op = RemoteCommandOperation(
+        operation_id="base",
+        summary="base",
+        argv=("ansible-playbook", "-i", "pve.example,", "playbook.yml"),
+    )
+    assert retarget_cloud_operations(object(), context, [op]) == (op,)

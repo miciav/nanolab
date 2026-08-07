@@ -5,13 +5,14 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import cast
 
 from sonata_tasks.components.bootstrap import retarget_bootstrap_operation
 from sonata_tasks.components.context import ScenarioExecutionContext
 from sonata_tasks.components.operations import RemoteCommandOperation
 from sonata_tasks.components.operations import ScenarioOperation
 from sonata_tasks.shell import SubprocessShell
-from sonata_tasks.tasks.executors import HostCommandTaskExecutor
+from sonata_tasks.tasks.executors import HostCommandRunner, HostCommandTaskExecutor
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 from sonata_tasks.vm.azure import AzureVmProvider
 from sonata_tasks.vm.models import VmRequest
@@ -85,7 +86,9 @@ def run_bootstrap_operations(
     *,
     role: str,
 ) -> None:
-    runner = getattr(provider, "shell", None) or SubprocessShell()
+    runner = cast(
+        HostCommandRunner, getattr(provider, "shell", None) or SubprocessShell()
+    )
     executor = HostCommandTaskExecutor(runner)
     tasks = [
         operation_task(
@@ -115,10 +118,27 @@ def retarget_cloud_operations(
     context: ScenarioExecutionContext,
     operations: Iterable[RemoteCommandOperation],
 ) -> tuple[RemoteCommandOperation, ...]:
-    if not isinstance(orchestrator, (AzureVmProvider, ProxmoxVmProvider)):
-        return tuple(operations)
-
     request = context.vm_request
+    if not isinstance(orchestrator, (AzureVmProvider, ProxmoxVmProvider)):
+        # Multipass plans are built against the synthetic "{name}.internal"
+        # host; re-point them at the post-ensure connection host (for external
+        # the planner already used the configured host, so this is identity).
+        # When resolution still yields the placeholder there is no real host
+        # to substitute, and operations the shim retargeted pre-ensure via
+        # cloud endpoint helpers must not be overwritten.
+        if request.host is None or request.host == f"{request.name}.internal":
+            return tuple(operations)
+        return tuple(
+            retarget_bootstrap_operation(
+                operation,
+                context=context,
+                host=request.host,
+                port=None,
+                private_key=None,
+            )
+            for operation in operations
+        )
+
     if isinstance(orchestrator, ProxmoxVmProvider):
         host, port = orchestrator.ssh_endpoint(request)
     else:

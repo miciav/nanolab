@@ -28,4 +28,4 @@ def test_provider_for_proxmox_returns_proxmox_provider(tmp_path: Path) -> None:
 
 def test_provider_for_external_raises(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="external"):
-        provider_for(VmRequest(lifecycle="external"), tmp_path)
+        provider_for(VmRequest(lifecycle="external", host="x"), tmp_path)

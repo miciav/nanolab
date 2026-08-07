@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from sonata_tasks.components.bootstrap import (
     plan_assets_sync_to_vm,
@@ -67,7 +67,7 @@ def _stack_operations(
 
 
 def _role_requests_and_operations(
-    provider: object,
+    provider: Any,
     scenario: ScenarioConfig,
     environment: EnvironmentConfig,
     *,
@@ -231,7 +231,11 @@ def provision_environment(
         assets_root=discover_tool_root() / "assets",
         keep=keep,
         after_ensure=(
-            (lambda role, request: post_ensure_verifier(role, request))
+            (
+                lambda role, request: post_ensure_verifier(
+                    cast(ExecutionRole, role), request
+                )
+            )
             if post_ensure_verifier is not None
             else None
         ),
