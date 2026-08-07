@@ -18,10 +18,9 @@ from rich.tree import Tree
 
 from nanolab.tui.event_aggregator import WorkflowEventAggregator
 from nanolab.tui.models import TuiPhaseSnapshot, TuiWorkflowSnapshot
-from sonata_engine.workflow.events import WorkflowEvent as SonataWorkflowEvent
+from sonata_engine.workflow.events import WorkflowEvent
+from sonata_engine.workflow.models import WorkflowState
 from tui_toolkit import render_screen_frame
-from sonata_tasks.workflow.events import WorkflowEvent
-from sonata_tasks.workflow.models import WorkflowState
 
 
 @dataclass
@@ -244,7 +243,7 @@ class TuiWorkflowSink:
         self._aggregator = aggregator
         self._refresh = refresh or (lambda: None)
 
-    def emit(self, event: WorkflowEvent | SonataWorkflowEvent) -> None:
+    def emit(self, event: WorkflowEvent) -> None:
         self._aggregator.handle_event(event)
         self._refresh()
 

@@ -5,10 +5,9 @@ from contextlib import contextmanager
 import time
 
 import typer
-from sonata_engine.workflow.events import WorkflowEvent as SonataWorkflowEvent
-from sonata_tasks.workflow.events import WorkflowEvent
+from sonata_engine.workflow.events import WorkflowEvent
 
-# Two engines, one console renderer: sonata_tasks says running/completed,
+# Two vocabularies, one console renderer: sonata_tasks said running/completed,
 # sonata_engine says started/passed. The events are structurally identical, so
 # the sink only has to accept both vocabularies.
 _RUNNING_KINDS = frozenset({"task.running", "task.started"})
@@ -27,7 +26,7 @@ class ConsoleProgressSink:
         self._started: dict[str, float] = {}
         self.records: list[dict[str, object]] = []
 
-    def emit(self, event: WorkflowEvent | SonataWorkflowEvent) -> None:
+    def emit(self, event: WorkflowEvent) -> None:
         task_id = event.task_id
         if task_id is None:
             return

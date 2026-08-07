@@ -20,9 +20,8 @@ from sonata_engine import (
 )
 from sonata_engine import Workflow as SonataWorkflow
 from sonata_engine.journal import JournalConfig
-from sonata_engine.workflow.context import bind_workflow_sink as bind_sonata_sink
+from sonata_engine.workflow.context import bind_workflow_sink
 from sonata_tasks.loadtest.adapters import HttpPrometheusClient
-from sonata_tasks.workflow.context import bind_workflow_sink
 from sonata_tasks.provisioning.providers import provider_for
 
 from nanolab.cli import diagnostics
@@ -514,13 +513,9 @@ def install_product_commands(app: typer.Typer) -> None:
             lifetime.close()
             raise
         try:
-            # Both binds are required, and not just during the migration: the
-            # legacy contextvar is read directly by SubprocessShell._emit_output
-            # (sonata_tasks/shell.py), which every command execution goes
-            # through regardless of which engine's workflow issued it. Drop the
-            # legacy bind only if that execution layer itself stops routing
-            # through workflow_log.
-            with bind_workflow_sink(sink), bind_sonata_sink(sink):
+            # Command output routing (SubprocessShell._emit_output) reads the
+            # same contextvar, so one bind covers the whole execution layer.
+            with bind_workflow_sink(sink):
                 if _uses_legacy_provisioning(
                     scenario_config, provision=provision, cli_provisioned=cli_provisioned
                 ):

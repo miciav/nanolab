@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from sonata_tasks.workflow.models import WorkflowState
+from sonata_engine.workflow.models import WorkflowState
 
 
 @dataclass(slots=True)

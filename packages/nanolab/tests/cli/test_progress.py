@@ -1,8 +1,7 @@
 from datetime import UTC, datetime
 
 from nanolab.cli.progress import ConsoleProgressSink
-from sonata_engine.workflow.events import WorkflowEvent as SonataWorkflowEvent
-from sonata_tasks.workflow.events import WorkflowEvent
+from sonata_engine.workflow.events import WorkflowEvent
 
 
 def test_console_progress_reports_task_status_and_elapsed_time() -> None:
@@ -45,7 +44,7 @@ def test_console_progress_reports_sonata_task_events() -> None:
     sink = ConsoleProgressSink(write=lines.append, clock=lambda: next(times))
 
     sink.emit(
-        SonataWorkflowEvent(
+        WorkflowEvent(
             kind="task.started",
             flow_id="cli",
             task_id="001.build-nanofaas-cli",
@@ -53,7 +52,7 @@ def test_console_progress_reports_sonata_task_events() -> None:
         )
     )
     sink.emit(
-        SonataWorkflowEvent(
+        WorkflowEvent(
             kind="task.passed",
             flow_id="cli",
             task_id="001.build-nanofaas-cli",

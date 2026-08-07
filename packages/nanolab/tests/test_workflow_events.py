@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from sonata_tasks.workflow.event_builders import build_log_event, build_task_event
-from sonata_tasks.workflow.events import WorkflowContext
+from sonata_engine.workflow.event_builders import build_log_event, build_task_event
+from sonata_engine.workflow.events import WorkflowContext
 
 
 def test_logged_process_output_is_tagged_with_task_run_context() -> None:

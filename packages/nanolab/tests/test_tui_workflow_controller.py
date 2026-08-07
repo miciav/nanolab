@@ -9,7 +9,7 @@ import pytest
 
 from nanolab.tui.workflow import WorkflowDashboard, WorkflowKeyListener
 from nanolab.tui.workflow_controller import TuiWorkflowController
-from sonata_tasks.workflow.event_builders import build_task_event
+from sonata_engine.workflow.event_builders import build_task_event
 
 
 def live_mock() -> MagicMock:

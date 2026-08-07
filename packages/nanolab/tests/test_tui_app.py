@@ -12,15 +12,25 @@ from unittest.mock import MagicMock
 import pytest
 from rich.console import Console
 from rich.table import Table
-from sonata_tasks.workflow.context import bind_workflow_sink
-from sonata_tasks.workflow.events import WorkflowEvent
-from sonata_tasks.workflow.reporting import step, workflow_log
+from sonata_engine.workflow.context import active_sink, bind_workflow_sink
+from sonata_engine.workflow.event_builders import build_task_event
+from sonata_engine.workflow.events import WorkflowEvent
+from sonata_engine.workflow.reporting import workflow_log
 
 import nanolab.tui.app as tui_app
 import nanolab.tui.workflow_controller as workflow_controller_module
 from nanolab.tui import NanofaasTUI
 from nanolab.tui.workflow import TuiWorkflowSink
 from nanolab.tui.workflow_controller import TuiWorkflowController
+
+
+def _step(label: str) -> None:
+    # sonata_tasks' reporting.step emitted task.running to the active sink;
+    # the engine has no step() helper, so the fakes emit the same event
+    # through its builders.
+    sink = active_sink()
+    if sink is not None:
+        sink.emit(build_task_event(kind="task.running", title=label))
 
 
 class ScriptedChooser:
@@ -936,7 +946,7 @@ def test_nonlocal_loadtest_runs_provision_build_and_cleanup_inside_live_sink(
     @contextmanager
     def provision(*args: object, **kwargs: object) -> Iterator[None]:
         events.append(("provision-enter",))
-        step("Provision stack")
+        _step("Provision stack")
         yield
         events.append(("provision-cleanup",))
         workflow_log("cleanup complete")
@@ -1006,7 +1016,7 @@ def test_provision_cleanup_error_reaches_real_controller_dashboard_and_acknowled
 
     @contextmanager
     def provision(*args: object, **kwargs: object) -> Iterator[None]:
-        step("Provision stack")
+        _step("Provision stack")
         try:
             yield
         finally:
