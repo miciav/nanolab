@@ -2,7 +2,6 @@
 root_packages =
     nanolab
     sonata_tasks
-    workflow_tasks
 include_external_packages = True
 
 [importlinter:contract:core_is_independent]
@@ -29,12 +28,6 @@ source_modules =
     nanolab.plans
     nanolab.workspace
 forbidden_modules = nanolab.tui
-
-[importlinter:contract:workflow_tasks_is_independent]
-name = workflow_tasks must not depend on nanolab
-type = forbidden
-source_modules = workflow_tasks
-forbidden_modules = nanolab
 
 [importlinter:contract:sonata_tasks_is_independent]
 name = sonata_tasks must not depend on nanolab

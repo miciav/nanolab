@@ -269,8 +269,7 @@ def test_run_container_cli_rejects_keep(
 def test_run_passes_custom_control_plane_url_to_cli_plan(
     monkeypatch,
 ) -> None:
-    # The cli scenario is now built and run by Sonata (a real sonata_engine.Workflow),
-    # not the legacy workflow_tasks.core.workflow.Workflow this test used to fake.
+    # The cli scenario is now built and run by Sonata (a real sonata_engine.Workflow).
     # This test only cares about the args build_cli_plan was called with,
     # so a mock of the Sonata API (keep assignment + run(select=...))
     # stands in without adding any compatibility shim.

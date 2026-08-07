@@ -516,7 +516,7 @@ def install_product_commands(app: typer.Typer) -> None:
         try:
             # Both binds are required, and not just during the migration: the
             # legacy contextvar is read directly by SubprocessShell._emit_output
-            # (workflow_tasks/shell.py), which every command execution goes
+            # (sonata_tasks/shell.py), which every command execution goes
             # through regardless of which engine's workflow issued it. Drop the
             # legacy bind only if that execution layer itself stops routing
             # through workflow_log.

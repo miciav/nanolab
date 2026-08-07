@@ -38,31 +38,9 @@ def test_ensure_vm_running_returns_vm_info() -> None:
     assert info.host == "10.0.0.1"
 
 
-def test_ensure_vm_running_satisfies_task_protocol() -> None:
-    from workflow_tasks.core.task import Task
-
-    lifecycle = _make_lifecycle()
-    task = EnsureVmRunning(
-        task_id="vm.ensure_running",
-        title="Ensure VM running",
-        lifecycle=lifecycle,
-        config=VmConfig(name="my-vm"),
-    )
-    assert isinstance(task, Task)
-
-
 def test_destroy_vm_calls_lifecycle_destroy() -> None:
     lifecycle = _make_lifecycle()
     info = VmInfo(name="my-vm", host="10.0.0.1", user="ubuntu", home="/home/ubuntu")
     task = DestroyVm(task_id="vm.destroy", title="Destroy VM", lifecycle=lifecycle, info=info)
     task.run()
     assert info in lifecycle.destroyed
-
-
-def test_destroy_vm_satisfies_task_protocol() -> None:
-    from workflow_tasks.core.task import Task
-
-    lifecycle = _make_lifecycle()
-    info = VmInfo(name="my-vm", host="10.0.0.1", user="ubuntu", home="/home/ubuntu")
-    task = DestroyVm(task_id="vm.destroy", title="Destroy VM", lifecycle=lifecycle, info=info)
-    assert isinstance(task, Task)

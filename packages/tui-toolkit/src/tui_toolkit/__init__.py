@@ -1,6 +1,6 @@
 """tui-toolkit — terminal UI widgets with unified theming.
 
-Workflow event types and reporting helpers live in workflow_tasks.
+Workflow event types and reporting helpers live in sonata_tasks.
 """
 from __future__ import annotations
 

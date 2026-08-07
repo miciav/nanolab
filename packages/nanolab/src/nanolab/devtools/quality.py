@@ -16,12 +16,13 @@ ENTRYPOINT_IMPORT_MODULES = (
 _GRIMP_CHECK = """
 import grimp
 
-graph = grimp.build_graph("nanolab", "workflow_tasks")
+graph = grimp.build_graph("nanolab", "sonata_tasks", "tui_toolkit")
 violations = []
 
-chain = graph.find_shortest_chain(importer="workflow_tasks", imported="nanolab")
-if chain:
-    violations.append(f"workflow_tasks -> nanolab: {' -> '.join(chain)}")
+for member in ("sonata_tasks", "tui_toolkit"):
+    chain = graph.find_shortest_chain(importer=member, imported="nanolab")
+    if chain:
+        violations.append(f"{member} -> nanolab: {' -> '.join(chain)}")
 
 if violations:
     for v in violations:

@@ -92,8 +92,8 @@ class WorkflowEventAggregator:
         for phase in self._phases:
             complete_phase(phase)
 
-    # workflow_tasks emits running/completed, Sonata emits started/passed. One
-    # aggregator reads both for as long as the migration lasts.
+    # sonata_tasks emits running/completed, sonata_engine emits started/passed.
+    # One aggregator reads both vocabularies.
     def handle_event(self, event: WorkflowEvent | SonataWorkflowEvent) -> None:
         if event.kind == "log.line":
             if event.task_id:

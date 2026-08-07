@@ -8,9 +8,9 @@ import typer
 from sonata_engine.workflow.events import WorkflowEvent as SonataWorkflowEvent
 from sonata_tasks.workflow.events import WorkflowEvent
 
-# Two engines, one console renderer: workflow_tasks says running/completed,
-# Sonata says started/passed. The events are structurally identical, so the
-# sink only has to accept both vocabularies.
+# Two engines, one console renderer: sonata_tasks says running/completed,
+# sonata_engine says started/passed. The events are structurally identical, so
+# the sink only has to accept both vocabularies.
 _RUNNING_KINDS = frozenset({"task.running", "task.started"})
 _TERMINAL_KINDS = frozenset({"task.completed", "task.passed", "task.failed"})
 
