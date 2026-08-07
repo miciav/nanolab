@@ -89,17 +89,20 @@ def provision_roles(
 ) -> Generator[None, None, None]:
     cleanup_tasks: list[DestroyVm] = []
     main_error: BaseException | None = None
-    cleanup_error: Exception | None = None
+    cleanup_errors: list[str] = []
     try:
+        resolved: list[VmRequest] = []
         for entry in roles:
             cleanup = _destroy_task(provider, entry.request, role=entry.role)
             if cleanup is not None:
                 cleanup_tasks.append(cleanup)
-            resolved = _ensure_vm(provider, entry.request, role=entry.role)
+            resolved.append(_ensure_vm(provider, entry.request, role=entry.role))
+        for entry, request in zip(roles, resolved):
             if after_ensure is not None:
                 after_ensure(entry.role, entry.request)
+        for entry, request in zip(roles, resolved):
             if entry.operations:
-                context = scenario_context(repo_root, resolved, assets_root)
+                context = scenario_context(repo_root, request, assets_root)
                 retargeted = retarget_cloud_operations(
                     provider, context, entry.operations
                 )
@@ -108,17 +111,18 @@ def provision_roles(
     except BaseException as exc:
         main_error = exc
     finally:
-        try:
-            if not keep:
-                for task in reversed(cleanup_tasks):
+        if not keep:
+            for task in reversed(cleanup_tasks):
+                try:
                     with workflow_step(task_id=task.task_id, title=task.title):
                         task.run()
-        except Exception as exc:
-            cleanup_error = exc
+                except Exception as exc:
+                    cleanup_errors.append(str(exc))
 
     if main_error is not None:
-        if cleanup_error is not None:
-            raise RuntimeError(f"{main_error}\n\nCleanup errors:\n{cleanup_error}") from main_error
+        if cleanup_errors:
+            combined = f"{main_error}\n\nCleanup errors:\n" + "\n".join(cleanup_errors)
+            raise RuntimeError(combined) from main_error
         raise main_error
-    if cleanup_error is not None:
-        raise cleanup_error
+    if cleanup_errors:
+        raise RuntimeError("Cleanup failed:\n" + "\n".join(cleanup_errors))
