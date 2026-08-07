@@ -20,11 +20,11 @@ from sonata_tasks.components.bootstrap import (
 )
 from sonata_tasks.vm.models import VmInfo, VmRequest
 
-from nanolab.cli.provisioning import (
-    _context,
-    _remote_operations,
-    _retarget_cloud_operations,
-    _run_operations,
+from sonata_tasks.provisioning import (
+    remote_operations,
+    retarget_cloud_operations,
+    run_bootstrap_operations,
+    scenario_context,
 )
 from nanolab.cli.vm_provider import vm_request_for_role
 from nanolab.config.environment import EnvironmentConfig, ExecutionRole
@@ -39,6 +39,7 @@ from nanolab.release.secrets import (
     stage_cosign_credentials,
     stage_ghcr_credentials,
 )
+from nanolab.workspace.paths import discover_tool_root
 
 
 T = TypeVar("T")
@@ -211,7 +212,7 @@ def _bootstrap_role(
     resolved = request.model_copy(
         update={"lifecycle": "external", "host": info.host, "user": info.user, "home": info.home}
     )
-    context = _context(repo_root, resolved)
+    context = scenario_context(repo_root, resolved, discover_tool_root() / "assets")
     if role == "stack":
         raw = (
             *plan_vm_provision_base(context),
@@ -223,8 +224,8 @@ def _bootstrap_role(
         raw = (*plan_loadtest_install_k6(context), *plan_assets_sync_to_vm(context))
     else:
         raw = plan_vm_provision_base(context)
-    operations = _retarget_cloud_operations(environment, provider, context, _remote_operations(raw))
-    _run_operations(provider, operations, role=role)
+    operations = retarget_cloud_operations(provider, context, remote_operations(raw))
+    run_bootstrap_operations(provider, operations, role=role)
 
 
 def build_release_resources(
