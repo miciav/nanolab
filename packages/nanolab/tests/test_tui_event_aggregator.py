@@ -41,16 +41,15 @@ def test_event_aggregator_preserves_log_buffer_across_toggle() -> None:
     assert "docker push ok" in snapshot.logs[-1]
 
 
-def test_event_aggregator_routes_updated_cancelled_and_log_events_through_same_task_row() -> None:
+def test_event_aggregator_routes_started_and_log_events_through_same_task_row() -> None:
     bridge = WorkflowEventAggregator()
 
     bridge.handle_event(
         build_task_event(
-            kind="task.updated",
+            kind="task.started",
             flow_id="e2e.k8s_vm",
             task_id="images.build_core",
             title="Build core images",
-            detail="50%",
         )
     )
     bridge.handle_event(
@@ -60,21 +59,11 @@ def test_event_aggregator_routes_updated_cancelled_and_log_events_through_same_t
             line="docker building layer cached",
         )
     )
-    bridge.handle_event(
-        build_task_event(
-            kind="task.cancelled",
-            flow_id="e2e.k8s_vm",
-            task_id="images.build_core",
-            title="Build core images",
-            detail="cancelled by user",
-        )
-    )
 
     snapshot = bridge.snapshot()
     assert len(snapshot.phases) == 1
     assert snapshot.phases[0].task_id == "images.build_core"
-    assert snapshot.phases[0].detail == "cancelled by user"
-    assert snapshot.phases[0].status == "cancelled"
+    assert snapshot.phases[0].status == "running"
     assert any("docker building layer cached" in line for line in snapshot.logs)
 
 
@@ -120,33 +109,6 @@ def test_event_aggregator_routes_label_only_events_to_matching_planned_steps() -
     snapshot = bridge.snapshot()
     assert [phase.label for phase in snapshot.phases] == ["preflight", "bootstrap", "load_k6"]
     assert [phase.status for phase in snapshot.phases] == ["success", "success", "running"]
-
-
-def test_event_aggregator_task_updated_reactivates_failed_task() -> None:
-    bridge = WorkflowEventAggregator()
-
-    bridge.handle_event(
-        build_task_event(
-            kind="task.failed",
-            flow_id="e2e.k8s_vm",
-            task_id="images.build_core",
-            title="Build core images",
-            detail="first attempt failed",
-        )
-    )
-    bridge.handle_event(
-        build_task_event(
-            kind="task.updated",
-            flow_id="e2e.k8s_vm",
-            task_id="images.build_core",
-            title="Build core images",
-            detail="Retrying",
-        )
-    )
-
-    snapshot = bridge.snapshot()
-    assert snapshot.phases[0].status == "running"
-    assert snapshot.phases[0].detail == "Retrying"
 
 
 def test_event_aggregator_does_not_mark_lower_planned_step_success_when_higher_step_starts() -> None:

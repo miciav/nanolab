@@ -100,13 +100,6 @@ class WorkflowEventAggregator:
             prefix = "stderr │ " if event.stream == "stderr" else ""
             self.append_log(f"{prefix}{event.line}")
             return
-        if event.kind == "phase.started":
-            self.upsert_phase(event.title or "Phase", detail=event.detail, activate=True)
-            self.append_log(f"[phase] {event.title or 'Phase'}")
-            return
-        if event.kind == "task.pending":
-            self._phase_for_event(event)
-            return
         if event.kind == "task.started":
             self.append_log(
                 f"[step] {event.title or event.task_id or 'Task'}"
@@ -133,28 +126,6 @@ class WorkflowEventAggregator:
             phase = self._phase_for_event(event)
             if phase is not None:
                 self._mark_phase_failed(phase, detail=event.detail)
-            return
-        if event.kind == "task.cancelled":
-            self.append_log(
-                f"[cancel] {event.title or event.task_id or 'Task'}"
-                + (f" ({event.detail})" if event.detail else "")
-            )
-            phase = self._phase_for_event(event)
-            if phase is not None:
-                self._mark_phase_cancelled(phase, detail=event.detail)
-            return
-        if event.kind == "task.updated":
-            self.append_log(
-                f"[update] {event.title or event.task_id or 'Task'}"
-                + (f" ({event.detail})" if event.detail else "")
-            )
-            phase = self._phase_for_event(event)
-            if phase is not None:
-                self._mark_phase_running(phase)
-            return
-        if event.kind == "task.warning":
-            self.append_log(f"[warn] {event.title or event.task_id or 'Task'}")
-            self._phase_for_event(event)
             return
         if event.kind == "task.skipped":
             self.append_log(f"[skip] {event.title or event.task_id or 'Task'}")

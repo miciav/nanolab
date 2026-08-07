@@ -86,33 +86,6 @@ def test_dashboard_toggle_hides_and_restores_log_panel() -> None:
     assert "Raw Command Output" in rendered_text(dashboard)
 
 
-def test_dashboard_tracks_cancelled_and_updated_states() -> None:
-    dashboard = WorkflowDashboard(title="E2E")
-    dashboard.apply_event(
-        build_task_event(
-            kind="task.updated",
-            flow_id="e2e",
-            task_id="images",
-            title="Build images",
-            detail="50%",
-        )
-    )
-    assert dashboard.steps[0].state == "running"
-    assert dashboard.steps[0].detail == "50%"
-
-    dashboard.apply_event(
-        build_task_event(
-            kind="task.cancelled",
-            flow_id="e2e",
-            task_id="images",
-            title="Build images",
-            detail="cancelled by user",
-        )
-    )
-    assert dashboard.steps[0].state == "cancelled"
-    assert "Build images" in rendered_text(dashboard)
-
-
 def test_dashboard_renders_durations_right_aligned_and_panels_bottom_aligned() -> None:
     dashboard = WorkflowDashboard(title="E2E", summary_lines=["Scenario: cli-stack"])
     dashboard.steps = [
