@@ -202,7 +202,6 @@ def _require_remote_success(result: object, action: str) -> None:
 
 
 def _bootstrap_role(
-    environment: EnvironmentConfig,
     provider: object,
     repo_root: Path,
     role: ExecutionRole,
@@ -243,12 +242,12 @@ def build_release_resources(
     def after_stack(info: VmInfo) -> None:
         verify_release_vm_facts(environment, provider, "stack", stack_request)
         secure_release_endpoints(environment, provider, stack_request, None)
-        _bootstrap_role(environment, provider, repo_root, "stack", stack_request, info)
+        _bootstrap_role(provider, repo_root, "stack", stack_request, info)
 
     def after_loadgen(info: VmInfo) -> None:
         verify_release_vm_facts(environment, provider, "loadgen", loadgen_request)
         secure_release_endpoints(environment, provider, stack_request, loadgen_request)
-        _bootstrap_role(environment, provider, repo_root, "loadgen", loadgen_request, info)
+        _bootstrap_role(provider, repo_root, "loadgen", loadgen_request, info)
 
     def after_arm(info: VmInfo) -> None:
         verify_release_vm_facts(environment, provider, "arm-builder", arm_request)
@@ -258,7 +257,7 @@ def build_release_resources(
             source_cidrs=(f"{info.host}/32",),
             priority_base=1020,
         )
-        _bootstrap_role(environment, provider, repo_root, "arm-builder", arm_request, info)
+        _bootstrap_role(provider, repo_root, "arm-builder", arm_request, info)
 
     stack = provisioned_vm(
         title="Acquire release stack VM",

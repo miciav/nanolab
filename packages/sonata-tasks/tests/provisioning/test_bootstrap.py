@@ -15,6 +15,7 @@ from sonata_tasks.provisioning.bootstrap import (
 )
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 from sonata_tasks.vm.models import VmRequest
+from sonata_tasks.vm.proxmox import ProxmoxVmProvider
 
 
 @dataclass
@@ -27,7 +28,7 @@ class RecordingShell:
 
 
 @dataclass
-class FakeOrchestrator:
+class FakeOrchestrator(ProxmoxVmProvider):
     shell: RecordingShell = field(default_factory=RecordingShell)
     retargeted: list[str] = field(default_factory=list)
 
@@ -67,4 +68,22 @@ def test_retarget_cloud_operations_uses_ssh_endpoint() -> None:
     )
     retargeted = retarget_cloud_operations(provider, context, [op])
     assert "-e" in retargeted[0].argv
+    assert "ansible_port=22" in retargeted[0].argv
+
+
+def test_retarget_cloud_operations_branches_on_provider_not_lifecycle() -> None:
+    # The release flow resolves the request to lifecycle="external" before
+    # retargeting, so the branch must follow the provider type, not the request.
+    provider = FakeOrchestrator()
+    context = scenario_context(
+        Path("/repo"),
+        VmRequest(lifecycle="external", name="stack", host="10.0.0.5"),
+        Path("/assets"),
+    )
+    op = RemoteCommandOperation(
+        operation_id="base",
+        summary="base",
+        argv=("ansible-playbook", "-i", "unused", "playbook.yml"),
+    )
+    retargeted = retarget_cloud_operations(provider, context, [op])
     assert "ansible_port=22" in retargeted[0].argv

@@ -13,7 +13,9 @@ from sonata_tasks.components.operations import ScenarioOperation
 from sonata_tasks.shell import SubprocessShell
 from sonata_tasks.tasks.executors import HostCommandTaskExecutor
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
+from sonata_tasks.vm.azure import AzureVmProvider
 from sonata_tasks.vm.models import VmRequest
+from sonata_tasks.vm.proxmox import ProxmoxVmProvider
 from sonata_tasks.workflow.reporting import workflow_step
 
 
@@ -37,7 +39,7 @@ def scenario_context(
 
 @dataclass
 class OperationTask:
-    """A legacy-Engine Task running one RemoteCommandOperation via an executor."""
+    """Runs one RemoteCommandOperation through an executor, raising on failure."""
 
     task_id: str
     title: str
@@ -113,11 +115,11 @@ def retarget_cloud_operations(
     context: ScenarioExecutionContext,
     operations: Iterable[RemoteCommandOperation],
 ) -> tuple[RemoteCommandOperation, ...]:
-    if context.vm_request.lifecycle not in {"azure", "proxmox"}:
+    if not isinstance(orchestrator, (AzureVmProvider, ProxmoxVmProvider)):
         return tuple(operations)
 
     request = context.vm_request
-    if context.vm_request.lifecycle == "proxmox":
+    if isinstance(orchestrator, ProxmoxVmProvider):
         host, port = orchestrator.ssh_endpoint(request)
     else:
         host, port = orchestrator.connection_host(request), None

@@ -137,7 +137,7 @@ class ConsumeEndpoints(Task[None]):
 
 
 def _workflow(provider: FakeProvider, monkeypatch: pytest.MonkeyPatch) -> tuple[Workflow, object]:
-    def bootstrap(_environment, _provider, _root, role, _request, _info) -> None:
+    def bootstrap(_provider, _root, role, _request, _info) -> None:
         provider.events.append(f"bootstrap:{role}")
 
     monkeypatch.setattr(release_resources, "_bootstrap_role", bootstrap)
