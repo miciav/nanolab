@@ -6,6 +6,7 @@ from sonata_tasks.provisioning.bootstrap import (
     run_bootstrap_operations,
     scenario_context,
 )
+from sonata_tasks.provisioning.environment import ProvisionedRole, provision_roles
 from sonata_tasks.provisioning.providers import provider_for
 from sonata_tasks.provisioning.resources import VerifiedLifecycle, provisioned_vm
 
@@ -14,4 +15,5 @@ __all__ = [
     "VerifiedLifecycle", "provisioned_vm",
     "scenario_context", "remote_operations",
     "retarget_cloud_operations", "run_bootstrap_operations",
+    "ProvisionedRole", "provision_roles",
 ]
