@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from contextlib import AbstractContextManager
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Generic, TypeVar
 
 from sonata_engine import Resource, TaskInputs
-from sonata_tasks.vm import vm_resource
+from sonata_tasks.provisioning.resources import provisioned_vm
 from sonata_tasks.compensation import best_effort
 from sonata_tasks.components.bootstrap import (
     plan_assets_sync_to_vm,
@@ -18,8 +18,7 @@ from sonata_tasks.components.bootstrap import (
     plan_registry_ensure_container,
     plan_vm_provision_base,
 )
-from sonata_tasks.vm.adapters import VmLifecycleAdapter
-from sonata_tasks.vm.models import VmConfig, VmInfo, VmRequest, vm_remote_home
+from sonata_tasks.vm.models import VmInfo, VmRequest
 
 from nanolab.cli.provisioning import (
     _context,
@@ -201,24 +200,6 @@ def _require_remote_success(result: object, action: str) -> None:
         raise RuntimeError(detail or f"{action} failed (exit {return_code})")
 
 
-class _VerifiedLifecycle:
-    def __init__(
-        self,
-        lifecycle: VmLifecycleAdapter,
-        after_ensure: Callable[[VmInfo], None],
-    ) -> None:
-        self._lifecycle = lifecycle
-        self._after_ensure = after_ensure
-
-    def ensure_running(self, config: VmConfig) -> VmInfo:
-        info = self._lifecycle.ensure_running(config)
-        self._after_ensure(info)
-        return info
-
-    def destroy(self, info: VmInfo) -> None:
-        self._lifecycle.destroy(info)
-
-
 def _bootstrap_role(
     environment: EnvironmentConfig,
     provider: object,
@@ -244,38 +225,6 @@ def _bootstrap_role(
         raw = plan_vm_provision_base(context)
     operations = _retarget_cloud_operations(environment, provider, context, _remote_operations(raw))
     _run_operations(provider, operations, role=role)
-
-
-def _vm(
-    *,
-    title: str,
-    request: VmRequest,
-    provider: object,
-    after_ensure: Callable[[VmInfo], None],
-    requires: tuple[Resource[Any], ...] = (),
-) -> Resource[VmInfo]:
-    config = VmConfig(
-        name=request.name or request.host or title,
-        cpus=request.cpus,
-        memory=request.memory,
-        disk=request.disk,
-    )
-    lifecycle = _VerifiedLifecycle(
-        VmLifecycleAdapter(provider, lifecycle=request.lifecycle, credentials=request),
-        after_ensure,
-    )
-    resource = vm_resource(
-        title=title,
-        lifecycle=lifecycle,  # type: ignore[arg-type]
-        config=config,
-        fallback_info=VmInfo(
-            name=config.name,
-            host=request.host or "",
-            user=request.user,
-            home=vm_remote_home(request),
-        ),
-    )
-    return replace(resource, requires=requires)
 
 
 def build_release_resources(
@@ -310,21 +259,21 @@ def build_release_resources(
         )
         _bootstrap_role(environment, provider, repo_root, "arm-builder", arm_request, info)
 
-    stack = _vm(
+    stack = provisioned_vm(
         title="Acquire release stack VM",
         request=stack_request,
         provider=provider,
         after_ensure=after_stack,
         requires=requires,
     )
-    loadgen = _vm(
+    loadgen = provisioned_vm(
         title="Acquire release loadgen VM",
         request=loadgen_request,
         provider=provider,
         after_ensure=after_loadgen,
         requires=requires,
     )
-    arm_builder = _vm(
+    arm_builder = provisioned_vm(
         title="Acquire release ARM builder VM",
         request=arm_request,
         provider=provider,
