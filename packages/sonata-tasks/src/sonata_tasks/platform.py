@@ -101,9 +101,6 @@ class PlatformRequest:
     # workflows with one platform; without it a plan holding two shows
     # "Check kubectl is usable" twice and a reader cannot tell which cluster.
     label: str = ""
-    # When true, adds a Gradle step that runs K8sE2eTest after platform setup.
-    # KUBECONFIG is supplied by the executor's default environment.
-    run_java_e2e: bool = False
 
     def titled(self, title: str) -> str:
         return f"{title} on the {self.label}" if self.label else title
@@ -358,29 +355,5 @@ def add_platform(
         )
         for function in request.functions
     )
-
-    if request.run_java_e2e:
-        e2e_env = {
-            "NANOFAAS_RUN_K8S_E2E": "true",
-            "NANOFAAS_E2E_NAMESPACE": request.namespace,
-        }
-        workflow.add(
-            CommandTask(
-                title=request.titled("Run Kubernetes E2E test"),
-                argv=(
-                    "./gradlew",
-                    ":control-plane-modules:k8s-deployment-provider:test",
-                    "-PrunE2e",
-                    "--tests",
-                    "it.unimib.datai.nanofaas.modules.k8s.e2e.K8sE2eTest",
-                    "--no-daemon",
-                ),
-                executor=executor,
-                role=request.role,
-                env=e2e_env,
-                cwd=cwd,
-            ),
-            requires=(*requires, *resources),
-        )
 
     return Platform(endpoint=endpoint, resources=resources, functions=functions)
