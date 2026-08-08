@@ -18,6 +18,7 @@ from sonata_tasks.cli_function import (
     CliFunctionInvokeTask,
 )
 from sonata_tasks.command import CommandTask
+from sonata_tasks.docker import DockerPushTask
 from sonata_tasks.function import function_resource
 from sonata_tasks.gradle import GradleTask
 from sonata_tasks.kubectl import k8s_deployment_readiness
@@ -46,6 +47,7 @@ class CliWorkflowRequest:
     namespace: str = "nanofaas-e2e"
     endpoint: str = "http://127.0.0.1:8080"
     binary: str = "clients/cli/build/install/nanofaas-cli/bin/nanofaas-cli"
+    push_function_images: bool = False
 
     def __post_init__(self) -> None:
         if self.cli_role not in ("host", "stack"):
@@ -126,6 +128,7 @@ def build_cli_workflow(
     bootstrap: tuple[CommandTask, ...] = (),
     bootstrap_requires: tuple[Resource[Any], ...] = (),
     function_requires: tuple[Resource[Any], ...] = (),
+    push_requires: tuple[Resource[Any], ...] = (),
     readiness_timeout_seconds: int | None = None,
 ) -> Workflow:
     """Build the CLI end-to-end workflow: build, register, list, invoke, remove.
@@ -186,6 +189,17 @@ def build_cli_workflow(
                     role=request.build_role,
                     cwd=cwd,
                 )
+            )
+        if request.push_function_images and function.build_argv is not None:
+            workflow.add(
+                DockerPushTask(
+                    image=function.image,
+                    executor=executor,
+                    role=request.build_role,
+                    title=f"Push image {function.image}",
+                    cwd=cwd,
+                ),
+                requires=push_requires,
             )
     for bootstrap_task in bootstrap:
         workflow.add(bootstrap_task, requires=bootstrap_requires)
