@@ -91,6 +91,23 @@ def test_vm_executor_delegates_to_injected_runner() -> None:
     assert runner.commands == [(("docker", "ps"), {"A": "B"}, "/home/ubuntu/nanofaas", True)]
 
 
+def test_vm_executor_does_not_use_host_cwd_as_remote_dir() -> None:
+    runner = _RecordingVmRunner()
+    executor = VmCommandTaskExecutor(runner=runner)
+
+    executor.run(
+        CommandTaskSpec(
+            task_id="vm.x",
+            summary="VM X",
+            target="vm",
+            argv=("kubectl", "version"),
+            cwd=Path("/Users/alice/mcFaas"),
+        )
+    )
+
+    assert runner.commands == [(("kubectl", "version"), {}, None, False)]
+
+
 def test_vm_executor_rejects_host_tasks() -> None:
     executor = VmCommandTaskExecutor(runner=_RecordingVmRunner())
     task = CommandTaskSpec(task_id="x", summary="X", argv=("echo", "hi"), target="host")
