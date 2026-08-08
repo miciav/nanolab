@@ -24,6 +24,23 @@ FUNCTION = ValidateFunction(
     resources={"requests": {"cpu": 0.5, "memoryMiB": 256}, "limits": {"cpu": 1, "memoryMiB": 512}},
 )
 
+QUEUE_PROBE = ValidateFunction(
+    name="k8s-sync-queue",
+    image="localhost:5000/nanofaas/java-warm-echo:e2e",
+    payload='{"input":{"message":"warmup"}}',
+    build_argv=("./gradlew", ":services:java:warm-echo:bootJar", "--quiet"),
+    image_build_argv=(
+        "docker",
+        "build",
+        "-t",
+        "localhost:5000/nanofaas/java-warm-echo:e2e",
+        "-f",
+        "services/java/warm-echo/Dockerfile",
+        "services/java/warm-echo",
+    ),
+    concurrency=1,
+)
+
 
 # 0.5 CPU -> 512 shares, 1 CPU -> 1e9 nanocpus, 256/512 MiB, reservation set
 # because request and limit differ.
@@ -125,6 +142,17 @@ def test_k8s_adds_the_preflight_the_images_and_the_helm_release() -> None:
         "011.release-word-stats-java",
         "012.release-helm-release-nanofaas",
     ]
+
+
+def test_k8s_can_add_a_dedicated_queue_probe() -> None:
+    workflow = build_validate_workflow(
+        _request(backend="k8s", queue_probe=QUEUE_PROBE), _bindings(ScriptedExecutor())
+    )
+
+    titles = _titles(workflow)
+    assert "Build image k8s-sync-queue" in titles
+    assert "Push image localhost:5000/nanofaas/java-warm-echo:e2e" in titles
+    assert "Acquire k8s-sync-queue" in titles
 
 
 def test_the_teardown_is_compiled_in_rather_than_left_to_the_caller() -> None:

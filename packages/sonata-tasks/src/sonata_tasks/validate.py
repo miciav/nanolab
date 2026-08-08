@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -23,7 +24,13 @@ from sonata_tasks.resources import ContainerResourceCheckTask, K8sResourceCheckT
 # `validate` is the platform half plus a question asked of it: does the function
 # answer, and did the limits it declared reach the object that runs it.
 ValidateFunction = PlatformFunction
-ValidateWorkflowRequest = PlatformRequest
+
+
+@dataclass(frozen=True, slots=True)
+class ValidateWorkflowRequest(PlatformRequest):
+    """The common platform request plus the K8s-only queue probe."""
+
+    queue_probe: PlatformFunction | None = None
 
 
 def _inspection_task(
@@ -78,9 +85,14 @@ def build_validate_workflow(
     """
     executor = RoleBoundCommandTaskExecutor(bindings)
     workflow = Workflow(workflow_id=workflow_id)
+    platform_request = (
+        replace(request, functions=(*request.functions, request.queue_probe))
+        if request.queue_probe is not None
+        else request
+    )
     platform = add_platform(
         workflow,
-        request,
+        platform_request,
         executor=executor,
         cwd=cwd,
         control_plane_process=control_plane_process,
@@ -103,5 +115,18 @@ def build_validate_workflow(
         workflow.add(
             _inspection_task(request, function, executor, cwd),
             requires=(*requires, registered),
+        )
+    if request.queue_probe is not None:
+        queue_registered = platform.functions[len(request.functions)]
+        workflow.add(
+            HttpFunctionInvokeTask(
+                request.queue_probe.name,
+                payload=request.queue_probe.payload,
+                endpoint=platform.endpoint,
+                executor=executor,
+                role=request.role,
+                cwd=cwd,
+            ),
+            requires=(*requires, *platform.resources, queue_registered),
         )
     return workflow
