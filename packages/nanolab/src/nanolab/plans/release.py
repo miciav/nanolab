@@ -509,7 +509,7 @@ def build_release_workflow(
         environment=env,
         scenario=request.scenario,
         settings=request.settings,
-        image_plan=request.image_plan,
+        image_plan=arm_plan,
         builder=BuilderConfiguration(
             name=f"release-arm64-{request.version}",
             max_parallelism=request.settings.max_parallelism,
@@ -750,7 +750,6 @@ def build_release_workflow(
     def attest_images(inputs: Any) -> tuple[Evidence, ...]:
         if cosign is None:
             raise ValueError("release Cosign credentials are required for attestation")
-        release_record()
         images = all_published()
         aggregate_evidence = verified_file_receipt(
             aggregate.receipt, "aggregate", release_dir / "aggregate.json"

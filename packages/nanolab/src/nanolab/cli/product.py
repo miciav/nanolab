@@ -90,7 +90,6 @@ def _workflow(
     prometheus_url: str = "http://127.0.0.1:9090",
     run_dir: Path | None = None,
     dry_run: bool = False,
-    provision: bool = False,
 ):
     bindings, fetcher = build_role_bindings(environment)
     paths = default_tool_paths()
@@ -120,7 +119,6 @@ def _workflow(
             bindings,
             endpoint=control_plane_url,
             repo_root=paths.nanofaas_root,
-            provision=provision,
             environment=environment,
         )
     return build_loadtest_plan(
@@ -154,35 +152,40 @@ def _teardown_release(
         raise typer.BadParameter("--teardown requires a release scenario")
     paths = default_tool_paths()
     version = normalize_version(scenario_config.release.version)[0]
-    journal = JournalConfig(
-        versioned_release_run_dir(run_dir or paths.runs_dir / "release", version)
-        / "sonata.jsonl"
+    release_dir = versioned_release_run_dir(run_dir or paths.runs_dir / "release", version)
+    journal_paths = [release_dir / "sonata.jsonl"]
+    journal_paths.extend(
+        path / "sonata.jsonl"
+        for path in sorted(release_dir.parent.glob(f"{release_dir.name}.superseded-*"))
+        if (path / "sonata.jsonl").is_file()
     )
-    if not journal.path.is_file():
-        typer.echo(f"nothing to tear down: no release journal at {journal.path}")
+    journals = tuple(JournalConfig(path) for path in journal_paths if path.is_file())
+    if not journals:
+        typer.echo(f"nothing to tear down: no release journal at {journal_paths[0]}")
         return
 
     provider = provider_for(vm_request_for_role(environment_config, "stack"), paths.tool_root)
     resources = build_release_resources(environment_config, paths.nanofaas_root, provider)
     by_title = {resource.title: resource for resource in (*resources.vms, resources.endpoints)}
-    unknown: UnknownRetainedResourceError | None = None
+    unknown: list[UnknownRetainedResourceError] = []
+    released: list[str] = []
     with release_run_lock(release_lock_path(environment_config)):
-        try:
-            released = release_retained(by_title, journal)
-        except UnknownRetainedResourceError as error:
-            # Sonata releases everything it was given before reporting the rest,
-            # and the rest is always in-VM state: buildx builders, the registry
-            # tunnel, the staged source. Destroying the VMs above took them with
-            # it, so this is a note, not a failure -- a teardown that exits
-            # non-zero every time is a teardown nobody reads.
-            unknown = error
-            released = ()
+        for journal in journals:
+            try:
+                released.extend(release_retained(by_title, journal))
+            except UnknownRetainedResourceError as error:
+                # Sonata releases everything it was given before reporting the rest,
+                # and the rest is always in-VM state: buildx builders, the registry
+                # tunnel, the staged source. Destroying the VMs above took them with
+                # it, so this is a note, not a failure -- a teardown that exits
+                # non-zero every time is a teardown nobody reads.
+                unknown.append(error)
     for title in released:
         typer.echo(f"released: {title}")
-    if unknown is not None:
-        typer.echo(f"note: {unknown}")
+    for error in unknown:
+        typer.echo(f"note: {error}")
         typer.echo("those live inside the released VMs and went with them")
-    if not released and unknown is None:
+    if not released and not unknown:
         typer.echo("nothing to tear down: the journal records nothing still held")
 
 
@@ -240,36 +243,16 @@ def _release_request(
 
 def _require_cli_endpoint(
     scenario: ScenarioConfig,
+    environment: EnvironmentConfig,
     control_plane_url: str | None,
-    *,
-    provision: bool = False,
 ) -> None:
     if (
         scenario.workflow == "cli"
         and scenario.backend == "k8s"
-        and not provision
+        and environment.provider == "local"
         and control_plane_url is None
     ):
         raise typer.BadParameter("--control-plane-url is required for a k8s cli scenario")
-
-
-def _cli_provisioned(scenario: ScenarioConfig, *, provision: bool) -> bool:
-    """Whether this run/plan is the Sonata-provisioned cli/k8s path.
-
-    That path owns its own VM/Helm lifecycle (built into the compiled plan by
-    `build_cli_plan`), so it must never also go through the legacy
-    `provision_environment` context manager.
-    """
-    return provision and scenario.workflow == "cli" and scenario.backend == "k8s"
-
-
-def _uses_legacy_provisioning(
-    scenario: ScenarioConfig,
-    *,
-    provision: bool,
-    cli_provisioned: bool,
-) -> bool:
-    return provision and scenario.workflow != "release" and not cli_provisioned
 
 
 def _validate_cli_container_options(
@@ -388,7 +371,6 @@ def install_product_commands(app: typer.Typer) -> None:
     def run_command(
         scenario: Path = typer.Argument(..., exists=True),
         environment: Path | None = typer.Option(None, "--environment", exists=True),
-        provision: bool = typer.Option(False, "--provision"),
         keep: bool = typer.Option(False, "--keep"),
         teardown: bool = typer.Option(
             False,
@@ -432,11 +414,10 @@ def install_product_commands(app: typer.Typer) -> None:
         if release and environment is None:
             raise typer.BadParameter("release workflow requires --environment")
         if teardown:
-            if provision or resume or keep or only or start or until:
+            if resume or keep or only or start or until:
                 raise typer.BadParameter(
                     "--teardown releases what a kept run held and runs nothing else; it "
-                    "cannot be combined with --provision, --resume, --keep, --only, "
-                    "--from or --until"
+                    "cannot be combined with --resume, --keep, --only, --from or --until"
                 )
             if release_config is not None:
                 typer.echo("--teardown ignores --release-config; it releases resources only")
@@ -447,20 +428,12 @@ def install_product_commands(app: typer.Typer) -> None:
             return
         if resume and not release:
             raise typer.BadParameter("--resume is only supported for release workflows")
-        if release and not (provision or resume):
-            raise typer.BadParameter(
-                "a fresh release run requires --provision; pass --resume to continue an "
-                "existing release"
-            )
-        if provision and environment_config.provider == "local":
-            raise typer.BadParameter("--provision requires a non-local environment")
         _validate_cli_container_options(
             scenario_config,
             environment_config,
             keep=keep,
         )
-        _require_cli_endpoint(scenario_config, control_plane_url, provision=provision)
-        cli_provisioned = _cli_provisioned(scenario_config, provision=provision)
+        _require_cli_endpoint(scenario_config, environment_config, control_plane_url)
         paths = default_tool_paths()
         effective_run_dir = run_dir
         if effective_run_dir is None and scenario_config.workflow in (
@@ -483,6 +456,7 @@ def install_product_commands(app: typer.Typer) -> None:
         lifetime = ExitStack()
         try:
             if release:
+                lifetime.enter_context(release_run_lock(release_lock_path(environment_config)))
                 source_tree = Path(
                     lifetime.enter_context(
                         tempfile.TemporaryDirectory(prefix="nanofaas-release-")
@@ -509,6 +483,9 @@ def install_product_commands(app: typer.Typer) -> None:
             sink = ConsoleProgressSink()
             started_at = datetime.now(UTC)
             provenance = _git_provenance(paths.nanofaas_root)
+        except ReleaseRunInProgressError as error:
+            lifetime.close()
+            raise typer.BadParameter(str(error)) from None
         except BaseException:
             lifetime.close()
             raise
@@ -516,21 +493,18 @@ def install_product_commands(app: typer.Typer) -> None:
             # Command output routing (SubprocessShell._emit_output) reads the
             # same contextvar, so one bind covers the whole execution layer.
             with bind_workflow_sink(sink):
-                if _uses_legacy_provisioning(
-                    scenario_config, provision=provision, cli_provisioned=cli_provisioned
+                if (
+                    scenario_config.workflow != "release"
+                    and environment_config.provider != "local"
+                    and not (
+                        scenario_config.workflow == "cli" and scenario_config.backend == "k8s"
+                    )
                 ):
                     provisioning = provision_environment(
                         scenario_config,
                         environment_config,
                         repo_root=paths.nanofaas_root,
                         keep=keep,
-                    )
-                elif release_request is not None:
-                    # A release owns its VMs inside the Sonata DAG; the outer
-                    # context only holds the lock that keeps two coordinators off
-                    # the same Azure VMs.
-                    provisioning = release_run_lock(
-                        release_lock_path(release_request.environment)
                     )
                 else:
                     provisioning = nullcontext()
@@ -553,7 +527,6 @@ def install_product_commands(app: typer.Typer) -> None:
                                 control_plane_url=control_plane_url,
                                 prometheus_url=prometheus_url or "http://127.0.0.1:9090",
                                 run_dir=effective_run_dir,
-                                provision=provision,
                             ),
                         )
                     )
@@ -619,7 +592,6 @@ def install_product_commands(app: typer.Typer) -> None:
     def plan_command(
         scenario: Path = typer.Argument(..., exists=True),
         environment: Path | None = typer.Option(None, "--environment", exists=True),
-        provision: bool = typer.Option(False, "--provision"),
         only: str | None = typer.Option(
             None,
             "--only",
@@ -652,10 +624,8 @@ def install_product_commands(app: typer.Typer) -> None:
     ) -> None:
         scenario_config = _scenario(scenario)
         environment_config = _environment(environment)
-        if provision and environment_config.provider == "local":
-            raise typer.BadParameter("--provision requires a non-local environment")
         _validate_cli_container_options(scenario_config, environment_config)
-        _require_cli_endpoint(scenario_config, control_plane_url, provision=provision)
+        _require_cli_endpoint(scenario_config, environment_config, control_plane_url)
         if scenario_config.workflow == "loadtest":
             control_plane_url, prometheus_url = resolve_loadtest_urls(
                 environment_config,
@@ -686,7 +656,6 @@ def install_product_commands(app: typer.Typer) -> None:
                 scenario_config,
                 environment_config,
                 control_plane_url=control_plane_url,
-                provision=provision,
                 prometheus_url=prometheus_url or "http://127.0.0.1:9090",
                 run_dir=run_dir,
                 dry_run=True,

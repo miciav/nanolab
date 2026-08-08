@@ -10,7 +10,7 @@ from sonata_tasks.cli import CliFunction, CliWorkflowRequest, build_cli_workflow
 from sonata_tasks.command import CommandTask
 from sonata_tasks.helm import HelmReleaseSpec, helm_release_resource
 from sonata_tasks.process import managed_process_resource
-from sonata_tasks.vm import vm_resource
+from sonata_tasks.provisioning.resources import provisioned_vm
 from sonata_tasks.components.bootstrap import (
     plan_k3s_install,
     plan_repo_sync_to_vm,
@@ -23,8 +23,7 @@ from sonata_tasks.components.images import control_image
 from sonata_tasks.components.operations import RemoteCommandOperation, ScenarioOperation
 from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
 from sonata_tasks.execution.roles import ExecutionRole
-from sonata_tasks.vm.adapters import VmLifecycleAdapter
-from sonata_tasks.vm.models import VmConfig, VmInfo, VmRequest, vm_remote_home
+from sonata_tasks.vm.models import VmInfo, VmRequest
 from sonata_tasks.vm.multipass import _find_ssh_private_key_path
 from sonata_tasks.vm.orchestrator import VmOrchestrator
 from sonata_tasks.provisioning.providers import provider_for
@@ -35,6 +34,7 @@ from nanolab.config.scenario import ScenarioConfig
 from nanolab.plans import _local_control_plane
 from nanolab.plans.validate import _resolve_function
 from nanolab.release.publish import GHCR_REPOSITORY
+from nanolab.release.environment import secure_release_endpoints
 from nanolab.release.versioning import normalize_version, read_project_version
 
 LOCAL_ENDPOINT = _local_control_plane.ENDPOINT
@@ -233,7 +233,7 @@ def _stack_orchestrator(
     return VmOrchestrator(repo_root)
 
 
-def _build_provisioned_k8s_plan(
+def _build_k8s_plan(
     config: ScenarioConfig,
     bindings: RoleBindings,
     *,
@@ -243,27 +243,18 @@ def _build_provisioned_k8s_plan(
     orchestrator_factory: Callable[[Path], Any] | None,
 ) -> Workflow:
     if environment is None:
-        raise ValueError("--provision requires an environment")
+        raise ValueError("k8s cli workflow requires an environment")
     vm_request = _stack_vm_request(environment)
     orchestrator = _stack_orchestrator(environment, repo_root, orchestrator_factory)
-    lifecycle = VmLifecycleAdapter(orchestrator, lifecycle=vm_request.lifecycle, credentials=vm_request)
-    vm_config = VmConfig(
-        name=vm_request.name or "nanofaas-e2e",
-        cpus=vm_request.cpus,
-        memory=vm_request.memory,
-        disk=vm_request.disk,
-    )
-    fallback_info = VmInfo(
-        name=vm_config.name,
-        host=vm_request.host or "",
-        user=vm_request.user,
-        home=vm_remote_home(vm_request),
-    )
-    vm = vm_resource(
+    def after_ensure(_info: VmInfo) -> None:
+        if environment.provider == "azure" and environment.azure.operator_source_cidr:
+            secure_release_endpoints(environment, orchestrator, vm_request, None)
+
+    vm = provisioned_vm(
         title="Acquire stack VM",
-        lifecycle=lifecycle,
-        config=vm_config,
-        fallback_info=fallback_info,
+        request=vm_request,
+        provider=orchestrator,
+        after_ensure=after_ensure,
         external=environment.provider == "external",
     )
 
@@ -318,7 +309,6 @@ def build_cli_plan(
     endpoint: str | None = None,
     namespace: str = "nanofaas-e2e",
     repo_root: Path | None = None,
-    provision: bool = False,
     environment: EnvironmentConfig | None = None,
     orchestrator_factory: Callable[[Path], Any] | None = None,
 ) -> Workflow:
@@ -328,10 +318,8 @@ def build_cli_plan(
     local = config.backend == "container"
     if local and cli_role != "host":
         raise ValueError("container cli workflow must run on the host role")
-    if local and provision:
-        raise ValueError("container cli workflow does not support --provision")
-    if provision:
-        return _build_provisioned_k8s_plan(
+    if not local and environment is not None and environment.provider != "local":
+        return _build_k8s_plan(
             config,
             bindings,
             namespace=namespace,

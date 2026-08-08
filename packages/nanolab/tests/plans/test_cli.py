@@ -24,8 +24,6 @@ from nanolab.release.versioning import normalize_version, read_project_version
 from nanolab.workspace.paths import default_tool_paths
 
 SUCCESS = '{"status":"success","output":{"words":2}}'
-
-
 @dataclass
 class RecordingExecutor:
     seen: list[CommandTaskSpec] = field(default_factory=list)
@@ -58,9 +56,33 @@ class FakeMultipassOrchestrator:
         self.torn_down.append(request)
 
 
+@dataclass
+class FakeAzureOrchestrator(FakeMultipassOrchestrator):
+    restrictions: list[tuple[str | None, tuple[int, ...], tuple[str, ...]]] = field(
+        default_factory=list
+    )
+
+    def restrict_inbound_sources(self, request, *, ports, source_cidrs, priority_base=1010) -> None:
+        self.restrictions.append((request.name, ports, source_cidrs))
+
+
 def _multipass_environment(**role_overrides: object) -> EnvironmentConfig:
     role = {"name": "nanofaas-e2e-cli", **role_overrides}
     return EnvironmentConfig.model_validate({"provider": "multipass", "roles": {"stack": role}})
+
+
+def _azure_environment() -> EnvironmentConfig:
+    return EnvironmentConfig.model_validate(
+        {
+            "provider": "azure",
+            "roles": {"stack": {}},
+            "azure": {
+                "resource_group": "rg",
+                "location": "westeurope",
+                "operator_source_cidr": "203.0.113.42/32",
+            },
+        }
+    )
 
 
 def _provisioned_plan(
@@ -74,7 +96,6 @@ def _provisioned_plan(
         _scenario(backend="k8s", **overrides),
         bindings,
         repo_root=default_tool_paths().nanofaas_root,
-        provision=True,
         environment=_multipass_environment(),
         orchestrator_factory=lambda _root: fake,
     )
@@ -377,7 +398,6 @@ def test_provisioned_k8s_plan_compilation_does_not_discover_ssh_credentials(
         _scenario(backend="k8s"),
         RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor()),
         repo_root=default_tool_paths().nanofaas_root,
-        provision=True,
         environment=_multipass_environment(),
     )
 
@@ -420,6 +440,22 @@ def test_provisioned_k8s_bootstrap_argv_is_resolved_from_the_acquired_vm() -> No
     assert any("192.0.2.42" in argument for argument in sync.argv)
     assert orchestrator.ensured, "the VM must actually be ensured running"
     assert orchestrator.torn_down, "a non-kept run must destroy the VM at the end"
+
+
+def test_azure_k8s_plan_restricts_nodeports_to_the_operator() -> None:
+    provider = FakeAzureOrchestrator(host="192.0.2.42")
+
+    build_cli_plan(
+        _scenario(),
+        RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor()),
+        repo_root=default_tool_paths().nanofaas_root,
+        environment=_azure_environment(),
+        orchestrator_factory=lambda _root: provider,
+    ).run()
+
+    assert provider.restrictions == [
+        ("nanofaas-azure", (30080, 30081, 30090), ("203.0.113.42/32",))
+    ]
 
 
 def test_provisioned_k8s_endpoint_is_the_incluster_node_port() -> None:
@@ -481,21 +517,3 @@ def test_provisioned_k8s_keep_preserves_the_vm_and_helm_but_not_the_function() -
     assert "Uninstall Helm release control-plane" not in summaries
     assert "Delete word-stats-java" in summaries
     assert orchestrator.torn_down == []
-
-
-def test_container_backend_still_rejects_provision() -> None:
-    with pytest.raises(ValueError, match="--provision"):
-        build_cli_plan(
-            _scenario(backend="container"),
-            RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor()),
-            provision=True,
-        )
-
-
-def test_provisioned_k8s_requires_an_environment() -> None:
-    with pytest.raises(ValueError, match="environment"):
-        build_cli_plan(
-            _scenario(backend="k8s"),
-            RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor()),
-            provision=True,
-        )

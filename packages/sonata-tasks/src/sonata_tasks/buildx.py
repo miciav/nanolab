@@ -91,4 +91,5 @@ def buildx_builder_resource(
         acquire=acquire,
         release=release,
         requires=requires,
+        always_release=True,
     )

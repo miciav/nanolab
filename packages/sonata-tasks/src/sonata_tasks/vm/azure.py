@@ -110,7 +110,11 @@ class AzureVmProvider:
             capture_output=True,
             text=True,
         )
-        return process.returncode == 0
+        if process.returncode == 0:
+            return True
+        if "ResourceNotFound" in process.stderr:
+            return False
+        raise RuntimeError(process.stderr or "Azure CLI command failed")
 
     def ensure_running(self, request: VmRequest) -> ShellExecutionResult:
         name = self._vm_name(request)

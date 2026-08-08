@@ -854,16 +854,22 @@ def test_build_release_workflow_compiles_without_cloud_discovery(
         < titles.index("Acquire release loadgen VM")
         < titles.index("Acquire release ARM builder VM")
     )
-    # Retention is opt-out, so the interesting set is the opposite one: nothing in
-    # the release DAG may ask to always be released except the credential
-    # resources, which this credential-free compile does not build. A tunnel or a
-    # builder marked always_release would show up here.
+    # --keep retains infrastructure, never transient build or staging state.
     always_released = {
         task.resource.title
         for task in compiled.tasks
         if task.kind == "acquire" and task.resource is not None and task.resource.always_release
     }
-    assert always_released == set()
+    assert always_released == {
+        "Acquire immutable release source archive",
+        "Acquire verified source on nanofaas-azure-release",
+        "Acquire verified source on nanofaas-azure-release-arm",
+        "Acquire registry tunnel to <release-stack>:5000",
+        "Acquire AMD64 Bake and BuildKit inputs",
+        "Acquire ARM64 Bake and BuildKit inputs",
+        f"Acquire release-amd64-v{CURRENT_VERSION} buildx builder",
+        f"Acquire release-arm64-v{CURRENT_VERSION} buildx builder",
+    }
 
     stack_slice = workflow.compile(select=Selection(only="build-amd64-images"))
     assert [task.task.title for task in stack_slice.tasks] == [

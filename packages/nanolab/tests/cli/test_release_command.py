@@ -212,20 +212,22 @@ def release_cli_harness(
     return state
 
 
-def test_generic_release_run_requires_explicit_provision_acknowledgement(
-    release_cli_harness,
-) -> None:
+def test_generic_release_run_starts_without_provision_acknowledgement(release_cli_harness) -> None:
     result = release_cli_harness.invoke()
 
-    assert result.exit_code != 0
-    assert "--provision" in result.output
-    assert "Traceback" not in result.output
-    assert release_cli_harness.built == []
-    assert release_cli_harness.events == []
+    assert result.exit_code == 0, result.output
+    assert release_cli_harness.events == ["acquire", "phase", "release"]
 
 
-def test_generic_release_run_provisions_journals_and_passes(release_cli_harness) -> None:
+def test_generic_release_run_rejects_the_retired_provision_flag(release_cli_harness) -> None:
     result = release_cli_harness.invoke("--provision")
+
+    assert result.exit_code != 0
+    assert "No such option" in result.output
+
+
+def test_generic_release_run_journals_and_passes(release_cli_harness) -> None:
+    result = release_cli_harness.invoke()
 
     assert result.exit_code == 0, result.output
     assert release_cli_harness.events == ["acquire", "phase", "release"]
@@ -246,7 +248,7 @@ def test_generic_release_run_provisions_journals_and_passes(release_cli_harness)
 def test_generic_release_run_uses_a_versioned_default_run_directory(
     release_cli_harness,
 ) -> None:
-    result = release_cli_harness.invoke("--provision", run_dir=None)
+    result = release_cli_harness.invoke(run_dir=None)
 
     assert result.exit_code == 0, result.output
     journal = release_cli_harness.workflows[0].run_kwargs["journal"].path
@@ -262,7 +264,7 @@ def test_generic_release_run_uses_a_versioned_default_run_directory(
 
 
 def test_generic_release_run_forwards_keep_and_selection(release_cli_harness) -> None:
-    result = release_cli_harness.invoke("--provision", "--keep", "--until", "run-source-tests")
+    result = release_cli_harness.invoke("--keep", "--until", "run-source-tests")
 
     assert result.exit_code == 0, result.output
     workflow = release_cli_harness.workflows[0]
@@ -289,11 +291,11 @@ def test_generic_release_fresh_run_supersedes_the_previous_one(release_cli_harne
     deleting the directory would erase the record of a failed release -- which,
     past the publish phases, is the only local trace of what was pushed.
     """
-    assert release_cli_harness.invoke("--provision").exit_code == 0
+    assert release_cli_harness.invoke().exit_code == 0
     receipt = release_cli_harness.release_dir / "source-tests.json"
     receipt.write_text("previous run receipt", encoding="utf-8")
 
-    repeated = release_cli_harness.invoke("--provision")
+    repeated = release_cli_harness.invoke()
 
     assert repeated.exit_code == 0, repeated.output
     superseded = list(
@@ -325,7 +327,7 @@ def test_generic_release_resume_names_the_journal_it_wanted(release_cli_harness)
 
 
 def test_generic_release_resume_reuses_the_verified_journal(release_cli_harness) -> None:
-    assert release_cli_harness.invoke("--provision").exit_code == 0
+    assert release_cli_harness.invoke().exit_code == 0
     release_cli_harness.events.clear()
 
     result = release_cli_harness.invoke("--resume")
@@ -347,7 +349,7 @@ def test_generic_release_failure_releases_resources_and_records_metadata(
 
     release_cli_harness.monkeypatch.setattr(product_module, "build_release_request", record)
 
-    result = release_cli_harness.invoke("--provision")
+    result = release_cli_harness.invoke()
 
     assert result.exit_code != 0
     assert release_cli_harness.events == ["acquire", "phase", "release"]
@@ -368,7 +370,7 @@ def test_generic_release_failure_releases_resources_and_records_metadata(
 def test_generic_release_interrupt_still_releases_infrastructure(release_cli_harness) -> None:
     release_cli_harness.failure = KeyboardInterrupt()
 
-    result = release_cli_harness.invoke("--provision")
+    result = release_cli_harness.invoke()
 
     assert result.exit_code != 0
     assert release_cli_harness.events == ["acquire", "phase", "release"]
@@ -378,12 +380,26 @@ def test_generic_release_run_rejects_a_concurrent_coordinator(release_cli_harnes
     environment = product_module._environment(release_cli_harness.environment)
 
     with release_run_lock(release_lock_path(environment)):
-        result = release_cli_harness.invoke("--provision")
+        result = release_cli_harness.invoke()
 
     assert result.exit_code != 0
     assert "already in progress" in result.output
     assert "Traceback" not in result.output
     assert release_cli_harness.events == []
+
+
+def test_locked_release_does_not_supersede_the_active_journal(release_cli_harness) -> None:
+    assert release_cli_harness.invoke().exit_code == 0
+    receipt = release_cli_harness.release_dir / "source-tests.json"
+    receipt.write_text("active receipt", encoding="utf-8")
+    environment = product_module._environment(release_cli_harness.environment)
+
+    with release_run_lock(release_lock_path(environment)):
+        result = release_cli_harness.invoke()
+
+    assert result.exit_code != 0
+    assert receipt.read_text(encoding="utf-8") == "active receipt"
+    assert not list(release_cli_harness.release_dir.parent.glob("*.superseded-*"))
 
 
 def test_generic_release_run_removes_the_extracted_tree(release_cli_harness) -> None:
@@ -408,7 +424,7 @@ def test_generic_release_run_removes_the_extracted_tree(release_cli_harness) -> 
 
     release_cli_harness.monkeypatch.setattr(product_module, "build_release_request", record)
 
-    result = release_cli_harness.invoke("--provision")
+    result = release_cli_harness.invoke()
 
     assert result.exit_code == 0, result.output
     assert len(trees) == 1
@@ -479,7 +495,22 @@ def _teardown_harness(release_cli_harness, destroyed: list[str]):
 
 def test_teardown_releases_what_a_kept_run_left_behind(release_cli_harness) -> None:
     """--keep's counterpart: the resources the journal still records as held."""
-    assert release_cli_harness.invoke("--provision", "--keep").exit_code == 0
+    assert release_cli_harness.invoke("--keep").exit_code == 0
+    destroyed: list[str] = []
+    _teardown_harness(release_cli_harness, destroyed)
+
+    result = release_cli_harness.invoke("--teardown")
+
+    assert result.exit_code == 0, result.output
+    assert destroyed == ["nanofaas-azure-release"]
+
+
+def test_teardown_finds_a_kept_superseded_journal(release_cli_harness) -> None:
+    assert release_cli_harness.invoke("--keep").exit_code == 0
+    superseded = release_cli_harness.release_dir.with_name(
+        f"{release_cli_harness.release_dir.name}.superseded-test"
+    )
+    release_cli_harness.release_dir.rename(superseded)
     destroyed: list[str] = []
     _teardown_harness(release_cli_harness, destroyed)
 
@@ -498,7 +529,7 @@ def test_teardown_reports_in_vm_resources_without_failing(
     retained but live inside the VMs this command destroys. Exiting non-zero
     every time would train the operator to ignore the one run that mattered.
     """
-    assert release_cli_harness.invoke("--provision", "--keep").exit_code == 0
+    assert release_cli_harness.invoke("--keep").exit_code == 0
     destroyed: list[str] = []
     _teardown_harness(release_cli_harness, destroyed)
     monkeypatch.setattr(
@@ -520,7 +551,7 @@ def test_teardown_reports_in_vm_resources_without_failing(
 
 
 def test_teardown_is_idempotent(release_cli_harness) -> None:
-    assert release_cli_harness.invoke("--provision", "--keep").exit_code == 0
+    assert release_cli_harness.invoke("--keep").exit_code == 0
     destroyed: list[str] = []
     _teardown_harness(release_cli_harness, destroyed)
 
@@ -534,7 +565,7 @@ def test_teardown_works_after_a_preflight_that_would_reject(release_cli_harness)
     """The reason teardown skips build_release_request: after a failed release the
     tree is usually dirty or the version has moved on, and the VMs still need
     closing."""
-    assert release_cli_harness.invoke("--provision", "--keep").exit_code == 0
+    assert release_cli_harness.invoke("--keep").exit_code == 0
     destroyed: list[str] = []
     _teardown_harness(release_cli_harness, destroyed)
     release_cli_harness.monkeypatch.setattr(
@@ -559,7 +590,7 @@ def test_teardown_without_a_journal_says_so_and_touches_nothing(release_cli_harn
 
 
 @pytest.mark.parametrize(
-    "flag", ("--provision", "--resume", "--keep", "--only=x", "--from=x", "--until=x")
+    "flag", ("--resume", "--keep", "--only=x", "--from=x", "--until=x")
 )
 def test_teardown_refuses_flags_that_describe_running_a_workflow(
     flag: str, release_cli_harness

@@ -34,6 +34,7 @@ from sonata_tasks.vm.proxmox import ProxmoxVmProvider
 from nanolab.cli.vm_provider import vm_request_for_role
 from nanolab.config import EnvironmentConfig, ScenarioConfig
 from nanolab.config.environment import ExecutionRole
+from nanolab.release.environment import secure_release_endpoints
 from nanolab.workspace.paths import discover_tool_root
 
 
@@ -224,20 +225,23 @@ def provision_environment(
     ):
         roles.append(ProvisionedRole(role=role, request=request, operations=operations))
 
+    stack_request = next(entry.request for entry in roles if entry.role == "stack")
+    loadgen_request = next(
+        (entry.request for entry in roles if entry.role == "loadgen"), None
+    )
+
+    def after_ensure(role: str, request: VmRequest) -> None:
+        if post_ensure_verifier is not None:
+            post_ensure_verifier(cast(ExecutionRole, role), request)
+        if role == "stack" and environment.provider == "azure" and environment.azure.operator_source_cidr:
+            secure_release_endpoints(environment, provider, stack_request, loadgen_request)
+
     with provision_roles(
         provider,
         tuple(roles),
         repo_root=repo_root,
         assets_root=discover_tool_root() / "assets",
         keep=keep,
-        after_ensure=(
-            (
-                lambda role, request: post_ensure_verifier(
-                    cast(ExecutionRole, role), request
-                )
-            )
-            if post_ensure_verifier is not None
-            else None
-        ),
+        after_ensure=after_ensure,
     ):
         yield

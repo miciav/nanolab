@@ -370,6 +370,18 @@ def test_ensure_running_recreates_a_vm_deleted_outside_tofu(mock_client_cls, moc
 
 
 @patch("sonata_tasks.vm.azure.subprocess.run")
+def test_azure_existence_probe_does_not_hide_cli_failures(mock_run) -> None:
+    mock_run.return_value = MagicMock(
+        returncode=1,
+        stdout="",
+        stderr="ERROR: Please run 'az login' to setup account.",
+    )
+
+    with pytest.raises(RuntimeError, match="az login"):
+        _make_provider()._exists_in_azure(_make_request())
+
+
+@patch("sonata_tasks.vm.azure.subprocess.run")
 @patch("sonata_tasks.vm.azure.AzureClient")
 def test_ensure_running_keeps_the_fast_path_for_a_live_vm(mock_client_cls, mock_run) -> None:
     client_mock = MagicMock()

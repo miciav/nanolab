@@ -136,7 +136,7 @@ def test_generic_release_run_requires_an_environment_and_never_provisions(
 
     result = CliRunner().invoke(
         app,
-        ["run", "scenarios-v2/release.yaml", "--provision"],
+        ["run", "scenarios-v2/release.yaml"],
     )
 
     assert result.exit_code != 0
@@ -237,7 +237,6 @@ def test_run_container_cli_rejects_provision_even_with_a_nonlocal_environment(
         [
             "run",
             "scenarios-v2/cli-container.yaml",
-            "--provision",
             "--environment",
             "environments/multipass.yaml",
         ],
@@ -295,7 +294,7 @@ def test_run_passes_custom_control_plane_url_to_cli_plan(
 def test_run_provisioned_k8s_cli_skips_the_legacy_provisioning_context(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # cli/k8s --provision owns its own VM/Helm lifecycle inside the compiled
+    # cli/k8s owns its own VM/Helm lifecycle inside the compiled
     # Sonata plan (see nanolab.plans.cli.build_cli_plan); it must never also
     # go through the legacy provision_environment context manager.
     workflow = MagicMock()
@@ -303,7 +302,7 @@ def test_run_provisioned_k8s_cli_skips_the_legacy_provisioning_context(
     monkeypatch.setattr(product_module, "build_cli_plan", build_cli_plan)
 
     def _legacy_provision_must_not_run(*args, **kwargs):
-        raise AssertionError("legacy provision_environment must not run for cli/k8s --provision")
+        raise AssertionError("legacy provision_environment must not run for cli/k8s")
 
     monkeypatch.setattr(product_module, "provision_environment", _legacy_provision_must_not_run)
 
@@ -312,7 +311,6 @@ def test_run_provisioned_k8s_cli_skips_the_legacy_provisioning_context(
         [
             "run",
             "scenarios-v2/cli-k8s.yaml",
-            "--provision",
             "--environment",
             "environments/multipass.yaml",
         ],
@@ -320,27 +318,10 @@ def test_run_provisioned_k8s_cli_skips_the_legacy_provisioning_context(
 
     assert result.exit_code == 0, result.output
     assert build_cli_plan.call_args.kwargs["endpoint"] is None
-    assert build_cli_plan.call_args.kwargs["provision"] is True
     assert build_cli_plan.call_args.kwargs["environment"].provider == "multipass"
     workflow.run.assert_called_once_with(
         select=Selection(only=None, start=None, until=None)
     )
-
-
-def test_release_provisioning_is_owned_by_sonata() -> None:
-    scenario = MagicMock(workflow="release")
-
-    assert product_module._uses_legacy_provisioning(
-        scenario, provision=True, cli_provisioned=False
-    ) is False
-
-
-def test_non_release_provisioning_still_uses_the_legacy_context() -> None:
-    scenario = MagicMock(workflow="loadtest")
-
-    assert product_module._uses_legacy_provisioning(
-        scenario, provision=True, cli_provisioned=False
-    ) is True
 
 
 def test_plan_provisioned_k8s_cli_shows_the_twelve_task_workflow() -> None:
@@ -349,7 +330,6 @@ def test_plan_provisioned_k8s_cli_shows_the_twelve_task_workflow() -> None:
         [
             "plan",
             "scenarios-v2/cli-k8s.yaml",
-            "--provision",
             "--environment",
             "environments/multipass.yaml",
         ],
@@ -412,7 +392,6 @@ def test_run_provisions_before_executing_workflow(monkeypatch, tmp_path: Path) -
             "scenarios-v2/loadtest.yaml",
             "--environment",
             "environments/multipass.yaml",
-            "--provision",
             "--run-dir",
             str(tmp_path),
         ],
@@ -499,7 +478,7 @@ def test_run_rejects_provisioning_for_local_environment() -> None:
     )
 
     assert result.exit_code != 0
-    assert "--provision requires a non-local environment" in result.output
+    assert "No such option" in result.output
 
 
 def test_inspect_renders_validated_configuration() -> None:

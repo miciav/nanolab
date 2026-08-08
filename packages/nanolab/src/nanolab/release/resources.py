@@ -325,6 +325,7 @@ def build_release_source_resources(
         title="Acquire immutable release source archive",
         acquire=acquire_local,
         release=lambda _inputs, _value: archive.unlink(missing_ok=True),
+        always_release=True,
     )
 
     def remote(request: object, requires: tuple[Resource[Any], ...]) -> Resource[str]:
@@ -355,6 +356,7 @@ def build_release_source_resources(
             acquire=acquire,
             release=lambda _inputs, _value: cleanup(),
             requires=(local, *requires),
+            always_release=True,
         )
 
     return ReleaseSourceResources(
@@ -432,4 +434,5 @@ def build_inputs_resource(
         acquire=acquire,
         release=lambda _inputs, _value: cleanup(),
         requires=requires,
+        always_release=True,
     )

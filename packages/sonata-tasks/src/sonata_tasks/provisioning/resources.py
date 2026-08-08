@@ -39,6 +39,7 @@ def provisioned_vm(
     provider: object,
     after_ensure: Callable[[VmInfo], None] | None = None,
     requires: tuple[Resource[Any], ...] = (),
+    external: bool = False,
 ) -> Resource[VmInfo]:
     """A Sonata VM resource that ensures, verifies, and compensates the VM."""
     config = VmConfig(
@@ -61,5 +62,6 @@ def provisioned_vm(
             user=request.user,
             home=vm_remote_home(request),
         ),
+        external=external,
     )
     return replace(resource, requires=requires)

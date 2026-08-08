@@ -46,6 +46,7 @@ def test_acquire_runs_socat_tunnel_with_upstream_host():
         "TCP-LISTEN:5000,fork,reuseaddr",
         "TCP:10.0.0.42:5000",
     )
+    assert resource.always_release is True
 
 
 def test_acquire_tolerates_an_absent_previous_transient_unit():

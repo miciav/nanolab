@@ -92,4 +92,5 @@ def registry_tunnel_resource(
         acquire=acquire,
         release=release,
         requires=requires,
+        always_release=True,
     )

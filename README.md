@@ -4,7 +4,7 @@
 from nanofaas. It contains three Python workspace members:
 
 - `packages/nanolab`: the nanofaas operations CLI and supporting tooling
-- `packages/workflow-tasks`: reusable workflow task primitives
+- `packages/sonata-tasks`: reusable workflow task primitives
 - `packages/tui-toolkit`: shared terminal UI components
 
 The initial source snapshot comes from nanofaas commit

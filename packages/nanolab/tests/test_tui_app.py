@@ -558,7 +558,6 @@ def test_run_passes_phase_titles_and_exact_summary_to_live_controller(
     assert controller.calls[0]["summary_lines"] == [
         "Scenario: cli-container.yaml",
         "Environment: local.yaml",
-        "Provision: no",
         "Cleanup: cleanup",
     ]
     assert workflow.run_calls == 1
@@ -669,7 +668,7 @@ def test_container_cli_rejects_non_local_environment(
     controller = RecordingController()
 
     NanofaasTUI(
-        choose=ScriptedChooser(iter([str(environment_path), "run"])),
+        choose=ScriptedChooser(iter([str(environment_path), "run", "cleanup"])),
         controller=controller,
         console=RecordingConsole(),
         input_stream=RecordingInput(tty=False),
@@ -740,18 +739,15 @@ def test_kubernetes_provisioned_rejects_local_environment(
     controller = RecordingController()
 
     NanofaasTUI(
-        choose=ScriptedChooser(iter([str(environment_path), "run"])),
+        choose=ScriptedChooser(iter([str(environment_path), "run", "cleanup"])),
         controller=controller,
         console=RecordingConsole(),
         input_stream=RecordingInput(tty=False),
     )._workflow_menu("cli-k8s.yaml")
 
-    assert [call[0] for call in helper_calls] == ["scenario", "environment"]
-    assert frame_calls[0]["title"] == "Configuration error"
-    assert str(frame_calls[0]["body"]) == (
-        "--provision requires a non-local environment"
-    )
-    assert controller.calls == []
+    assert [call[0] for call in helper_calls] == ["scenario", "environment", "workflow", "workflow"]
+    assert frame_calls == []
+    assert controller.calls
 
 
 def test_kubernetes_provisioned_run_skips_provision_menu_forces_provision_and_avoids_legacy_provisioning(
@@ -791,12 +787,10 @@ def test_kubernetes_provisioned_run_skips_provision_menu_forces_provision_and_av
     assert provision_calls == []
     workflow_calls = [call for call in helper_calls if call[0] == "workflow"]
     assert len(workflow_calls) == 2  # preview build + real run build
-    assert [call[3]["provision"] for call in workflow_calls] == [True, True]
     assert workflow.run_calls == 1
     assert controller.calls[0]["summary_lines"] == [
         "Scenario: cli-k8s.yaml",
         "Environment: local.yaml",
-        "Provision: yes",
         "Cleanup: cleanup",
     ]
     # Preview and run share the same compiled Sonata task IDs/titles.
@@ -843,7 +837,6 @@ def test_kubernetes_provisioned_keep_sets_keep_without_entering_legacy_provision
     assert controller.calls[0]["summary_lines"] == [
         "Scenario: cli-k8s.yaml",
         "Environment: local.yaml",
-        "Provision: yes",
         "Cleanup: keep",
     ]
 
@@ -903,7 +896,7 @@ def test_non_local_run_enters_existing_provisioning_context(
 
     NanofaasTUI(
         choose=ScriptedChooser(
-            iter([str(environment_path), "run", "provision", "cleanup"])
+            iter([str(environment_path), "run", "cleanup"])
         ),
         controller=RecordingController(),
     )._workflow_menu("cli-container.yaml")
@@ -974,7 +967,7 @@ def test_nonlocal_loadtest_runs_provision_build_and_cleanup_inside_live_sink(
 
     NanofaasTUI(
         choose=ScriptedChooser(
-            iter([str(environment_path), "run", "provision", "cleanup"])
+            iter([str(environment_path), "run", "cleanup"])
         ),
         controller=controller,
     )._workflow_menu("loadtest.yaml")
@@ -1046,7 +1039,7 @@ def test_provision_cleanup_error_reaches_real_controller_dashboard_and_acknowled
 
     NanofaasTUI(
         choose=ScriptedChooser(
-            iter([str(environment_path), "run", "provision", "cleanup"])
+            iter([str(environment_path), "run", "cleanup"])
         ),
         controller=controller,
     )._workflow_menu("cli-container.yaml")
@@ -1085,7 +1078,7 @@ def test_keep_applies_to_provisioning_and_workflow_cleanup(
     monkeypatch.setattr(tui_app, "provision_environment", provision)
 
     NanofaasTUI(
-        choose=ScriptedChooser(iter([str(environment_path), "run", "provision", "keep"])),
+        choose=ScriptedChooser(iter([str(environment_path), "run", "keep"])),
         controller=RecordingController(),
     )._workflow_menu("cli-container.yaml")
 
@@ -1096,7 +1089,7 @@ def test_keep_applies_to_provisioning_and_workflow_cleanup(
     assert workflow.run_calls == 1
 
 
-def test_reselecting_local_environment_resets_remote_provisioning_choice(
+def test_remote_environment_runs_with_automatic_provisioning(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     local_path = _install_paths(monkeypatch, tmp_path)
@@ -1137,12 +1130,11 @@ def test_reselecting_local_environment_resets_remote_provisioning_choice(
 
     NanofaasTUI(choose=chooser, controller=controller)._workflow_menu("cli-container.yaml")
 
-    assert provision_calls == []
+    assert len(provision_calls) == 1
     assert workflow.run_calls == 1
     assert controller.calls[0]["summary_lines"] == [
         "Scenario: cli-container.yaml",
-        "Environment: local.yaml",
-        "Provision: no",
+        "Environment: remote.yaml",
         "Cleanup: cleanup",
     ]
 
@@ -1367,17 +1359,15 @@ def test_provider_setup_never_loads_template_as_executable_yaml(
         (
             "multipass",
             ["environment", "run", "back", "back", "back"],
-            ["Environment", "Action", "Provision environment?", "Action", "Environment"],
+            ["Environment", "Action", "Cleanup policy", "Action", "Environment"],
         ),
         (
             "multipass",
-            ["environment", "run", "existing", "back", "back", "back", "back"],
+            ["environment", "run", "back", "back", "back", "back"],
             [
                 "Environment",
                 "Action",
-                "Provision environment?",
                 "Cleanup policy",
-                "Provision environment?",
                 "Action",
                 "Environment",
             ],
@@ -1447,12 +1437,7 @@ def test_environment_back_returns_to_the_scenario_submenu(
         (
             "multipass",
             ["environment", "run", KeyboardInterrupt],
-            ["Environment", "Action", "Provision environment?"],
-        ),
-        (
-            "multipass",
-            ["environment", "run", "existing", KeyboardInterrupt],
-            ["Environment", "Action", "Provision environment?", "Cleanup policy"],
+            ["Environment", "Action", "Cleanup policy"],
         ),
         (
             "local",
@@ -1460,7 +1445,7 @@ def test_environment_back_returns_to_the_scenario_submenu(
             ["Environment", "Action", "Cleanup policy"],
         ),
     ],
-    ids=["environment", "action", "provision", "nonlocal-cleanup", "local-cleanup"],
+    ids=["environment", "action", "nonlocal-cleanup", "local-cleanup"],
 )
 def test_ctrl_c_from_every_workflow_depth_propagates_to_exit(
     monkeypatch: pytest.MonkeyPatch,

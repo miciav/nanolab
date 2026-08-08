@@ -318,6 +318,7 @@ def test_source_archive_is_created_once_and_checksum_verified_on_stack_and_arm(
         stack_request=stack,
         arm_request=arm,
     )
+    assert all(resource.always_release for resource in (resources.local, resources.stack, resources.arm))
     # Acquire/release directly keeps the contract test independent of a dummy task.
     local = resources.local.acquire(TaskInputs.empty())
     inputs = TaskInputs._for_resources({resources.local: local}, {resources.local})
@@ -358,6 +359,7 @@ def test_arm_build_inputs_transfer_bake_and_buildkit_and_cleanup_on_failure(
         request=object(),
         architecture="arm64",
     )
+    assert resource.always_release is True
 
     with pytest.raises(RuntimeError, match="buildkitd-arm64"):
         resource.acquire(TaskInputs.empty())

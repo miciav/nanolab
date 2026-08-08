@@ -79,6 +79,7 @@ def test_buildx_builder_preexisting_is_not_removed() -> None:
     assert state == "existing"
     resource.release(TaskInputs.empty(), state)
     assert len(executor.seen) == 1  # only inspect, no create or rm
+    assert resource.always_release is True
 
 
 def test_buildx_builder_validates_preexisting_builder() -> None:

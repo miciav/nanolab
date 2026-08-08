@@ -30,6 +30,7 @@ class RecordingShell:
 class RecordingOrchestrator:
     def __init__(self) -> None:
         self.events: list[tuple[str, object]] = []
+        self.restrictions: list[tuple[object, tuple[int, ...], tuple[str, ...]]] = []
         self.shell = RecordingShell(self.events)
         self.ensure_result = _Result()
 
@@ -50,6 +51,9 @@ class RecordingOrchestrator:
 
     def ssh_private_key_path(self, request):
         return Path("/keys/provider")
+
+    def restrict_inbound_sources(self, request, *, ports, source_cidrs, priority_base=1010):
+        self.restrictions.append((request.name, ports, source_cidrs))
 
 
 def _playbooks(orchestrator: RecordingOrchestrator) -> list[str]:
@@ -348,6 +352,32 @@ def test_azure_provisioning_uses_public_endpoint_and_provider_key(tmp_path: Path
     assert ansible[ansible.index("--private-key") + 1] == "/keys/provider"
     assert commands[-1][-1] == "azureuser@nanofaas-azure.internal:/home/azureuser/nanofaas/"
     assert orchestrator.events[-1] == ("teardown", "nanofaas-azure")
+
+
+def test_azure_provisioning_restricts_nodeports_to_the_operator(tmp_path: Path) -> None:
+    orchestrator = RecordingOrchestrator()
+
+    with provision_environment(
+        ScenarioConfig(workflow="cli", backend="k8s", functions=["word-stats-java"]),
+        EnvironmentConfig.model_validate(
+            {
+                "provider": "azure",
+                "roles": {"stack": {}},
+                "azure": {
+                    "resource_group": "rg",
+                    "location": "westeurope",
+                    "operator_source_cidr": "203.0.113.42/32",
+                },
+            }
+        ),
+        repo_root=tmp_path,
+        orchestrator_factory=lambda _: orchestrator,
+    ):
+        pass
+
+    assert orchestrator.restrictions == [
+        ("nanofaas-azure", (30080, 30081, 30090), ("203.0.113.42/32",))
+    ]
 
 
 def test_proxmox_provisioning_retargets_bootstrap_to_ssh_nat(monkeypatch, tmp_path: Path) -> None:
