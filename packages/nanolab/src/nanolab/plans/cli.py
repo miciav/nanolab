@@ -10,6 +10,7 @@ from sonata_tasks.cli import CliFunction, CliWorkflowRequest, build_cli_workflow
 from sonata_tasks.command import CommandTask
 from sonata_tasks.helm import HelmReleaseSpec, helm_release_resource
 from sonata_tasks.process import managed_process_resource
+from sonata_tasks.registry import docker_registry_resource
 from sonata_tasks.provisioning.resources import provisioned_vm
 from sonata_tasks.components.bootstrap import (
     plan_k3s_install,
@@ -78,13 +79,18 @@ _BOOTSTRAP_STEPS: tuple[
 )
 
 
-def _local_control_plane_resource(repo_root: Path) -> Resource:
+def _local_control_plane_resource(
+    repo_root: Path, *, requires: tuple[Resource[Any], ...] = ()
+) -> Resource:
     """The control plane running on this machine, deploying functions with Docker."""
-    return managed_process_resource(
-        title="Acquire local control plane",
-        argv=_local_control_plane.argv(repo_root),
-        cwd=repo_root,
-        ready=_local_control_plane.ready,
+    return replace(
+        managed_process_resource(
+            title="Acquire local control plane",
+            argv=_local_control_plane.argv(repo_root),
+            cwd=repo_root,
+            ready=_local_control_plane.ready,
+        ),
+        requires=requires,
     )
 
 
@@ -352,12 +358,26 @@ def build_cli_plan(
         build_role=cli_role,
         endpoint=target_endpoint,
         namespace=namespace,
+        push_function_images=local,
     )
-    requires = (_local_control_plane_resource(root),) if local else ()
+    registry = (
+        docker_registry_resource(
+            executor=RoleBoundCommandTaskExecutor(bindings),
+            role="host",
+        )
+        if local
+        else None
+    )
+    requires = (
+        (registry, _local_control_plane_resource(root, requires=(registry,)))
+        if registry is not None
+        else ()
+    )
     return build_cli_workflow(
         request,
         bindings,
         cwd=root,
         control_plane_build_argv=LOCAL_CONTROL_PLANE_BUILD_ARGV if local else None,
         requires=requires,
+        push_requires=(registry,) if registry is not None else (),
     )

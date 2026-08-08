@@ -488,6 +488,24 @@ def test_the_image_build_runs_before_the_function_is_registered() -> None:
     assert titles.index("Build image word-stats-java") < titles.index("Apply word-stats-java")
 
 
+def test_requested_function_images_are_pushed_before_registration() -> None:
+    function = replace(FUNCTION, build_argv=("docker", "build", "-t", FUNCTION.image, "."))
+
+    workflow = build_cli_workflow(
+        CliWorkflowRequest(functions=(function,), push_function_images=True), _bindings(ScriptedExecutor())
+    )
+
+    assert [task.task_id for task in workflow.compile().tasks] == [
+        "001.build-nanofaas-cli",
+        "002.build-image-word-stats-java",
+        "003.push-image-localhost-5000-nanofaas-java-word-stats-e2e",
+        "004.acquire-word-stats-java",
+        "005.list-functions",
+        "006.invoke-word-stats-java",
+        "007.release-word-stats-java",
+    ]
+
+
 def test_without_build_argv_nothing_extra_is_emitted() -> None:
     executor = ScriptedExecutor()
     workflow = build_cli_workflow(
