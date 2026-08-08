@@ -7,6 +7,7 @@ from typing import Any, cast
 from sonata_engine import Task, Workflow
 from sonata_tasks.command import CommandTask
 from sonata_tasks.compose import DockerComposeProject, docker_compose_resource
+from sonata_tasks.registry import docker_registry_resource
 from sonata_tasks.loadtest import (
     CapturePrometheusTask,
     EvaluateGateTask,
@@ -241,7 +242,7 @@ def build_loadtest_plan(
         else (),
         build_images=not prebuilt,
         build_control_plane=backend == "k8s",
-        push_function_images=False,
+        push_function_images=backend == "container" and not prebuilt,
         control_plane_image=prebuilt_control_plane_image,
     )
     if backend == "k8s":
@@ -263,22 +264,26 @@ def build_loadtest_plan(
     executor = RoleBoundCommandTaskExecutor(bindings)
     platform_requires = ()
     if backend == "container":
-        platform_requires = (
-            docker_compose_resource(
-                DockerComposeProject(
-                    name="nanofaas-loadtest",
-                    file=Path("deploy/compose/compose.yaml"),
-                    ready_url="http://127.0.0.1:8081/actuator/health/readiness",
-                    env={
-                        "NANOFAAS_CONTROL_PLANE_MODULES": (
-                            "container-deployment-provider,autoscaler,"
-                            "async-queue,sync-queue"
-                        )
-                    },
-                ),
-                executor=executor,
-                cwd=root,
+        registry = docker_registry_resource(executor=executor, role="host")
+        compose = docker_compose_resource(
+            DockerComposeProject(
+                name="nanofaas-loadtest",
+                file=Path("deploy/compose/compose.yaml"),
+                ready_url="http://127.0.0.1:8081/actuator/health/readiness",
+                env={
+                    "NANOFAAS_CONTROL_PLANE_MODULES": (
+                        "container-deployment-provider,autoscaler,"
+                        "async-queue,sync-queue"
+                    )
+                },
             ),
+            executor=executor,
+            cwd=root,
+            requires=(registry,),
+        )
+        platform_requires = (
+            registry,
+            compose,
         )
     run_k6 = RunK6(
         task_id="",
