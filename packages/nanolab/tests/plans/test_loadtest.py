@@ -195,13 +195,16 @@ def test_container_loadtest_uses_compose_without_kubernetes(
     )
 
     assert _ids(workflow) == [
-        "001.acquire-docker-compose-project-nanofaas-loadtest",
-        "002.build-application-artifact-word-stats-java",
-        "003.build-image-word-stats-java",
-        "004.acquire-word-stats-java",
-        "005.run-the-load-test",
-        "006.release-word-stats-java",
-        "007.release-docker-compose-project-nanofaas-loadtest",
+        "001.acquire-local-registry",
+        "002.acquire-docker-compose-project-nanofaas-loadtest",
+        "003.build-application-artifact-word-stats-java",
+        "004.build-image-word-stats-java",
+        "005.push-image-localhost-5000-nanofaas-java-word-stats-e2e",
+        "006.acquire-word-stats-java",
+        "007.run-the-load-test",
+        "008.release-word-stats-java",
+        "009.release-docker-compose-project-nanofaas-loadtest",
+        "010.release-local-registry",
     ]
 
 
