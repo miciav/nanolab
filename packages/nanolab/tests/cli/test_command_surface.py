@@ -106,9 +106,7 @@ def test_plan_builds_shared_validate_workflow() -> None:
 
     assert result.exit_code == 0
     assert "005.build-application-artifact-word-stats-java" in result.stdout
-    # K8sE2eTest runs after Helm deploy, before function ops.
-    assert "run-kubernetes-e2e-test" in result.stdout
-    assert "Run Kubernetes E2E test" in result.stdout
+    assert "run-kubernetes-e2e-test" not in result.stdout
     assert "inspect-resources-of-fn-word-stats-java" in result.stdout
 
 

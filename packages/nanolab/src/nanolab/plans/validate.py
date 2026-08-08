@@ -166,7 +166,6 @@ def build_validate_plan(
         ),
         additional_modules=("async-queue", "sync-queue") if kubernetes else (),
         build_control_plane=kubernetes,
-        run_java_e2e=kubernetes,
         push_function_images=not kubernetes,
     )
     if kubernetes:

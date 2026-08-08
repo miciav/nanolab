@@ -77,9 +77,8 @@ def test_validate_plan_dispatches_k8s_tasks_to_stack_binding() -> None:
         RoleBindings(host=host, stack=stack),
     )
 
-    # 14 compiled tasks: kubectl check, build control-plane jar, build/push images,
-    # function artifact, Helm install, register, invoke, inspect, and K8sE2eTest.
-    assert len(plan.compile().tasks) == 14
+    # The workflow itself validates deploy, invoke and resource propagation.
+    assert len(plan.compile().tasks) == 13
     assert host.seen == []
 
 
