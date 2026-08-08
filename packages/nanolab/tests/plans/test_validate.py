@@ -9,6 +9,7 @@ from nanolab.plans.validate import (
 )
 from sonata_engine import Workflow
 from sonata_tasks.execution.bindings import RoleBindings
+from sonata_tasks.registry import docker_registry_resource
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 
@@ -103,18 +104,25 @@ def test_container_validation_builds_and_deploys_the_control_plane_with_compose(
     ids = [task.task_id for task in _plan("container").compile().tasks]
 
     assert ids == [
-        "001.acquire-docker-compose-project-nanofaas-validate",
-        "002.build-application-artifact-word-stats-java",
-        "003.build-image-word-stats-java",
-        "004.acquire-word-stats-java",
-        "005.invoke-word-stats-java",
-        "006.inspect-resources-of-nanofaas-word-stats-java-r1",
-        "007.release-word-stats-java",
-        "008.release-docker-compose-project-nanofaas-validate",
+        "001.acquire-local-registry",
+        "002.acquire-docker-compose-project-nanofaas-validate",
+        "003.build-application-artifact-word-stats-java",
+        "004.build-image-word-stats-java",
+        "005.push-image-localhost-5000-nanofaas-java-word-stats-e2e",
+        "006.acquire-word-stats-java",
+        "007.invoke-word-stats-java",
+        "008.inspect-resources-of-nanofaas-word-stats-java-r1",
+        "009.release-word-stats-java",
+        "010.release-docker-compose-project-nanofaas-validate",
+        "011.release-local-registry",
     ]
 
 
-def test_container_validation_owns_an_isolated_compose_project() -> None:
+def test_container_validation_owns_an_isolated_compose_project(monkeypatch: object) -> None:
+    monkeypatch.setattr(
+        "nanolab.plans.validate.docker_registry_resource",
+        lambda **kwargs: docker_registry_resource(**kwargs, ready=lambda: True),
+    )
     host = RecordingExecutor()
     plan = build_validate_plan(
         ScenarioConfig(

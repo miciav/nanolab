@@ -5,6 +5,7 @@ from pathlib import Path
 import yaml
 from sonata_engine import Workflow
 from sonata_tasks.compose import DockerComposeProject, docker_compose_resource
+from sonata_tasks.registry import docker_registry_resource
 from sonata_tasks.validate import ValidateFunction as SonataFunction
 from sonata_tasks.validate import ValidateWorkflowRequest, build_validate_workflow
 from sonata_tasks.components.helm import control_plane_helm_values
@@ -166,6 +167,7 @@ def build_validate_plan(
         additional_modules=("async-queue", "sync-queue") if kubernetes else (),
         build_control_plane=kubernetes,
         run_java_e2e=kubernetes,
+        push_function_images=not kubernetes,
     )
     if kubernetes:
         # Both settings are what this workflow exists to exercise: the JUnit queue
@@ -185,16 +187,23 @@ def build_validate_plan(
         )
     requires = ()
     if not kubernetes:
-        requires = (
-            docker_compose_resource(
-                DockerComposeProject(
-                    name="nanofaas-validate",
-                    file=Path("deploy/compose/compose.yaml"),
-                    ready_url="http://127.0.0.1:8081/actuator/health/readiness",
-                ),
-                executor=RoleBoundCommandTaskExecutor(bindings),
-                cwd=root,
+        registry = docker_registry_resource(
+            executor=RoleBoundCommandTaskExecutor(bindings),
+            role="host",
+        )
+        compose = docker_compose_resource(
+            DockerComposeProject(
+                name="nanofaas-validate",
+                file=Path("deploy/compose/compose.yaml"),
+                ready_url="http://127.0.0.1:8081/actuator/health/readiness",
             ),
+            executor=RoleBoundCommandTaskExecutor(bindings),
+            cwd=root,
+            requires=(registry,),
+        )
+        requires = (
+            registry,
+            compose,
         )
     return build_validate_workflow(
         request,
