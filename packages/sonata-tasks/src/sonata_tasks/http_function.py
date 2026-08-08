@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import replace
+import json
 from pathlib import Path
+from time import monotonic, sleep
 
-from sonata_engine import Resource
+from sonata_engine import Resource, Task, TaskInputs, TaskOutcome
 from sonata_tasks.execution.bindings import CommandTaskExecutor
 from sonata_tasks.execution.roles import ExecutionRole
 from sonata_tasks.tasks.models import TaskResult
@@ -50,8 +52,43 @@ class HttpFunctionRegisterTask(CommandTask):
         endpoint: Endpoint,
         executor: CommandTaskExecutor,
         role: ExecutionRole,
+        expected_backend: str | None = None,
+        expected_endpoint_prefix: str | None = None,
         cwd: Path | None = None,
     ) -> None:
+        def verify(result: TaskResult) -> None:
+            if expected_backend is None and expected_endpoint_prefix is None:
+                return
+            try:
+                response = json.loads(result.stdout)
+            except json.JSONDecodeError as error:
+                raise RuntimeError(f"{manifest.name}: invalid registration response") from error
+            expected = {
+                "name": manifest.name,
+                "image": manifest.image,
+                "requestedExecutionMode": manifest.execution_mode,
+                "effectiveExecutionMode": manifest.execution_mode,
+            }
+            for field, value in expected.items():
+                if response.get(field) != value:
+                    raise RuntimeError(
+                        f"{manifest.name}: {field} was {response.get(field)!r}, expected {value!r}"
+                    )
+            if expected_backend is not None and response.get("deploymentBackend") != expected_backend:
+                raise RuntimeError(
+                    f"{manifest.name}: deploymentBackend was {response.get('deploymentBackend')!r}, "
+                    f"expected {expected_backend!r}"
+                )
+            endpoint_url = response.get("endpointUrl")
+            if expected_endpoint_prefix is not None and (
+                not isinstance(endpoint_url, str)
+                or not endpoint_url.startswith(expected_endpoint_prefix)
+            ):
+                raise RuntimeError(
+                    f"{manifest.name}: endpointUrl was {endpoint_url!r}, "
+                    f"expected prefix {expected_endpoint_prefix!r}"
+                )
+
         super().__init__(
             title=f"Register {manifest.name}",
             argv=_argv(
@@ -69,6 +106,7 @@ class HttpFunctionRegisterTask(CommandTask):
             executor=executor,
             role=role,
             cwd=cwd,
+            verify=verify if expected_backend is not None or expected_endpoint_prefix is not None else None,
         )
 
 
@@ -100,6 +138,117 @@ class HttpFunctionDeleteTask(CommandTask):
             cwd=cwd,
             expected_exit_codes=frozenset({0, 7, 22}),
         )
+
+
+class HttpFunctionEnqueueTask(Task[str]):
+    """Enqueue one invocation and return its execution id.
+
+    When ``match_upstream`` is set, the immediately preceding enqueue must have
+    returned the same id.  A ``Steps`` composite uses that to prove the public
+    idempotency contract without persisting state outside the workflow.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        *,
+        payload: str,
+        endpoint: Endpoint,
+        executor: CommandTaskExecutor,
+        role: ExecutionRole,
+        idempotency_key: str,
+        match_upstream: bool = False,
+        cwd: Path | None = None,
+    ) -> None:
+        self.title = f"Enqueue {name}"
+        self._name = name
+        self._match_upstream = match_upstream
+        self._command = CommandTask(
+            title=self.title,
+            argv=_argv(
+                endpoint,
+                lambda base: (
+                    "curl",
+                    "-fsS",
+                    "-H",
+                    "Content-Type: application/json",
+                    "-H",
+                    f"Idempotency-Key: {idempotency_key}",
+                    "--data",
+                    payload,
+                    f"{base}/v1/functions/{name}:enqueue",
+                ),
+            ),
+            executor=executor,
+            role=role,
+            cwd=cwd,
+        )
+
+    def run(self, inputs: TaskInputs) -> TaskOutcome[str]:
+        result = self._command.run(inputs).value
+        try:
+            response = json.loads(result.stdout)
+        except json.JSONDecodeError as error:
+            raise RuntimeError(f"{self._name}: invalid enqueue response") from error
+        execution_id = response.get("executionId")
+        if response.get("status") != "queued" or not isinstance(execution_id, str) or not execution_id:
+            raise RuntimeError(f"{self._name}: expected queued execution, got {response!r}")
+        if self._match_upstream and inputs.upstream() != execution_id:
+            raise RuntimeError(
+                f"{self._name}: idempotent enqueue returned {execution_id!r}, "
+                f"expected {inputs.upstream()!r}"
+            )
+        return TaskOutcome(value=execution_id)
+
+
+class HttpExecutionSuccessTask(Task[None]):
+    """Poll the execution id from the preceding enqueue until it succeeds."""
+
+    def __init__(
+        self,
+        *,
+        endpoint: Endpoint,
+        executor: CommandTaskExecutor,
+        role: ExecutionRole,
+        timeout_seconds: float = 20,
+        poll_seconds: float = 0.5,
+        cwd: Path | None = None,
+    ) -> None:
+        self.title = "Wait for enqueued execution"
+        self._endpoint = endpoint
+        self._executor = executor
+        self._role = role
+        self._timeout_seconds = timeout_seconds
+        self._poll_seconds = poll_seconds
+        self._cwd = cwd
+
+    def run(self, inputs: TaskInputs) -> TaskOutcome[None]:
+        execution_id = inputs.upstream()
+        if not isinstance(execution_id, str) or not execution_id:
+            raise RuntimeError(f"{self.title}: expected an execution id from enqueue")
+        command = CommandTask(
+            title=self.title,
+            argv=_argv(self._endpoint, lambda base: ("curl", "-fsS", f"{base}/v1/executions/{execution_id}")),
+            executor=self._executor,
+            role=self._role,
+            cwd=self._cwd,
+        )
+        deadline = monotonic() + self._timeout_seconds
+        while True:
+            result = command.run(inputs).value
+            try:
+                response = json.loads(result.stdout)
+            except json.JSONDecodeError as error:
+                raise RuntimeError(f"{self.title}: invalid execution response") from error
+            if response.get("executionId") != execution_id:
+                raise RuntimeError(f"{self.title}: response was for {response.get('executionId')!r}")
+            if response.get("status") == "success":
+                return TaskOutcome(value=None)
+            if response.get("status") in {"error", "timeout"}:
+                raise RuntimeError(f"{self.title}: execution ended {response.get('status')}")
+            if monotonic() >= deadline:
+                raise RuntimeError(f"{self.title}: execution {execution_id!r} did not succeed in time")
+            sleep(self._poll_seconds)
 
 
 def _split_response(stdout: str) -> tuple[str, str]:

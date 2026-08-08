@@ -3,11 +3,17 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 
+import pytest
 from sonata_engine import TaskInputs
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 from sonata_tasks.cli_function import CliFunctionApplyTask, CliFunctionDeleteTask
-from sonata_tasks.http_function import HttpFunctionDeleteTask, HttpFunctionRegisterTask
+from sonata_tasks.http_function import (
+    HttpExecutionSuccessTask,
+    HttpFunctionDeleteTask,
+    HttpFunctionEnqueueTask,
+    HttpFunctionRegisterTask,
+)
 from sonata_tasks.manifest import FunctionManifest
 
 MANIFEST = FunctionManifest(name="word-stats", image="reg/word-stats:e2e")
@@ -21,6 +27,29 @@ class RecordingExecutor:
     def run(self, task: CommandTaskSpec, *, dry_run: bool = False) -> TaskResult:
         self.seen.append(task)
         return TaskResult(task_id="", status="passed", return_code=0)
+
+
+@dataclass
+class RespondingExecutor(RecordingExecutor):
+    stdout: str = ""
+
+    def run(self, task: CommandTaskSpec, *, dry_run: bool = False) -> TaskResult:
+        self.seen.append(task)
+        return TaskResult(task_id="", status="passed", return_code=0, stdout=self.stdout)
+
+
+@dataclass
+class SequencedExecutor(RecordingExecutor):
+    responses: list[str] = field(default_factory=list)
+
+    def run(self, task: CommandTaskSpec, *, dry_run: bool = False) -> TaskResult:
+        self.seen.append(task)
+        return TaskResult(
+            task_id="",
+            status="passed",
+            return_code=0,
+            stdout=self.responses.pop(0),
+        )
 
 
 def test_manifest_carries_the_tuning_values_the_control_plane_expects() -> None:
@@ -100,6 +129,110 @@ def test_http_register_posts_the_same_manifest() -> None:
     assert argv[0] == "curl"
     assert argv[-1] == "http://cp:8080/v1/functions"
     assert MANIFEST.json() in argv
+
+
+def test_k8s_register_requires_the_provider_derived_endpoint() -> None:
+    executor = RespondingExecutor(
+        stdout=json.dumps(
+            {
+                "name": "word-stats",
+                "image": "reg/word-stats:e2e",
+                "requestedExecutionMode": "DEPLOYMENT",
+                "effectiveExecutionMode": "DEPLOYMENT",
+                "deploymentBackend": "k8s",
+                "endpointUrl": "http://fn-word-stats.nf.svc.cluster.local:8080/invoke",
+            }
+        )
+    )
+
+    _ = HttpFunctionRegisterTask(
+        MANIFEST,
+        endpoint="http://cp:8080",
+        executor=executor,
+        role="stack",
+        expected_backend="k8s",
+        expected_endpoint_prefix="http://fn-word-stats.nf.svc.cluster.local:8080/invoke",
+    ).run(TaskInputs.empty())
+
+
+def test_k8s_register_rejects_a_non_provider_endpoint() -> None:
+    executor = RespondingExecutor(
+        stdout=json.dumps(
+            {
+                "name": "word-stats",
+                "image": "reg/word-stats:e2e",
+                "requestedExecutionMode": "DEPLOYMENT",
+                "effectiveExecutionMode": "DEPLOYMENT",
+                "deploymentBackend": "k8s",
+                "endpointUrl": "http://wrong.example/invoke",
+            }
+        )
+    )
+
+    task = HttpFunctionRegisterTask(
+        MANIFEST,
+        endpoint="http://cp:8080",
+        executor=executor,
+        role="stack",
+        expected_backend="k8s",
+        expected_endpoint_prefix="http://fn-word-stats.nf.svc.cluster.local:8080/invoke",
+    )
+
+    with pytest.raises(RuntimeError, match="endpointUrl"):
+        _ = task.run(TaskInputs.empty())
+
+
+def test_enqueue_returns_the_execution_id_and_checks_idempotency() -> None:
+    executor = SequencedExecutor(
+        responses=[
+            '{"executionId":"e-1","status":"queued"}',
+            '{"executionId":"e-1","status":"queued"}',
+        ]
+    )
+    first = HttpFunctionEnqueueTask(
+        "word-stats",
+        payload='{"input":{"text":"a b"}}',
+        endpoint="http://cp:8080",
+        executor=executor,
+        role="stack",
+        idempotency_key="same-request",
+    ).run(TaskInputs.empty())
+    second = HttpFunctionEnqueueTask(
+        "word-stats",
+        payload='{"input":{"text":"a b"}}',
+        endpoint="http://cp:8080",
+        executor=executor,
+        role="stack",
+        idempotency_key="same-request",
+        match_upstream=True,
+    ).run(_with_upstream(first.value))
+
+    assert first.value == second.value == "e-1"
+    assert "Idempotency-Key: same-request" in executor.seen[0].argv
+
+
+def test_poll_waits_for_a_successful_execution() -> None:
+    executor = SequencedExecutor(
+        responses=[
+            '{"executionId":"e-1","status":"queued"}',
+            '{"executionId":"e-1","status":"success"}',
+        ]
+    )
+
+    _ = HttpExecutionSuccessTask(
+        endpoint="http://cp:8080",
+        executor=executor,
+        role="stack",
+        poll_seconds=0,
+    ).run(_with_upstream("e-1"))
+
+    assert executor.seen[-1].argv[-1] == "http://cp:8080/v1/executions/e-1"
+
+
+def _with_upstream(value: object) -> TaskInputs:
+    from dataclasses import replace
+
+    return replace(TaskInputs.empty(), _upstream=value)
 
 
 def test_http_delete_tolerates_an_unreachable_or_absent_target() -> None:
