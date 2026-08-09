@@ -103,6 +103,8 @@ def evaluate_conservation(
         "k6_offloaded_requests",
         _k6_counter_value(k6_summary, "offloaded_requests", {"function": offloadable}),
     )
+    if k6_offloaded == 0:
+        failures.append("no requests were offloaded to the cloud")
     edge_offload_total = record(
         "edge_offload_total",
         _sum_metric(edge_metrics, f'nanofaas_offload_total{{function="{offloadable}",'),

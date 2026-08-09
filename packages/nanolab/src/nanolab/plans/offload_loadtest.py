@@ -33,10 +33,9 @@ from nanolab.plans.validate import _resolve_function, _set_args, _sonata_functio
 
 _ACTUATOR_PORT = 30081
 _CONTROL_PLANE_PORT = 30080
-# The pressure-offload trigger fires in bursts correlated with the control
-# plane's 10s throughput window, not smoothly — a lower offloadable rate keeps
-# each burst small enough for the cloud's own admission control to absorb.
-_OFFLOADABLE_RATE = "10"
+# The edge has a one-slot queue in this scenario, so this rate reliably creates
+# pressure while the cloud's larger function budget absorbs the overflow.
+_OFFLOADABLE_RATE = "100"
 _CONTROL_RATE = "20"
 _K6_DURATION = "60s"
 
@@ -172,6 +171,7 @@ def _platform(
         control_plane_image=request.control_plane_image_reference(),
         expose_node_port=True,
         metrics_profile="advanced",
+        sync_queue_max_depth=1 if offload_target is not None else None,
     )
     if offload_target is not None:
         values = _offload_target(values, offload_target)

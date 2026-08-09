@@ -124,6 +124,24 @@ def test_run_renders_normalized_task_progress(monkeypatch) -> None:
     assert "[001.test-task] passed" in result.stdout
 
 
+def test_run_container_loadtest_requires_k6_before_building_the_workflow(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    build = MagicMock(side_effect=AssertionError("workflow must not be built"))
+    monkeypatch.setattr(product_module, "_workflow", build)
+    monkeypatch.setattr(
+        product_module.diagnostics,
+        "missing_executables",
+        lambda required=(): ["k6"] if required == ("k6",) else [],
+    )
+
+    result = CliRunner().invoke(app, ["run", "scenarios-v2/loadtest-container.yaml"])
+
+    assert result.exit_code != 0
+    assert "requires k6 on the host" in result.output
+    build.assert_not_called()
+
+
 def test_generic_release_run_requires_an_environment_and_never_provisions(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

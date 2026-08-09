@@ -270,6 +270,15 @@ def _validate_cli_container_options(
         raise typer.BadParameter("--keep is not supported for a cli container scenario")
 
 
+def _require_local_loadtest_tools(scenario: ScenarioConfig, environment: EnvironmentConfig) -> None:
+    if scenario.workflow != "loadtest" or scenario.backend != "container":
+        return
+    if environment.provider != "local":
+        return
+    if diagnostics.missing_executables(("k6",)):
+        raise typer.BadParameter("container load-test requires k6 on the host")
+
+
 def _render_compiled(compiled: CompiledWorkflow) -> None:
     for compiled_task in compiled.tasks:
         typer.echo(f"{compiled_task.task_id}  {compiled_task.task.title}")
@@ -434,6 +443,7 @@ def install_product_commands(app: typer.Typer) -> None:
             environment_config,
             keep=keep,
         )
+        _require_local_loadtest_tools(scenario_config, environment_config)
         _require_cli_endpoint(scenario_config, environment_config, control_plane_url)
         paths = default_tool_paths()
         effective_run_dir = run_dir

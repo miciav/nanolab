@@ -29,6 +29,7 @@ def control_plane_helm_values(
     expose_node_port: bool = False,
     metrics_profile: str | None = None,
     sync_queue_admission_enabled: bool = False,
+    sync_queue_max_depth: int | None = None,
 ) -> dict[str, str]:
     repository, tag = _image_parts(control_plane_image)
     callback_url = f"http://control-plane.{namespace}.svc.cluster.local:8080/v1/internal/executions"
@@ -41,7 +42,9 @@ def control_plane_helm_values(
         "demos.enabled": "false",
         "prometheus.create": "false",
     }
-    sync_queue_depth = "100" if expose_node_port else "1"
+    sync_queue_depth = str(
+        sync_queue_max_depth if sync_queue_max_depth is not None else 100 if expose_node_port else 1
+    )
     sync_queue_wait = "30s" if expose_node_port else "5s"
     extra_env = [
         ("NANOFAAS_DEPLOYMENT_DEFAULT_BACKEND", "k8s"),

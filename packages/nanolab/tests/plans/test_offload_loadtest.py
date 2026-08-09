@@ -165,10 +165,12 @@ def test_dedicated_loadgen_runs_k6_on_loadgen_and_fetches_results(tmp_path: Path
 
     commands = _run(workflow, executor)
     preflight = next(spec for spec in commands if spec.argv == ("k6", "version"))
-    k6 = next(" ".join(spec.argv) for spec in commands if spec.argv[0] == "k6" and "run" in spec.argv)
+    k6_spec = next(spec for spec in commands if spec.argv[0] == "k6" and "run" in spec.argv)
+    k6 = " ".join(k6_spec.argv)
 
     assert preflight.execution_role == "loadgen"
     assert "/home/ubuntu/nanolab-assets/k6/offload-mixed.js" in k6
+    assert "OFFLOADABLE_RATE=100" in k6_spec.argv
     # A remote load generator writes its summary there, so it has to come back.
     assert fetched == [("/home/ubuntu/nanofaas-loadtest/k6-summary.json", tmp_path)]
 
@@ -184,7 +186,7 @@ def test_dedicated_loadgen_requires_a_fetcher(tmp_path: Path) -> None:
         )
 
 
-def test_evaluation_writes_a_zero_offload_summary(
+def test_evaluation_rejects_a_run_without_offloads(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     summary_path = tmp_path / "k6-summary.json"
@@ -203,19 +205,19 @@ def test_evaluation_writes_a_zero_offload_summary(
         ),
     )
 
-    result = EvaluateOffloadConservation(
-        task_id="",
-        title="Evaluate offload conservation",
-        k6_summary_path=summary_path,
-        edge_metrics_url="http://edge/metrics",
-        cloud_metrics_url="unused",
-        offloadable="word-stats-java",
-        control="json-transform-java",
-        output_path=report_path,
-    ).run()
+    with pytest.raises(RuntimeError, match="no requests were offloaded"):
+        EvaluateOffloadConservation(
+            task_id="",
+            title="Evaluate offload conservation",
+            k6_summary_path=summary_path,
+            edge_metrics_url="http://edge/metrics",
+            cloud_metrics_url="unused",
+            offloadable="word-stats-java",
+            control="json-transform-java",
+            output_path=report_path,
+        ).run()
 
-    assert result == {"passed": True}
-    assert json.loads(report_path.read_text(encoding="utf-8"))["numbers"]["k6_offloadable_requests"] == 601
+    assert json.loads(report_path.read_text(encoding="utf-8"))["passed"] is False
 
 
 def test_summary_does_not_describe_nonzero_offload_as_zero() -> None:
@@ -249,7 +251,10 @@ def test_edge_offload_target_points_at_the_cloud_role(tmp_path: Path) -> None:
     ]
     # Only the edge's chart is told where to offload to; the cloud is the target.
     assert sum("NANOFAAS_OFFLOAD_TARGETURL" in command for command in installs) == 1
-    assert any("].value=http://cloud.example:30080" in command for command in installs)
+    edge_install = next(command for command in installs if "NANOFAAS_OFFLOAD_TARGETURL" in command)
+    assert "].value=http://cloud.example:30080" in edge_install
+    assert "SYNC_QUEUE_MAX_DEPTH" in edge_install
+    assert "controlPlane.extraEnv[5].value=1 --set" in edge_install
 
 
 def test_cleanup_covers_both_control_planes(tmp_path: Path) -> None:
