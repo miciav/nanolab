@@ -99,6 +99,7 @@ def _workflow(
             bindings,
             repo_root=paths.nanofaas_root,
             tool_root=paths.tool_root,
+            environment=environment,
         )
     if scenario.workflow == "offload":
         return build_offload_plan(scenario, bindings, repo_root=paths.nanofaas_root)

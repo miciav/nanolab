@@ -23,6 +23,7 @@ from sonata_tasks.platform import PlatformRequest
 from sonata_tasks.components.helm import control_plane_helm_values
 from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
 from sonata_tasks.execution.roles import ExecutionRole
+from sonata_tasks.k6 import K6Task
 from sonata_tasks.loadtest.autoscaling import (
     HttpReplicaProbe,
     ReplicaProbe,
@@ -35,7 +36,6 @@ from sonata_tasks.loadtest.ports import PrometheusClient, RemoteFileFetcher
 from sonata_tasks.loadtest.tasks import (
     CapturePrometheusSnapshot,
     FetchVmResults,
-    RunK6,
     WriteK6Report,
     WriteLoadtestSummary,
 )
@@ -104,7 +104,7 @@ def _home(user: str, explicit: str | None) -> str:
 
 
 class _RoleRunner:
-    """The VM-command shape `RunK6` and the replica probe expect, bound to a role."""
+    """The VM-command shape the legacy replica probe expects, bound to a role."""
 
     def __init__(self, bindings: RoleBindings, role: ExecutionRole) -> None:
         self._executor = bindings.executor_for(role)
@@ -285,10 +285,10 @@ def build_loadtest_plan(
             registry,
             compose,
         )
-    run_k6 = RunK6(
-        task_id="",
+    run_k6 = K6Task(
+        executor=executor,
+        role=load_role,
         title="Run k6",
-        runner=_RoleRunner(bindings, load_role),
         config=K6Config(
             script_path=script_path,
             target_url=control_plane_url,

@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from sonata_engine import TaskInputs, Workflow
+from sonata_engine import TaskInputs, TaskOutcome, Workflow
 from sonata_engine.errors import NoUpstreamValueError
 from sonata_engine.workflow.context import bind_workflow_sink
 from sonata_tasks.loadtest.autoscaling import AutoscalingSummary
@@ -45,9 +45,10 @@ class FakeRunK6:
     result_value: K6RunResult = field(default_factory=_k6)
     calls: int = 0
 
-    def run(self) -> K6RunResult:
+    def run(self, inputs: TaskInputs) -> TaskOutcome[K6RunResult]:
+        del inputs
         self.calls += 1
-        return self.result_value
+        return TaskOutcome(value=self.result_value)
 
 
 @dataclass
@@ -97,7 +98,8 @@ def test_the_watcher_brackets_the_run() -> None:
 
 def test_the_watcher_stops_even_when_k6_blows_up() -> None:
     class Exploding:
-        def run(self) -> K6RunResult:
+        def run(self, inputs: TaskInputs) -> TaskOutcome[K6RunResult]:
+            del inputs
             raise RuntimeError("k6 missing")
 
     watcher = FakeWatcher()
@@ -181,9 +183,8 @@ def test_the_gate_passes_a_clean_run() -> None:
 )
 def test_no_step_can_see_a_run_that_did_not_happen(task: Any) -> None:
     """The whole reason this is one composite. In the legacy workflow these were
-    separate tasks reading `run_k6.result` off an attribute, so selecting one on
-    its own raised "RunK6.run() has not been called" — a granularity that looked
-    real and was not."""
+    separate tasks reading a mutable result attribute, so selecting one on its
+    own failed for an unrelated ordering detail."""
     with pytest.raises(NoUpstreamValueError):
         _ = task.run(TaskInputs.empty())
 

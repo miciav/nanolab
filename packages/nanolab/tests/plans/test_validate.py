@@ -33,6 +33,15 @@ class RecordingExecutor:
             stdout = "10.43.0.7"
         elif "get deployment" in rendered:
             stdout = DEPLOYMENT_PAYLOAD
+        elif ":enqueue" in rendered:
+            stdout = '{"executionId":"queued-1","status":"queued"}'
+        elif "/v1/executions/" in rendered:
+            stdout = '{"executionId":"queued-1","status":"success"}'
+        elif "/actuator/prometheus" in rendered:
+            stdout = (
+                'function_enqueue_total{function="word-stats-java"} 1\n'
+                'function_success_total{function="word-stats-java"} 1\n'
+            )
         return TaskResult(
             task_id=task.task_id, status="passed", return_code=0, stdout=stdout
         )
@@ -78,7 +87,7 @@ def test_validate_plan_dispatches_k8s_tasks_to_stack_binding() -> None:
     )
 
     # The workflow itself validates deploy, invoke and resource propagation.
-    assert len(plan.compile().tasks) == 13
+    assert len(plan.compile().tasks) == 23
     assert host.seen == []
 
 
@@ -86,6 +95,20 @@ def test_validate_plan_selects_the_queue_modules_kubernetes_validation_exercises
     build = _argv(_plan("k8s"), "Build control plane")
 
     assert "-PcontrolPlaneModules=k8s-deployment-provider,async-queue,sync-queue" in build
+
+
+def test_kubernetes_validation_runs_the_queue_burst_with_k6() -> None:
+    stack = RecordingExecutor()
+    plan = build_validate_plan(
+        ScenarioConfig(workflow="validate", backend="k8s", functions=["word-stats-java"]),
+        RoleBindings(host=RecordingExecutor(), stack=stack),
+    )
+
+    plan.run()
+
+    burst = next(spec for spec in stack.seen if spec.argv[:2] == ("k6", "run"))
+    assert "k8s-queue-burst.js" in " ".join(burst.argv)
+    assert "NANOFAAS_FUNCTION=k8s-sync-queue" in burst.argv
 
 
 def test_validate_plan_keeps_container_validation_local() -> None:

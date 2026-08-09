@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+from sonata_engine import Resource
+
 
 @dataclass(frozen=True)
 class K6Stage:
@@ -14,7 +16,7 @@ class K6Stage:
 @dataclass(frozen=True)
 class K6Config:
     script_path: Path
-    target_url: str
+    target_url: str | Resource[str]
     summary_output_path: Path
     stages: tuple[K6Stage, ...] = ()
     env: dict[str, str] = field(default_factory=dict)

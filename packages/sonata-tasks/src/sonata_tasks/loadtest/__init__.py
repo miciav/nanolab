@@ -16,7 +16,6 @@ from sonata_tasks.loadtest.models import K6RunResult, TimeWindow
 from sonata_tasks.loadtest.tasks import (
     CapturePrometheusSnapshot,
     FetchVmResults,
-    RunK6,
     WriteK6Report,
     WriteLoadtestSummary,
 )
@@ -36,10 +35,8 @@ class LoadtestOutcome:
 
     The legacy tasks read each other's results off attributes: the Prometheus
     snapshot took `lambda: run_k6.result.started_at`, the summary took the
-    verifier object, and the gate took the RunK6 instance. That is a temporal
-    coupling held together by convention — `RunK6.result` raises
-    "has not been called" if anyone gets the order wrong, which is exactly what
-    happens to `--only metrics.evaluate_gate` today.
+    verifier object, while the gate consumed a mutable result attribute. That
+    temporal coupling made an out-of-order step fail obscurely.
 
     Here it travels forward through `inputs.upstream()` instead, so a step can
     only see what genuinely ran before it.
@@ -77,7 +74,7 @@ class RunK6Task(Task[LoadtestOutcome]):
     def __init__(
         self,
         *,
-        run_k6: RunK6,
+        run_k6: Task[K6RunResult],
         watcher: ReplicaWatcher | None = None,
         title: str = "Run k6",
     ) -> None:
@@ -85,14 +82,17 @@ class RunK6Task(Task[LoadtestOutcome]):
         self._run_k6 = run_k6
         self._watcher = watcher
 
+    def _run(self) -> K6RunResult:
+        return self._run_k6.run(TaskInputs.empty()).value
+
     @override
     def run(self, inputs: TaskInputs) -> TaskOutcome[LoadtestOutcome]:
         del inputs
         if self._watcher is None:
-            return TaskOutcome(value=LoadtestOutcome(k6=self._run_k6.run()))
+            return TaskOutcome(value=LoadtestOutcome(k6=self._run()))
         self._watcher.start()
         try:
-            result = self._run_k6.run()
+            result = self._run()
         finally:
             self._watcher.stop()
         return TaskOutcome(value=LoadtestOutcome(k6=result))
@@ -218,9 +218,8 @@ def loadtest_composite(
 
     One unit because the steps are not independently runnable: every one after
     the run needs what the run produced. The legacy workflow made them separate
-    tasks that reached into each other's attributes, so selecting one on its own
-    raised "RunK6.run() has not been called" — a granularity that looked real
-    and was not. Here the steps show up in the event stream instead, and
+    tasks that reached into each other's attributes. Here the steps show up in
+    the event stream instead, and
     `--only` names the load test, which is the thing you can actually re-run.
     """
     return Steps(title=title, steps=(preflight, prepare, run_k6, *steps_after_run))

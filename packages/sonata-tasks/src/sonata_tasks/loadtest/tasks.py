@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Callable
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -13,79 +13,6 @@ from sonata_tasks.loadtest.ports import PrometheusClient, RemoteFileFetcher
 
 if TYPE_CHECKING:
     from sonata_tasks.loadtest.autoscaling import VerifyAutoscalingReplicas
-    from sonata_tasks.loadtest.models import K6Config, K6RunResult
-    from sonata_tasks.tasks.executors import VmCommandRunner
-
-
-def _build_k6_argv(config: "K6Config") -> tuple[str, ...]:
-    args: list[str] = [
-        "k6",
-        "run",
-        "--summary-export",
-        str(config.summary_output_path),
-        "--summary-trend-stats",
-        "avg,min,med,max,p(50),p(90),p(95),p(99)",
-    ]
-    if config.vus is not None:
-        args.extend(["--vus", str(config.vus)])
-    if config.duration is not None:
-        args.extend(["--duration", config.duration])
-    if config.vus is None and config.duration is None:
-        for stage in config.stages:
-            args.extend(["--stage", f"{stage.duration}:{stage.target}"])
-    for key, value in config.env.items():
-        args.extend(["-e", f"{key}={value}"])
-    if config.payload_path is not None:
-        args.extend(["-e", f"NANOFAAS_PAYLOAD={config.payload_path}"])
-    args.append(str(config.script_path))
-    return tuple(args)
-
-
-@dataclass
-class RunK6:
-    task_id: str
-    title: str
-    runner: "VmCommandRunner"
-    config: "K6Config"
-    remote_dir: str
-    _result: "K6RunResult | None" = field(default=None, init=False, repr=False, compare=False)
-
-    def run(self) -> "K6RunResult":
-        from sonata_tasks.loadtest.models import K6RunResult
-
-        started_at = datetime.now(timezone.utc)
-        result = self.runner.run_vm_command(
-            _build_k6_argv(self.config),
-            env={},
-            remote_dir=self.remote_dir,
-            dry_run=False,
-        )
-        ended_at = datetime.now(timezone.utc)
-        # k6 exit 99 = thresholds breached, but the test ran to completion and wrote
-        # the summary, so tolerate it (recorded as passed=False) and let the pipeline
-        # fetch the report. Any other non-zero exit means k6 failed to run (e.g. the
-        # script is missing or the summary path is unwritable) and produced no summary
-        # — raise so the failure is legible at this step instead of surfacing later as
-        # a confusing "summary not found" fetch error.
-        if result.return_code not in (0, 99):
-            raise RuntimeError(
-                result.stderr
-                or result.stdout
-                or f"k6 run failed (exit {result.return_code})"
-            )
-        self._result = K6RunResult(
-            summary_path=self.config.summary_output_path,
-            started_at=started_at,
-            ended_at=ended_at,
-            passed=result.return_code == 0,
-        )
-        return self._result
-
-    @property
-    def result(self) -> "K6RunResult":
-        if self._result is None:
-            raise RuntimeError("RunK6.run() has not been called")
-        return self._result
 
 
 @dataclass

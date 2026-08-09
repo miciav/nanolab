@@ -89,6 +89,7 @@ def test_multipass_k8s_provisioning_composes_lifecycle_and_bootstrap_tasks(
         "provision-k3s.yml",
         "ensure-registry.yml",
         "configure-k3s-registry.yml",
+        "install-k6.yml",
     ]
     assert _commands(orchestrator)[-1][0] == "rsync"
     assert orchestrator.events[-1] == ("teardown", "stack")
