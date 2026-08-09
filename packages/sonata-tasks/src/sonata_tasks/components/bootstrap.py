@@ -129,6 +129,7 @@ def plan_vm_provision_base(
     context: ScenarioExecutionContext,
     *,
     discover_private_key: bool = True,
+    install_uv: bool = False,
 ) -> tuple[ScenarioOperation, ...]:
     return (
         _ansible_operation(
@@ -138,6 +139,7 @@ def plan_vm_provision_base(
             playbook_name="provision-base.yml",
             extra_vars={
                 "install_helm": "true",
+                "install_uv": str(install_uv).lower(),
                 "helm_version": "3.16.4",
                 "vm_user": context.vm_request.user,
             },

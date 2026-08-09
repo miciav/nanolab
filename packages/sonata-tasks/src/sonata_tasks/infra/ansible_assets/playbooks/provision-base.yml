@@ -5,6 +5,7 @@
   become: true
   vars:
     install_helm: false
+    install_uv: false
     helm_version: "3.16.4"
     vm_user: ubuntu
     helm_arch_map:
@@ -90,6 +91,7 @@
         url: https://astral.sh/uv/install.sh
         dest: /tmp/uv-install.sh
         mode: "0755"
+      when: install_uv | bool
 
     - name: Install uv
       ansible.builtin.shell: /tmp/uv-install.sh
@@ -98,6 +100,7 @@
         creates: /usr/local/bin/uv
       environment:
         UV_INSTALL_DIR: /usr/local/bin
+      when: install_uv | bool
 
     - name: Fail when Helm is requested on an unsupported architecture
       ansible.builtin.fail:

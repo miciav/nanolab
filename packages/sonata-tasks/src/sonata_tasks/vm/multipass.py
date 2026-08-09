@@ -142,32 +142,15 @@ class MultipassVmProvider:
     def _shell_run(self, command: list[str], *, dry_run: bool = False) -> ShellExecutionResult:
         return self.shell.run(command, cwd=self.workspace_root, dry_run=dry_run)
 
-    def _ensure_multipass_authorized_key(self, request: VmRequest) -> None:
-        public_key, _ = self._ssh_credentials()
-        if not public_key:
-            return
-        name = self._vm_name(request)
-        remote_home = self._remote_home(request)
-        authorized_keys = f"{remote_home}/.ssh/authorized_keys"
-        quoted_key = shlex.quote(public_key)
-        if request.user == "root":
-            command = (
-                f"install -d -m 700 {shlex.quote(remote_home)}/.ssh && "
-                f"touch {shlex.quote(authorized_keys)} && "
-                f"chmod 600 {shlex.quote(authorized_keys)} && "
-                f"grep -qxF {quoted_key} {shlex.quote(authorized_keys)} || "
-                f"printf '%s\\n' {quoted_key} >> {shlex.quote(authorized_keys)}"
-            )
-        else:
-            command = (
-                f"sudo install -d -m 700 -o {shlex.quote(request.user)} -g {shlex.quote(request.user)} {shlex.quote(remote_home)}/.ssh && "
-                f"sudo touch {shlex.quote(authorized_keys)} && "
-                f"sudo chown {shlex.quote(request.user)}:{shlex.quote(request.user)} {shlex.quote(authorized_keys)} && "
-                f"sudo chmod 600 {shlex.quote(authorized_keys)} && "
-                f"sudo -u {shlex.quote(request.user)} bash -lc "
-                f"\"grep -qxF {quoted_key} {shlex.quote(authorized_keys)} || printf '%s\\\\n' {quoted_key} >> {shlex.quote(authorized_keys)}\""
-            )
-        self._client.get_vm(name).exec(["bash", "-lc", command])
+    def _ssh_options(self) -> list[str]:
+        _, private_key = self._ssh_credentials()
+        options = ["-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null"]
+        if private_key is not None:
+            options.extend(("-i", str(private_key)))
+        return options
+
+    def _ssh_target(self, request: VmRequest, *, dry_run: bool) -> str:
+        return f"{request.user}@{self.connection_host(request, dry_run=dry_run)}"
 
     @staticmethod
     def _build_exec_script(
@@ -216,7 +199,6 @@ class MultipassVmProvider:
             name, cpus=request.cpus, memory=request.memory,
             disk=request.disk, cloud_init_config=cloud_init_config,
         )
-        self._ensure_multipass_authorized_key(request)
         return _ok(launch_cmd)
 
     def teardown(self, request: VmRequest, *, dry_run: bool = False) -> ShellExecutionResult:
@@ -272,15 +254,10 @@ class MultipassVmProvider:
         command: str,
         dry_run: bool = False,
     ) -> ShellExecutionResult:
-        if request.lifecycle == "external":
-            return self._shell_run(
-                ["ssh", f"{request.user}@{request.host}", command], dry_run=dry_run
-            )
-        name = self._vm_name(request)
-        exec_cmd = ["multipass", "exec", name, "--", "bash", "-lc", command]
-        if dry_run:
-            return _ok(exec_cmd)
-        return self._shell_run(exec_cmd, dry_run=False)
+        return self._shell_run(
+            ["ssh", *self._ssh_options(), self._ssh_target(request, dry_run=dry_run), shlex.join(("bash", "-lc", command))],
+            dry_run=dry_run,
+        )
 
     def transfer_to(
         self,
@@ -290,13 +267,10 @@ class MultipassVmProvider:
         destination: str,
         dry_run: bool = False,
     ) -> ShellExecutionResult:
-        if request.lifecycle == "external":
-            return self._shell_run(
-                ["scp", str(source), f"{request.user}@{request.host}:{destination}"],
-                dry_run=dry_run,
-            )
-        command = ["multipass", "transfer", str(source), f"{self._vm_name(request)}:{destination}"]
-        return self._shell_run(command, dry_run=dry_run)
+        return self._shell_run(
+            ["scp", *self._ssh_options(), str(source), f"{self._ssh_target(request, dry_run=dry_run)}:{destination}"],
+            dry_run=dry_run,
+        )
 
     def transfer_from(
         self,
@@ -306,10 +280,7 @@ class MultipassVmProvider:
         destination: Path,
         dry_run: bool = False,
     ) -> ShellExecutionResult:
-        if request.lifecycle == "external":
-            return self._shell_run(
-                ["scp", f"{request.user}@{request.host}:{source}", str(destination)],
-                dry_run=dry_run,
-            )
-        command = ["multipass", "transfer", f"{self._vm_name(request)}:{source}", str(destination)]
-        return self._shell_run(command, dry_run=dry_run)
+        return self._shell_run(
+            ["scp", *self._ssh_options(), f"{self._ssh_target(request, dry_run=dry_run)}:{source}", str(destination)],
+            dry_run=dry_run,
+        )

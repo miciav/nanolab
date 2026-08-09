@@ -214,7 +214,7 @@ def _bootstrap_role(
     context = scenario_context(repo_root, resolved, discover_tool_root() / "assets")
     if role == "stack":
         raw = (
-            *plan_vm_provision_base(context),
+            *plan_vm_provision_base(context, install_uv=True),
             *plan_k3s_install(context),
             *plan_registry_ensure_container(context),
             *plan_k3s_configure_registry(context),
@@ -222,7 +222,7 @@ def _bootstrap_role(
     elif role == "loadgen":
         raw = (*plan_loadtest_install_k6(context), *plan_assets_sync_to_vm(context))
     else:
-        raw = plan_vm_provision_base(context)
+        raw = plan_vm_provision_base(context, install_uv=True)
     operations = retarget_cloud_operations(provider, context, remote_operations(raw))
     run_bootstrap_operations(provider, operations, role=role)
 

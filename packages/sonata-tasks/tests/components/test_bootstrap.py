@@ -42,6 +42,12 @@ def test_provision_base_sets_ansible_config_env() -> None:
     assert any("infra/ansible_assets/ansible.cfg" in str(v) for v in env.values())
 
 
+def test_provision_base_can_skip_uv() -> None:
+    operation = _remote(bs.plan_vm_provision_base(_ctx(), install_uv=False)[0])
+
+    assert "install_uv=false" in operation.argv
+
+
 def test_k3s_install_planner_runs() -> None:
     assert len(bs.plan_k3s_install(_ctx())) >= 1
 

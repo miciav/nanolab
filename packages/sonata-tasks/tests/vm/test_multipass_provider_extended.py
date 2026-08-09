@@ -188,21 +188,23 @@ def test_ensure_running_multipass_calls_client() -> None:
     client.ensure_running.assert_called_once()
 
 
-def test_ensure_running_with_ssh_key_calls_authorize() -> None:
+def test_ensure_running_with_ssh_key_relies_on_cloud_init() -> None:
     provider, shell, client = _make_provider(ssh_public_key="ssh-ed25519 AAAA test@host")
     req = VmRequest(lifecycle="multipass", name="my-vm")
     provider.ensure_running(req, dry_run=False)
     client.ensure_running.assert_called_once()
-    # authorized key should be injected
-    client.get_vm.return_value.exec.assert_called()
+    assert client.ensure_running.call_args.kwargs["cloud_init_config"] == {
+        "ssh_authorized_keys": ["ssh-ed25519 AAAA test@host"]
+    }
+    client.get_vm.return_value.exec.assert_not_called()
 
 
-def test_ensure_running_with_ssh_key_root_user() -> None:
+def test_ensure_running_with_ssh_key_root_user_does_not_exec() -> None:
     provider, shell, client = _make_provider(ssh_public_key="ssh-ed25519 AAAA test@host")
     req = VmRequest(lifecycle="multipass", name="my-vm", user="root")
     provider.ensure_running(req, dry_run=False)
     client.ensure_running.assert_called_once()
-    client.get_vm.return_value.exec.assert_called()
+    client.get_vm.return_value.exec.assert_not_called()
 
 
 def test_teardown_external_lifecycle() -> None:
@@ -293,7 +295,7 @@ def test_exec_argv_with_env_and_cwd() -> None:
     req = VmRequest(lifecycle="multipass", name="my-vm")
     provider.exec_argv(req, ("ls", "-la"), env={"PATH": "/usr/bin"}, cwd="/tmp")
     call_args = shell.run.call_args[0][0]
-    assert "bash" in call_args
+    assert any(part.startswith("bash -lc") for part in call_args)
 
 
 def test_remote_exec_external() -> None:
@@ -318,7 +320,7 @@ def test_remote_exec_multipass_live() -> None:
     provider.remote_exec(req, command="echo hi")
     shell.run.assert_called_once()
     cmd = shell.run.call_args[0][0]
-    assert "multipass" in cmd
+    assert "ssh" in cmd
 
 
 def test_transfer_to_external() -> None:
@@ -336,7 +338,7 @@ def test_transfer_to_multipass() -> None:
     provider.transfer_to(req, source=Path("/local/file"), destination="/remote/file")
     shell.run.assert_called_once()
     cmd = shell.run.call_args[0][0]
-    assert "multipass" in cmd
+    assert "scp" in cmd
 
 
 def test_transfer_from_external() -> None:
@@ -346,3 +348,12 @@ def test_transfer_from_external() -> None:
     shell.run.assert_called_once()
     cmd = shell.run.call_args[0][0]
     assert "scp" in cmd
+
+
+def test_transfer_from_multipass_uses_ssh() -> None:
+    provider, shell, _ = _make_provider()
+    req = VmRequest(lifecycle="multipass", name="my-vm")
+
+    provider.transfer_from(req, source="/remote/file", destination=Path("/local/file"))
+
+    assert "scp" in shell.run.call_args[0][0]
