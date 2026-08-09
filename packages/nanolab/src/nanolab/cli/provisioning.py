@@ -180,7 +180,6 @@ def _role_requests_and_operations(
                         scenario,
                         cloud_context,
                         dedicated_loadgen=True,
-                        include_repo_sync=False,
                     ),
                 ),
             )

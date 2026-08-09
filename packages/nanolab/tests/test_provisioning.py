@@ -160,6 +160,32 @@ def test_loadtest_provisions_dedicated_load_generator_with_k6(tmp_path: Path) ->
     assert teardowns == ["loadgen", "stack"]
 
 
+def test_offload_loadtest_syncs_repository_to_cloud(tmp_path: Path) -> None:
+    orchestrator = RecordingOrchestrator()
+
+    with provision_environment(
+        ScenarioConfig(workflow="offload-loadtest", functions=["word-stats-java"]),
+        EnvironmentConfig.model_validate(
+            {
+                "provider": "multipass",
+                "roles": {
+                    "stack": {"name": "stack"},
+                    "cloud": {"name": "cloud"},
+                    "loadgen": {"name": "loadgen"},
+                },
+            }
+        ),
+        repo_root=tmp_path,
+        orchestrator_factory=lambda _: orchestrator,
+    ):
+        pass
+
+    assert any(
+        command[0] == "rsync" and "cloud.internal:/home/ubuntu/nanofaas/" in command[-1]
+        for command in _commands(orchestrator)
+    )
+
+
 def test_arm_builder_role_is_ensured_torn_down_and_base_provisioned(tmp_path: Path) -> None:
     orchestrator = RecordingOrchestrator()
 
