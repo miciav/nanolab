@@ -7,39 +7,75 @@ from pathlib import Path
 
 import pytest
 
-from sonata_tasks.loadtest.models import K6Config, K6RunResult, K6Stage, PrometheusQuery, TimeWindow
+from sonata_tasks.loadtest.models import K6Config, K6Stage, PrometheusQuery, TimeWindow
 from sonata_tasks.loadtest.tasks import (
     CapturePrometheusSnapshot,
     FetchVmResults,
-    RunK6,
     WriteK6Report,
     WriteLoadtestSummary,
 )
+from sonata_tasks.k6 import K6Task
+from sonata_engine import Resource, TaskInputs, Workflow
+from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 
-@dataclass
-class _VmResult:
-    return_code: int
-    stdout: str = ""
-    stderr: str = ""
-
-
-class _RecordingVmRunner:
-    def __init__(self, return_code: int = 0, stderr: str = "") -> None:
+class _Executor:
+    def __init__(self, return_code: int = 0) -> None:
+        self.spec: CommandTaskSpec | None = None
         self.return_code = return_code
-        self.stderr = stderr
-        self.commands: list[tuple[tuple[str, ...], dict, str | None, bool]] = []
 
-    def run_vm_command(
-        self,
-        argv: tuple[str, ...],
-        *,
-        env: dict[str, str],
-        remote_dir: str | None,
-        dry_run: bool,
-    ) -> _VmResult:
-        self.commands.append((argv, env, remote_dir, dry_run))
-        return _VmResult(return_code=self.return_code, stderr=self.stderr)
+    def run(self, task: CommandTaskSpec, *, dry_run: bool = False) -> TaskResult:
+        self.spec = task
+        return TaskResult(task_id="", status="passed", return_code=self.return_code)
+
+
+def test_k6_task_is_a_role_bound_sonata_command(tmp_path: Path) -> None:
+    executor = _Executor()
+    config = _make_k6_config(tmp_path)
+
+    outcome = K6Task(config, executor=executor, role="stack", remote_dir=".").run(TaskInputs.empty())
+
+    assert executor.spec is not None
+    assert executor.spec.argv[:2] == ("k6", "run")
+    assert executor.spec.remote_dir == "."
+    assert executor.spec.expected_exit_codes == frozenset({0, 99})
+    assert "--summary-trend-stats" in executor.spec.argv
+    assert outcome.value.passed is True
+
+
+def test_k6_task_keeps_a_threshold_failure_as_an_outcome(tmp_path: Path) -> None:
+    executor = _Executor(return_code=99)
+
+    outcome = K6Task(_make_k6_config(tmp_path), executor=executor, role="stack").run(
+        TaskInputs.empty()
+    )
+
+    assert outcome.value.passed is False
+
+
+def test_k6_task_resolves_a_resource_target_url(tmp_path: Path) -> None:
+    endpoint: Resource[str] = Resource(
+        title="Control plane", acquire=lambda _inputs: "http://10.0.0.1:30080", release=lambda *_: None
+    )
+    executor = _Executor()
+    workflow = Workflow(workflow_id="k6")
+    workflow.add(
+        K6Task(
+            K6Config(
+                script_path=Path("/remote/scripts/test.js"),
+                target_url=endpoint,
+                summary_output_path=Path("/remote/results/summary.json"),
+            ),
+            executor=executor,
+            role="stack",
+        ),
+        requires=(endpoint,),
+    )
+
+    workflow.run()
+
+    assert executor.spec is not None
+    assert "NANOFAAS_URL=http://10.0.0.1:30080" in executor.spec.argv
 
 
 def _make_k6_config(tmp_path: Path) -> K6Config:
@@ -50,139 +86,6 @@ def _make_k6_config(tmp_path: Path) -> K6Config:
         stages=(K6Stage(duration="30s", target=5),),
         env={"NANOFAAS_FUNCTION": "my-fn"},
     )
-
-
-def test_run_k6_passes_summary_export_flag(tmp_path: Path) -> None:
-    runner = _RecordingVmRunner()
-    config = _make_k6_config(tmp_path)
-    task = RunK6(task_id="loadgen.run_k6", title="Run k6", runner=runner, config=config, remote_dir="/home/ubuntu")
-    task.run()
-    argv = runner.commands[0][0]
-    assert "--summary-export" in argv
-    assert str(config.summary_output_path) in argv
-
-
-def test_run_k6_requests_release_summary_trend_stats(tmp_path: Path) -> None:
-    runner = _RecordingVmRunner()
-    config = _make_k6_config(tmp_path)
-
-    RunK6(
-        task_id="loadgen.run_k6",
-        title="Run k6",
-        runner=runner,
-        config=config,
-        remote_dir="/home/ubuntu",
-    ).run()
-
-    argv = runner.commands[0][0]
-    index = argv.index("--summary-trend-stats")
-    assert argv[index + 1] == "avg,min,med,max,p(50),p(90),p(95),p(99)"
-
-
-def test_run_k6_injects_env_vars_as_e_flags(tmp_path: Path) -> None:
-    runner = _RecordingVmRunner()
-    config = _make_k6_config(tmp_path)
-    task = RunK6(task_id="loadgen.run_k6", title="Run k6", runner=runner, config=config, remote_dir="/home/ubuntu")
-    task.run()
-    argv = runner.commands[0][0]
-    argv_str = " ".join(argv)
-    assert "NANOFAAS_FUNCTION=my-fn" in argv_str
-
-
-def test_run_k6_returns_k6_run_result_with_timing(tmp_path: Path) -> None:
-    runner = _RecordingVmRunner()
-    config = _make_k6_config(tmp_path)
-    task = RunK6(task_id="loadgen.run_k6", title="Run k6", runner=runner, config=config, remote_dir="/home/ubuntu")
-    result = task.run()
-    assert isinstance(result, K6RunResult)
-    assert result.summary_path == config.summary_output_path
-    assert result.started_at <= result.ended_at
-    assert result.passed is True
-
-
-def test_run_k6_tolerates_threshold_failure_exit_99(tmp_path: Path) -> None:
-    # k6 exits 99 when thresholds are breached: the test ran to completion and wrote
-    # the summary, so we must NOT raise (the report is still fetched) — just record
-    # passed=False.
-    runner = _RecordingVmRunner(return_code=99)
-    config = _make_k6_config(tmp_path)
-    task = RunK6(task_id="loadgen.run_k6", title="Run k6", runner=runner, config=config, remote_dir="/home/ubuntu")
-    result = task.run()
-    assert result.passed is False
-
-
-def test_run_k6_raises_on_run_error_exit(tmp_path: Path) -> None:
-    # Any non-zero exit other than 99 means k6 failed to run (e.g. missing script or
-    # unwritable summary path) and produced no summary. Raise here so the failure is
-    # legible at this step instead of surfacing later as a confusing "summary not
-    # found" fetch error.
-    runner = _RecordingVmRunner(return_code=1, stderr="level=error msg=\"open ...script.js: no such file\"")
-    config = _make_k6_config(tmp_path)
-    task = RunK6(task_id="loadgen.run_k6", title="Run k6", runner=runner, config=config, remote_dir="/home/ubuntu")
-    with pytest.raises(RuntimeError, match="no such file"):
-        task.run()
-
-
-def test_run_k6_result_property_raises_before_run(tmp_path: Path) -> None:
-    runner = _RecordingVmRunner()
-    config = _make_k6_config(tmp_path)
-    task = RunK6(task_id="loadgen.run_k6", title="Run k6", runner=runner, config=config, remote_dir="/home/ubuntu")
-    with pytest.raises(RuntimeError, match="not been called"):
-        _ = task.result
-
-
-def test_run_k6_result_property_returns_after_run(tmp_path: Path) -> None:
-    runner = _RecordingVmRunner()
-    config = _make_k6_config(tmp_path)
-    task = RunK6(task_id="loadgen.run_k6", title="Run k6", runner=runner, config=config, remote_dir="/home/ubuntu")
-    task.run()
-    assert task.result.passed is True
-
-
-def test_run_k6_passes_vus_flag_when_set(tmp_path: Path) -> None:
-    runner = _RecordingVmRunner()
-    config = K6Config(
-        script_path=Path("/remote/scripts/test.js"),
-        target_url="http://10.0.0.1:8080",
-        summary_output_path=Path("/remote/results/summary.json"),
-        vus=10,
-    )
-    task = RunK6(task_id="loadgen.run_k6", title="Run k6", runner=runner, config=config, remote_dir="/home/ubuntu")
-    task.run()
-    argv = runner.commands[0][0]
-    assert "--vus" in argv
-    assert "10" in argv
-    assert "--stage" not in argv
-
-
-def test_run_k6_passes_duration_flag_when_set(tmp_path: Path) -> None:
-    runner = _RecordingVmRunner()
-    config = K6Config(
-        script_path=Path("/remote/scripts/test.js"),
-        target_url="http://10.0.0.1:8080",
-        summary_output_path=Path("/remote/results/summary.json"),
-        duration="2m",
-    )
-    task = RunK6(task_id="loadgen.run_k6", title="Run k6", runner=runner, config=config, remote_dir="/home/ubuntu")
-    task.run()
-    argv = runner.commands[0][0]
-    assert "--duration" in argv
-    assert "2m" in argv
-    assert "--stage" not in argv
-
-
-def test_run_k6_injects_payload_path_when_set(tmp_path: Path) -> None:
-    runner = _RecordingVmRunner()
-    config = K6Config(
-        script_path=Path("/remote/scripts/test.js"),
-        target_url="http://10.0.0.1:8080",
-        summary_output_path=Path("/remote/results/summary.json"),
-        payload_path=Path("/remote/payloads/data.json"),
-    )
-    task = RunK6(task_id="loadgen.run_k6", title="Run k6", runner=runner, config=config, remote_dir="/home/ubuntu")
-    task.run()
-    argv_str = " ".join(runner.commands[0][0])
-    assert "NANOFAAS_PAYLOAD=/remote/payloads/data.json" in argv_str
 
 
 # ---------------------------------------------------------------------------

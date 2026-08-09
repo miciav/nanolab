@@ -273,65 +273,6 @@ def test_replica_watcher_survives_probe_errors() -> None:
     assert watcher.max_observed == 0
 
 
-def test_run_k6_with_replica_watch_starts_and_stops_watcher_around_run() -> None:
-    from sonata_tasks.loadtest.autoscaling import RunK6WithReplicaWatch
-
-    events: list[str] = []
-
-    class _FakeWatcher:
-        max_observed = 2
-
-        def start(self) -> None:
-            events.append("watch.start")
-
-        def stop(self) -> None:
-            events.append("watch.stop")
-
-    class _FakeRunK6:
-        def run(self):
-            events.append("k6.run")
-            return "k6-result"
-
-    task = RunK6WithReplicaWatch(
-        task_id="autoscaling.run_k6",
-        title="Run autoscaling k6",
-        run_k6=_FakeRunK6(),
-        watcher=_FakeWatcher(),
-    )
-
-    assert task.run() == "k6-result"
-    assert events == ["watch.start", "k6.run", "watch.stop"]
-
-
-def test_run_k6_with_replica_watch_stops_watcher_on_k6_failure() -> None:
-    from sonata_tasks.loadtest.autoscaling import RunK6WithReplicaWatch
-
-    events: list[str] = []
-
-    class _FakeWatcher:
-        def start(self) -> None:
-            events.append("watch.start")
-
-        def stop(self) -> None:
-            events.append("watch.stop")
-
-    class _BoomRunK6:
-        def run(self):
-            raise RuntimeError("k6 exploded")
-
-    task = RunK6WithReplicaWatch(
-        task_id="autoscaling.run_k6",
-        title="Run autoscaling k6",
-        run_k6=_BoomRunK6(),
-        watcher=_FakeWatcher(),
-    )
-    try:
-        task.run()
-    except RuntimeError:
-        pass
-    assert events == ["watch.start", "watch.stop"]
-
-
 def test_verify_uses_watcher_max_and_skips_scale_up_polling(monkeypatch) -> None:
     monkeypatch.setattr("sonata_tasks.loadtest.autoscaling.time.sleep", lambda _: None)
 

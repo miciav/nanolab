@@ -5,16 +5,12 @@ from pathlib import Path
 import shlex
 import threading
 import time
-from typing import Any, Protocol
+from typing import Protocol
 from urllib.parse import quote
 
 import httpx
 from sonata_tasks.loadtest.ports import RemoteFileFetcher
 from sonata_tasks.tasks.executors import VmCommandRunner
-
-
-class Runnable(Protocol):
-    def run(self) -> Any: ...
 
 
 class Watcher(Protocol):
@@ -183,23 +179,6 @@ class ReplicaWatcher:
                 # errors are kept for diagnostics.
                 self.errors.append(str(exc))
             self._stop.wait(self._poll_interval)
-
-
-@dataclass
-class RunK6WithReplicaWatch:
-    """Runs k6 while a ReplicaWatcher samples the target deployment."""
-
-    task_id: str
-    title: str
-    run_k6: Runnable
-    watcher: Watcher
-
-    def run(self):
-        self.watcher.start()
-        try:
-            return self.run_k6.run()
-        finally:
-            self.watcher.stop()
 
 
 @dataclass

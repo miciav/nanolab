@@ -18,11 +18,11 @@ from sonata_tasks.offload_loadtest import (
 from sonata_tasks.platform import PlatformFunction, PlatformRequest
 from sonata_tasks.components.helm import control_plane_helm_values
 from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
+from sonata_tasks.k6 import K6Task
 from sonata_tasks.loadtest.models import K6Config
 from sonata_tasks.loadtest.offload_conservation import evaluate_conservation
 from sonata_tasks.loadtest.ports import RemoteFileFetcher
-from sonata_tasks.loadtest.tasks import FetchVmResults, RunK6
-from sonata_tasks.tasks.models import CommandTaskSpec
+from sonata_tasks.loadtest.tasks import FetchVmResults
 from sonata_tasks.vm.models import VmRequest
 from sonata_tasks.vm.multipass import resolve_connection_host
 
@@ -56,34 +56,6 @@ def _role_host(environment: EnvironmentConfig, role: Role, *, dry_run: bool) -> 
     if target.host:
         return target.host
     raise ValueError(f"{environment.provider} {role} requires a host or explicit URLs")
-
-
-class _RoleRunner:
-    """Adapt a role-bound CommandTaskExecutor to the VmCommandRunner protocol RunK6 expects."""
-
-    def __init__(self, bindings: RoleBindings, role: Literal["stack", "loadgen"]) -> None:
-        self._executor = bindings.executor_for(role)
-        self._role: Literal["stack", "loadgen"] = role
-
-    def run_vm_command(
-        self,
-        argv: tuple[str, ...],
-        *,
-        env: dict[str, str],
-        remote_dir: str | None,
-        dry_run: bool,
-    ) -> Any:
-        return self._executor.run(
-            CommandTaskSpec(
-                task_id="offload-loadtest.run_k6.inner",
-                summary="Run k6",
-                argv=argv,
-                role=self._role,
-                env=env,
-                remote_dir=remote_dir,
-            ),
-            dry_run=dry_run,
-        )
 
 
 def _fetch_text(url: str, *, timeout: float = 10.0) -> str:
@@ -306,10 +278,10 @@ def build_offload_loadtest_plan(
             cwd=root,
         ),
         RunK6Task(
-            run_k6=RunK6(
-                task_id="",
+            run_k6=K6Task(
+                executor=executor,
+                role=k6_role,
                 title="Run k6",
-                runner=_RoleRunner(bindings, k6_role),
                 config=K6Config(
                     script_path=script_path,
                     target_url=edge_url,

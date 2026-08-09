@@ -5,7 +5,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from sonata_engine import Resource, Workflow
+from sonata_engine import Resource, Steps, Workflow
 from sonata_tasks.execution.bindings import (
     CommandTaskExecutor,
     RoleBindings,
@@ -13,7 +13,10 @@ from sonata_tasks.execution.bindings import (
 )
 
 from sonata_tasks.command import CommandTask
-from sonata_tasks.http_function import HttpFunctionInvokeTask
+from sonata_tasks.http_function import HttpExecutionSuccessTask, HttpFunctionEnqueueTask, HttpFunctionInvokeTask
+from sonata_tasks.k6 import K6Task
+from sonata_tasks.loadtest.models import K6Config
+from sonata_tasks.metrics import PrometheusMinimumCheckTask
 from sonata_tasks.platform import (
     PlatformFunction,
     PlatformRequest,
@@ -31,6 +34,8 @@ class ValidateWorkflowRequest(PlatformRequest):
     """The common platform request plus the K8s-only queue probe."""
 
     queue_probe: PlatformFunction | None = None
+    extended_k8s_checks: bool = False
+    queue_burst_script: Path | None = None
 
 
 def _inspection_task(
@@ -116,6 +121,29 @@ def build_validate_workflow(
             _inspection_task(request, function, executor, cwd),
             requires=(*requires, registered),
         )
+        if request.backend == "k8s" and request.extended_k8s_checks:
+            workflow.add(
+                Steps(
+                    title=f"Verify async lifecycle of {function.name}",
+                    steps=(
+                        HttpFunctionEnqueueTask(function.name, payload=function.payload, endpoint=platform.endpoint, executor=executor, role=request.role, idempotency_key=f"{function.name}-idempotent", title=f"Enqueue {function.name}", cwd=cwd),
+                        HttpFunctionEnqueueTask(function.name, payload=function.payload, endpoint=platform.endpoint, executor=executor, role=request.role, idempotency_key=f"{function.name}-idempotent", match_upstream=True, title=f"Repeat enqueue {function.name}", cwd=cwd),
+                        HttpExecutionSuccessTask(endpoint=platform.endpoint, executor=executor, role=request.role, cwd=cwd),
+                    ),
+                ),
+                requires=(*requires, *platform.resources, registered),
+            )
+            workflow.add(
+                PrometheusMinimumCheckTask(
+                    url=platform.endpoint,
+                    minimums=(("function_enqueue_total", {"function": function.name}, 1), ("function_success_total", {"function": function.name}, 1)),
+                    executor=executor,
+                    role=request.role,
+                    title=f"Check metrics for {function.name}",
+                    cwd=cwd,
+                ),
+                requires=(*requires, *platform.resources, registered),
+            )
     if request.queue_probe is not None:
         queue_registered = platform.functions[len(request.functions)]
         workflow.add(
@@ -129,4 +157,35 @@ def build_validate_workflow(
             ),
             requires=(*requires, *platform.resources, queue_registered),
         )
+        if request.queue_burst_script is not None:
+            workflow.add(
+                CommandTask(
+                    title="Check k6 is usable",
+                    argv=("k6", "version"),
+                    executor=executor,
+                    role=request.role,
+                ),
+                requires=(*requires, *platform.resources, queue_registered),
+            )
+            workflow.add(
+                K6Task(
+                    K6Config(
+                        script_path=request.queue_burst_script,
+                        target_url=platform.endpoint,
+                        summary_output_path=Path("/tmp/nanolab-k8s-queue-burst.json"),
+                        vus=12,
+                        duration="2s",
+                        env={
+                            "NANOFAAS_FUNCTION": request.queue_probe.name,
+                            "NANOFAAS_PAYLOAD": request.queue_probe.payload,
+                        },
+                    ),
+                    executor=executor,
+                    role=request.role,
+                    remote_dir=".",
+                    title="Burst the synchronous queue",
+                    require_pass=True,
+                ),
+                requires=(*requires, *platform.resources, queue_registered),
+            )
     return workflow

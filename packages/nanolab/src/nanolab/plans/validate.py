@@ -12,6 +12,7 @@ from sonata_tasks.components.helm import control_plane_helm_values
 from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
 
 from nanolab.config.scenario import ScenarioConfig
+from nanolab.config.environment import EnvironmentConfig
 from nanolab.functions.catalog import FunctionDefinition, resolve_function_definition
 from nanolab.workspace.paths import discover_tool_root
 
@@ -143,6 +144,7 @@ def build_validate_plan(
     *,
     repo_root: Path | None = None,
     tool_root: Path | None = None,
+    environment: EnvironmentConfig | None = None,
 ) -> Workflow:
     """Compile the validate scenario into a Sonata workflow.
 
@@ -169,6 +171,26 @@ def build_validate_plan(
         push_function_images=not kubernetes,
     )
     if kubernetes:
+        product_root = tool_root or discover_tool_root()
+        if environment is not None and environment.provider != "local":
+            target = environment.target("stack")
+            home = target.home or ("/root" if target.user == "root" else f"/home/{target.user}")
+            queue_burst_script = Path(home) / "nanolab-assets/k6/k8s-queue-burst.js"
+        else:
+            queue_burst_script = product_root / "assets/k6/k8s-queue-burst.js"
+        request = replace(
+            request,
+            queue_probe=SonataFunction(
+                name="k8s-sync-queue",
+                image="localhost:5000/nanofaas/java-warm-echo:e2e",
+                payload='{"input":{"message":"warmup"}}',
+                build_argv=("./gradlew", ":services:java:warm-echo:bootJar", "--quiet"),
+                image_build_argv=("docker", "build", "-t", "localhost:5000/nanofaas/java-warm-echo:e2e", "-f", "services/java/warm-echo/Dockerfile", "services/java/warm-echo"),
+                concurrency=1,
+            ),
+            extended_k8s_checks=True,
+            queue_burst_script=queue_burst_script,
+        )
         # Both settings are what this workflow exists to exercise: the JUnit queue
         # contracts need admission on, and the metric assertions need the advanced
         # profile. Derived from the request so the chart and the pushed image can

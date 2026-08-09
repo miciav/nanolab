@@ -60,7 +60,9 @@ def _stack_operations(
                 plan_k3s_configure_registry,
             ]
         )
-    if scenario.workflow == "loadtest" and not dedicated_loadgen:
+    if (scenario.workflow == "loadtest" and not dedicated_loadgen) or (
+        scenario.workflow == "validate" and scenario.backend == "k8s"
+    ):
         planners.extend([plan_loadtest_install_k6, plan_assets_sync_to_vm])
     if include_repo_sync:
         planners.append(plan_repo_sync_to_vm)

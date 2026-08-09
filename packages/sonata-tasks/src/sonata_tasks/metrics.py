@@ -9,6 +9,7 @@ from sonata_tasks.execution.roles import ExecutionRole
 from sonata_tasks.tasks.models import TaskResult
 
 from sonata_tasks.command import CommandTask
+from sonata_tasks.http_function import Endpoint
 
 _SAMPLE = re.compile(r"^([A-Za-z_:][A-Za-z0-9_:]*)(?:\{([^}]*)\})?\s+([-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)")
 _LABEL = re.compile(r'([A-Za-z_][A-Za-z0-9_]*)="((?:[^"\\]|\\.)*)"')
@@ -79,7 +80,7 @@ class PrometheusMinimumCheckTask(CommandTask):
     def __init__(
         self,
         *,
-        url: str,
+        url: Endpoint,
         minimums: tuple[tuple[str, Mapping[str, str], float], ...],
         any_minimums: tuple[tuple[tuple[str, ...], Mapping[str, str], float], ...] = (),
         executor: CommandTaskExecutor,
@@ -89,6 +90,11 @@ class PrometheusMinimumCheckTask(CommandTask):
     ) -> None:
         if not minimums and not any_minimums:
             raise ValueError("a metric minimum check needs at least one expectation")
+
+        def resolved(inputs: object) -> str:
+            if isinstance(url, str):
+                return url
+            return str(getattr(inputs, "resource")(url)).replace(":8080", ":8081") + "/actuator/prometheus"
 
         def require(scrape: str, names: tuple[str, ...], labels: Mapping[str, str], minimum: float) -> None:
             for name in names:
@@ -106,8 +112,8 @@ class PrometheusMinimumCheckTask(CommandTask):
                 require(result.stdout, names, labels, minimum)
 
         super().__init__(
-            title=title or f"Check metric values at {url}",
-            argv=("curl", "-fsS", url),
+            title=title or "Check metric values",
+            argv=lambda inputs: ("curl", "-fsS", resolved(inputs)),
             executor=executor,
             role=role,
             cwd=cwd,

@@ -158,9 +158,10 @@ class HttpFunctionEnqueueTask(Task[str]):
         role: ExecutionRole,
         idempotency_key: str,
         match_upstream: bool = False,
+        title: str | None = None,
         cwd: Path | None = None,
     ) -> None:
-        self.title = f"Enqueue {name}"
+        self.title = title or f"Enqueue {name}"
         self._name = name
         self._match_upstream = match_upstream
         self._command = CommandTask(
