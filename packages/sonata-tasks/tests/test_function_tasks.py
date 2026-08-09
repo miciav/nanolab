@@ -186,7 +186,7 @@ def test_enqueue_returns_the_execution_id_and_checks_idempotency() -> None:
     executor = SequencedExecutor(
         responses=[
             '{"executionId":"e-1","status":"queued"}',
-            '{"executionId":"e-1","status":"queued"}',
+            '{"executionId":"e-1","status":"success"}',
         ]
     )
     first = HttpFunctionEnqueueTask(

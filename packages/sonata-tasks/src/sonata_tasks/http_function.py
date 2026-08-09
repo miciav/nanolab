@@ -192,8 +192,9 @@ class HttpFunctionEnqueueTask(Task[str]):
         except json.JSONDecodeError as error:
             raise RuntimeError(f"{self._name}: invalid enqueue response") from error
         execution_id = response.get("executionId")
-        if response.get("status") != "queued" or not isinstance(execution_id, str) or not execution_id:
-            raise RuntimeError(f"{self._name}: expected queued execution, got {response!r}")
+        expected_statuses = {"queued", "success"} if self._match_upstream else {"queued"}
+        if response.get("status") not in expected_statuses or not isinstance(execution_id, str) or not execution_id:
+            raise RuntimeError(f"{self._name}: expected an accepted execution, got {response!r}")
         if self._match_upstream and inputs.upstream() != execution_id:
             raise RuntimeError(
                 f"{self._name}: idempotent enqueue returned {execution_id!r}, "
