@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import nanolab.cli.execution as execution
 from nanolab.cli.execution import build_role_bindings, resolve_loadtest_urls
 from nanolab.config.environment import EnvironmentConfig
 from sonata_tasks.tasks.models import CommandTaskSpec
@@ -74,8 +75,10 @@ def test_container_loadtest_uses_compose_ports() -> None:
     )
 
 
-def test_multipass_stack_uses_named_instance() -> None:
+def test_multipass_stack_uses_provider_ssh_execution(monkeypatch) -> None:
     runner = RecordingRunner()
+    provider = RecordingVmProvider()
+    monkeypatch.setattr(execution, "VmOrchestrator", lambda *_args, **_kwargs: provider, raising=False)
     environment = EnvironmentConfig.model_validate(
         {"provider": "multipass", "roles": {"stack": {"name": "nanofaas-stack"}}}
     )
@@ -85,8 +88,13 @@ def test_multipass_stack_uses_named_instance() -> None:
         CommandTaskSpec(task_id="check", summary="check", argv=("kubectl", "version"), role="stack")
     )
 
-    assert runner.calls[0][0][:4] == ["multipass", "exec", "nanofaas-stack", "--"]
-    assert "cd /home/ubuntu/nanofaas" in runner.calls[0][0][-1]
+    request, argv, env, cwd, dry_run = provider.exec_calls[0]
+    assert request.lifecycle == "multipass"
+    assert request.name == "nanofaas-stack"
+    assert argv == ("kubectl", "version")
+    assert env == {"KUBECONFIG": "/home/ubuntu/.kube/config"}
+    assert cwd == "/home/ubuntu"
+    assert runner.calls == []
 
 
 def test_remote_stack_exports_its_kubeconfig() -> None:
@@ -130,8 +138,10 @@ def test_distinct_external_loadgen_gets_distinct_executor_and_fetcher() -> None:
     assert fetcher is not None
 
 
-def test_multipass_three_role_environment_binds_cloud_like_stack() -> None:
+def test_multipass_three_role_environment_binds_cloud_like_stack(monkeypatch) -> None:
     runner = RecordingRunner()
+    provider = RecordingVmProvider()
+    monkeypatch.setattr(execution, "VmOrchestrator", lambda *_args, **_kwargs: provider)
     environment = EnvironmentConfig.model_validate(
         {
             "provider": "multipass",
@@ -150,8 +160,11 @@ def test_multipass_three_role_environment_binds_cloud_like_stack() -> None:
         CommandTaskSpec(task_id="check", summary="check", argv=("kubectl", "version"), role="cloud")
     )
 
-    assert runner.calls[0][0][:4] == ["multipass", "exec", "nanofaas-cloud", "--"]
-    assert "env KUBECONFIG=/home/ubuntu/.kube/config kubectl version" in runner.calls[0][0][-1]
+    request, argv, env, cwd, dry_run = provider.exec_calls[0]
+    assert request.name == "nanofaas-cloud"
+    assert argv == ("kubectl", "version")
+    assert env == {"KUBECONFIG": "/home/ubuntu/.kube/config"}
+    assert cwd == "/home/ubuntu"
 
 
 def test_external_loadtest_urls_use_stack_node_ports() -> None:

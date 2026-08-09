@@ -17,6 +17,7 @@ from sonata_tasks.tasks.executors import (
 from sonata_tasks.shell import SubprocessShell
 from sonata_tasks.vm.models import VmRequest, vm_remote_home
 from sonata_tasks.vm.multipass import resolve_connection_host
+from sonata_tasks.vm.orchestrator import VmOrchestrator
 from sonata_tasks.vm.runners import OrchestratorVmRunner, VmFileFetcher
 
 from nanolab.cli.vm_provider import vm_request_for_role
@@ -205,11 +206,17 @@ def build_role_bindings(
     if environment.provider == "local":
         return RoleBindings(host=host, stack=host, loadgen=host, cloud=host, arm_builder=host), None
 
-    if environment.provider in {"azure", "proxmox"}:
-        provider = vm_provider or provider_for(
-            vm_request_for_role(environment, "stack", loadtest=True),
-            repo_root or default_tool_paths().nanofaas_root,
-        )
+    if environment.provider in {"multipass", "azure", "proxmox"}:
+        if environment.provider == "multipass":
+            provider = vm_provider or VmOrchestrator(
+                repo_root or default_tool_paths().nanofaas_root,
+                shell=command_runner,
+            )
+        else:
+            provider = vm_provider or provider_for(
+                vm_request_for_role(environment, "stack", loadtest=True),
+                repo_root or default_tool_paths().nanofaas_root,
+            )
 
         def provider_remote(role: str):
             request = vm_request_for_role(environment, role)  # type: ignore[arg-type]
