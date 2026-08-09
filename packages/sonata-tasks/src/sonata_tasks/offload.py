@@ -13,6 +13,7 @@ from sonata_tasks.execution.bindings import (
 )
 
 from sonata_tasks.command import CommandTask
+from sonata_tasks.docker import DockerPushTask
 from sonata_tasks.function import function_resource
 from sonata_tasks.gradle import GradleTask
 from sonata_tasks.http_function import (
@@ -147,6 +148,9 @@ def build_offload_workflow(
     edge: Callable[[], Resource[Any]],
     workflow_id: str = "offload",
     cwd: Path | None = None,
+    push_function_images: bool = False,
+    push_requires: tuple[Resource[Any], ...] = (),
+    function_requires: tuple[Resource[Any], ...] = (),
 ) -> Workflow:
     """Build the offload workflow: two control planes, one hop, three assertions.
 
@@ -182,6 +186,16 @@ def build_offload_workflow(
                 cwd=cwd,
             )
         )
+        if push_function_images:
+            workflow.add(
+                DockerPushTask(
+                    image=function.image,
+                    executor=executor,
+                    role="host",
+                    cwd=cwd,
+                ),
+                requires=push_requires,
+            )
 
     planes = (cloud(), edge())
     sides: dict[str, tuple[Resource[None], ...]] = {}
@@ -194,7 +208,7 @@ def build_offload_workflow(
                 side=side,
                 executor=executor,
                 cwd=cwd,
-                requires=planes,
+                requires=(*planes, *function_requires),
             )
             for manifest, endpoint, side in (
                 (function.cloud_manifest(), request.cloud_endpoint, "cloud"),

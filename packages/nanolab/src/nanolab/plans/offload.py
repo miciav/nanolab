@@ -12,7 +12,8 @@ from sonata_tasks.offload import (
     build_offload_workflow,
 )
 from sonata_tasks.process import managed_process_resource
-from sonata_tasks.execution.bindings import RoleBindings
+from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
+from sonata_tasks.registry import docker_registry_resource
 
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.plans.validate import _resolve_function
@@ -120,6 +121,9 @@ def build_offload_plan(
         edge_endpoint=EDGE_ENDPOINT,
         edge_management=EDGE_MANAGEMENT,
     )
+    registry = docker_registry_resource(
+        executor=RoleBoundCommandTaskExecutor(bindings), role="host"
+    )
     return build_offload_workflow(
         request,
         bindings,
@@ -128,4 +132,7 @@ def build_offload_plan(
             "Acquire cloud control plane", _cloud_argv(root), CLOUD_MANAGEMENT, root
         ),
         edge=_plane("Acquire edge control plane", _edge_argv(root), EDGE_MANAGEMENT, root),
+        push_function_images=True,
+        push_requires=(registry,),
+        function_requires=(registry,),
     )

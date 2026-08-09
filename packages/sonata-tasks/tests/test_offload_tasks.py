@@ -272,6 +272,25 @@ def test_it_compiles_two_control_planes_two_registrations_and_three_checks() -> 
     ]
 
 
+def test_it_pushes_function_images_when_requested() -> None:
+    ids = [
+        task.task_id
+        for task in build_offload_workflow(
+            _request(),
+            RoleBindings(host=ScriptedExecutor(), stack=ScriptedExecutor()),
+            cloud=_plane("cloud"),
+            edge=_plane("edge"),
+            push_function_images=True,
+        ).compile().tasks
+    ]
+
+    assert ids[:3] == [
+        "001.build-control-plane",
+        "002.build-image-word-stats-java",
+        "003.push-image-localhost-5000-nanofaas-java-word-stats-e2e",
+    ]
+
+
 def test_the_no_fallback_check_runs_before_the_registrations_are_released() -> None:
     """It declares the probe's registrations so the compiler keeps them alive
     until it has run. Without that the releases land first and the edge answers

@@ -39,13 +39,13 @@ def _ids() -> list[str]:
 def test_plan_starts_both_control_planes_before_anything_registers() -> None:
     ids = _ids()
 
-    assert ids.index("003.acquire-cloud-control-plane") < ids.index(
-        "004.acquire-edge-control-plane"
+    assert ids.index("005.acquire-cloud-control-plane") < ids.index(
+        "006.acquire-edge-control-plane"
     )
     first_register = next(
         index for index, name in enumerate(ids) if "-on-the-" in name and "acquire" in name
     )
-    assert ids.index("004.acquire-edge-control-plane") < first_register
+    assert ids.index("006.acquire-edge-control-plane") < first_register
 
 
 def test_plan_ends_with_the_negative_check_then_releases_everything() -> None:
@@ -54,14 +54,15 @@ def test_plan_ends_with_the_negative_check_then_releases_everything() -> None:
     happen while the edge still knows the function, or it answers 404."""
     ids = _ids()
 
-    assert ids[-4:] == [
-        "010.release-word-stats-java-on-the-edge",
-        "011.release-word-stats-java-on-the-cloud",
-        "012.release-edge-control-plane",
-        "013.release-cloud-control-plane",
+    assert ids[-5:] == [
+        "012.release-word-stats-java-on-the-edge",
+        "013.release-word-stats-java-on-the-cloud",
+        "014.release-edge-control-plane",
+        "015.release-cloud-control-plane",
+        "016.release-local-registry",
     ]
-    assert ids.index("009.verify-word-stats-java-has-no-local-fallback") < ids.index(
-        "010.release-word-stats-java-on-the-edge"
+    assert ids.index("011.verify-word-stats-java-has-no-local-fallback") < ids.index(
+        "012.release-word-stats-java-on-the-edge"
     )
 
 
