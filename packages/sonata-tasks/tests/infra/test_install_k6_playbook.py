@@ -22,3 +22,7 @@ def test_install_k6_uses_github_binary_not_arm64_broken_apt() -> None:
     # Installs from the arch-correct GitHub release tarball (amd64 + arm64).
     assert "github.com/grafana/k6/releases/download" in text
     assert "linux-{{ k6_arch }}.tar.gz" in text
+
+
+def test_install_k6_prepares_ansible_remote_tmp() -> None:
+    assert "Ensure Ansible remote_tmp directory has correct permissions" in _playbook_text()

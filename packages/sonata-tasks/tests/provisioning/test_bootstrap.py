@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import pytest
+
 from sonata_tasks.components.operations import RemoteCommandOperation
 from sonata_tasks.provisioning.bootstrap import (
     remote_operations,
@@ -53,6 +55,23 @@ def test_run_bootstrap_operations_records_each_command() -> None:
     op = RemoteCommandOperation(operation_id="k3s", summary="install", argv=("helm", "install"))
     run_bootstrap_operations(provider, [op], role="stack")
     assert provider.shell.seen[0].argv == ("helm", "install")
+
+
+def test_run_bootstrap_operations_keeps_stdout_failure_alongside_stderr() -> None:
+    @dataclass
+    class FailingShell:
+        def run(self, argv: list[str], *, cwd, env, dry_run: bool) -> TaskResult:
+            return TaskResult(
+                task_id="x", status="failed", return_code=2,
+                stdout="fatal: k6 download failed", stderr="warning: remote_tmp"
+            )
+
+    provider = FakeOrchestrator(shell=FailingShell())
+    with pytest.raises(RuntimeError, match="fatal: k6 download failed") as error:
+        run_bootstrap_operations(
+            provider, [RemoteCommandOperation(operation_id="k6", summary="install", argv=("k6",))], role="loadgen"
+        )
+    assert "warning: remote_tmp" in str(error.value)
 
 
 def test_retarget_cloud_operations_uses_ssh_endpoint() -> None:

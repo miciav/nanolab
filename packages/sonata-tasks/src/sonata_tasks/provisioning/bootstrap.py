@@ -50,7 +50,7 @@ class OperationTask:
     def run(self) -> TaskResult:
         result = self.executor.run(self.spec)
         if result.status != "passed":
-            detail = result.stderr.strip() or result.stdout.strip() or "no output"
+            detail = "\n".join(part for part in (result.stdout.strip(), result.stderr.strip()) if part) or "no output"
             raise RuntimeError(
                 f"{self.task_id} failed (exit {result.return_code}): {detail}"
             )

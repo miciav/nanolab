@@ -11,6 +11,14 @@
       aarch64: arm64
       arm64: arm64
   pre_tasks:
+    - name: Ensure Ansible remote_tmp directory has correct permissions
+      ansible.builtin.file:
+        path: /root/.ansible/tmp
+        state: directory
+        mode: "0755"
+        owner: root
+        group: root
+
     - name: Ensure python3 is present on the target
       ansible.builtin.raw: |
         if command -v python3 >/dev/null 2>&1; then
