@@ -64,7 +64,7 @@
           - ca-certificates
           - tar
           - unzip
-          - openjdk-21-jdk-headless
+          - openjdk-25-jdk-headless
           - docker.io
           - docker-buildx
           - skopeo

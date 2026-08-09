@@ -168,3 +168,11 @@ def test_provision_base_installs_uv() -> None:
 
     assert "Install uv" in base
     assert "UV_INSTALL_DIR" in base or "command -v uv" in base
+
+
+def test_provision_base_installs_the_project_jdk() -> None:
+    base = (
+        bundled_ansible_root() / "playbooks" / "provision-base.yml"
+    ).read_text(encoding="utf-8")
+
+    assert "openjdk-25-jdk-headless" in base
