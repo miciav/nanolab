@@ -93,7 +93,7 @@ def test_multipass_stack_uses_provider_ssh_execution(monkeypatch) -> None:
     assert request.name == "nanofaas-stack"
     assert argv == ("kubectl", "version")
     assert env == {"KUBECONFIG": "/home/ubuntu/.kube/config"}
-    assert cwd == "/home/ubuntu"
+    assert cwd == "/home/ubuntu/nanofaas"
     assert runner.calls == []
 
 
@@ -164,7 +164,7 @@ def test_multipass_three_role_environment_binds_cloud_like_stack(monkeypatch) ->
     assert request.name == "nanofaas-cloud"
     assert argv == ("kubectl", "version")
     assert env == {"KUBECONFIG": "/home/ubuntu/.kube/config"}
-    assert cwd == "/home/ubuntu"
+    assert cwd == "/home/ubuntu/nanofaas"
 
 
 def test_external_loadtest_urls_use_stack_node_ports() -> None:

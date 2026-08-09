@@ -232,7 +232,11 @@ def build_role_bindings(
                 _ProviderRunner(
                     OrchestratorVmRunner(provider, request),
                     default_env=default_env,
-                    default_dir=vm_remote_home(request),
+                    default_dir=(
+                        f"{vm_remote_home(request)}/nanofaas"
+                        if environment.provider == "multipass"
+                        else vm_remote_home(request)
+                    ),
                 )
             )
             return RetargetingCommandTaskExecutor(executor, "vm"), request
