@@ -127,6 +127,9 @@ def test_http_register_posts_the_same_manifest() -> None:
     argv = executor.seen[0].argv
     assert task.title == "Register word-stats"
     assert argv[0] == "curl"
+    assert "--fail-with-body" in argv
+    assert "--retry" in argv
+    assert "--retry-max-time" in argv
     assert argv[-1] == "http://cp:8080/v1/functions"
     assert MANIFEST.json() in argv
 

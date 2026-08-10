@@ -101,6 +101,15 @@ def test_a_failing_command_falls_back_to_stdout_then_to_a_placeholder() -> None:
         CommandTask(title="Apply", argv=("cli",), executor=silent).run(TaskInputs.empty())
 
 
+def test_a_failing_command_keeps_stdout_when_stderr_is_present() -> None:
+    executor = RecordingExecutor(
+        result=TaskResult(task_id="", status="failed", return_code=22, stderr="curl: (22)", stdout="Kubernetes client unavailable")
+    )
+
+    with pytest.raises(RuntimeError, match=r"(?s)curl: \(22\).*Kubernetes client unavailable"):
+        CommandTask(title="Register", argv=("curl",), executor=executor).run(TaskInputs.empty())
+
+
 def test_expected_exit_codes_reach_the_spec() -> None:
     executor = RecordingExecutor()
     task = CommandTask(

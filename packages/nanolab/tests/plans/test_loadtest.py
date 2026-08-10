@@ -355,6 +355,29 @@ def test_loadtest_plan_deploys_exact_prebuilt_images(tmp_path: Path) -> None:
     assert function_image in register
 
 
+def test_remote_prebuilt_loadtest_uses_the_staged_chart_path(tmp_path: Path) -> None:
+    executor = RecordingExecutor()
+    staged_source = Path("/home/azureuser/nanofaas-release/v0.18.3/source")
+
+    workflow = build_loadtest_plan(
+        SCENARIO,
+        EnvironmentConfig.model_validate(
+            {"provider": "multipass", "roles": {"stack": {"name": "stack"}}}
+        ),
+        RoleBindings(host=executor, stack=executor),
+        control_plane_url="http://stack:30080",
+        prometheus_client=NoopPrometheus(),
+        run_dir=tmp_path,
+        fetcher=FakeFetcher(),
+        prebuilt_control_plane_image="localhost:5000/nanofaas/control-plane:v0.18.3-amd64",
+        prebuilt_function_images={"word-stats-java": "localhost:5000/nanofaas/java-word-stats:v0.18.3-amd64"},
+        remote_repo_root=staged_source,
+    )
+
+    install = next(command for command in _run(workflow, executor) if "helm upgrade" in command)
+    assert str(staged_source / "deploy/helm/nanofaas") in install
+
+
 def test_prebuilt_loadtest_requires_function_images(tmp_path: Path) -> None:
     executor = RecordingExecutor()
 
@@ -477,3 +500,38 @@ def test_autoscaling_loadtest_builds_registers_and_observes_scaler(tmp_path: Pat
     # The verification is a step of the composite, not a unit of its own: it
     # needs the samples the watcher took while k6 ran.
     assert any("get deployment" in command for command in commands)
+
+
+def test_autoscaling_loadtest_rejects_nonzero_initial_replicas_before_k6(
+    tmp_path: Path,
+) -> None:
+    @dataclass
+    class NonZeroReplicaExecutor(RecordingExecutor):
+        def run(self, task: CommandTaskSpec, *, dry_run: bool = False) -> TaskResult:
+            self.seen.append(task)
+            command = " ".join(task.argv)
+            stdout = (
+                "1"
+                if "{.spec.replicas}" in command
+                else "10.43.0.7"
+                if "get service control-plane" in command
+                else ""
+            )
+            return TaskResult(task_id=task.task_id, status="passed", return_code=0, stdout=stdout)
+
+    executor = NonZeroReplicaExecutor()
+    workflow = build_loadtest_plan(
+        ScenarioConfig(workflow="loadtest", functions=["word-stats-java"], autoscaling=True),
+        EnvironmentConfig.model_validate(
+            {"provider": "multipass", "roles": {"stack": {"name": "stack"}}}
+        ),
+        RoleBindings(host=executor, stack=executor),
+        control_plane_url="http://stack:30080",
+        prometheus_client=NoopPrometheus(),
+        run_dir=tmp_path,
+        fetcher=FakeFetcher(),
+    )
+
+    commands = _run(workflow, executor)
+
+    assert not any(command.startswith("k6 run") for command in commands)

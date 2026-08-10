@@ -11,6 +11,7 @@ from sonata_tasks.loadtest.autoscaling import (
     AutoscalingSummary,
     ReplicaWatcher,
     VerifyAutoscalingReplicas,
+    VerifyInitialAutoscalingReplicas,
 )
 from sonata_tasks.loadtest.models import K6RunResult, TimeWindow
 from sonata_tasks.loadtest.tasks import (
@@ -76,11 +77,13 @@ class RunK6Task(Task[LoadtestOutcome]):
         *,
         run_k6: Task[K6RunResult],
         watcher: ReplicaWatcher | None = None,
+        initial_replicas: VerifyInitialAutoscalingReplicas | None = None,
         title: str = "Run k6",
     ) -> None:
         self.title = title
         self._run_k6 = run_k6
         self._watcher = watcher
+        self._initial_replicas: VerifyInitialAutoscalingReplicas | None = initial_replicas
 
     def _run(self) -> K6RunResult:
         return self._run_k6.run(TaskInputs.empty()).value
@@ -88,6 +91,8 @@ class RunK6Task(Task[LoadtestOutcome]):
     @override
     def run(self, inputs: TaskInputs) -> TaskOutcome[LoadtestOutcome]:
         del inputs
+        if self._initial_replicas is not None:
+            self._initial_replicas.run()
         if self._watcher is None:
             return TaskOutcome(value=LoadtestOutcome(k6=self._run()))
         self._watcher.start()

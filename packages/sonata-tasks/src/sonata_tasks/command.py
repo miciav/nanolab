@@ -42,7 +42,8 @@ class CommandTask(Task[TaskResult]):
     def run(self, inputs: TaskInputs) -> TaskOutcome[TaskResult]:
         result = self.executor.run(self._spec(inputs))
         if result.status != "passed":
-            detail = result.stderr.strip() or result.stdout.strip() or "no output"
+            detail = "\n".join(part for part in (result.stderr.strip(), result.stdout.strip()) if part)
+            detail = detail or "no output"
             raise RuntimeError(f"{self.title} failed (exit {result.return_code}): {detail}")
         if self.verify is not None:
             self.verify(result)

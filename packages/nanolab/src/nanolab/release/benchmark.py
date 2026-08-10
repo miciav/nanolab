@@ -157,6 +157,7 @@ def run_sonata_benchmark(
         prometheus_client=HttpPrometheusClient(endpoints.prometheus),
         run_dir=run_dir,
         remote_run_dir=remote_run_dir,
+        remote_repo_root=plan.repo_root,
         fetcher=fetcher,
         repo_root=plan.repo_root,
         prebuilt_control_plane_image=_pinned_native_image_from_evidence(

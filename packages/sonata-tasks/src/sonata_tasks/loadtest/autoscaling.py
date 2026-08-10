@@ -181,6 +181,22 @@ class ReplicaWatcher:
             self._stop.wait(self._poll_interval)
 
 
+@dataclass(frozen=True)
+class VerifyInitialAutoscalingReplicas:
+    """Require a scale-to-zero run to begin with no desired or ready replicas."""
+
+    probe: ReplicaStatusProbe
+
+    def run(self) -> None:
+        desired = self.probe.desired_replicas()
+        ready = self.probe.ready_replicas()
+        if desired != 0 or ready != 0:
+            raise RuntimeError(
+                "initial autoscaling replicas: expected desired=0 and ready=0, "
+                f"got desired={desired} and ready={ready}"
+            )
+
+
 @dataclass
 class VerifyAutoscalingReplicas:
     task_id: str

@@ -29,6 +29,7 @@ from sonata_tasks.loadtest.autoscaling import (
     ReplicaProbe,
     ReplicaWatcher,
     ReplicaStatusProbe,
+    VerifyInitialAutoscalingReplicas,
     VerifyAutoscalingReplicas,
 )
 from sonata_tasks.loadtest.models import K6Config, K6Stage, PrometheusQuery
@@ -140,6 +141,7 @@ def build_loadtest_plan(
     prometheus_client: PrometheusClient,
     run_dir: Path,
     remote_run_dir: Path | None = None,
+    remote_repo_root: Path | None = None,
     fetcher: RemoteFileFetcher | object | None = None,
     repo_root: Path | None = None,
     tool_root: Path | None = None,
@@ -244,6 +246,11 @@ def build_loadtest_plan(
         build_control_plane=backend == "k8s",
         push_function_images=backend == "container" and not prebuilt,
         control_plane_image=prebuilt_control_plane_image,
+        helm_chart=(
+            str(remote_repo_root / "deploy/helm/nanofaas")
+            if remote_repo_root is not None
+            else "deploy/helm/nanofaas"
+        ),
     )
     if backend == "k8s":
         # NodePort because the load generator reaches the control plane from outside
@@ -420,7 +427,15 @@ def build_loadtest_plan(
                 executor=executor,
                 role=load_role,
             ),
-            run_k6=RunK6Task(run_k6=run_k6, watcher=watcher),
+            run_k6=RunK6Task(
+                run_k6=run_k6,
+                watcher=watcher,
+                initial_replicas=(
+                    VerifyInitialAutoscalingReplicas(replica_probe)
+                    if replica_probe is not None
+                    else None
+                ),
+            ),
             steps_after_run=tuple(after),
         ),
     )

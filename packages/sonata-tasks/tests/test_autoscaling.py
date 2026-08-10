@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from sonata_tasks.loadtest.autoscaling import HttpReplicaProbe, VerifyAutoscalingReplicas
+from sonata_tasks.loadtest.autoscaling import (
+    HttpReplicaProbe,
+    VerifyAutoscalingReplicas,
+    VerifyInitialAutoscalingReplicas,
+)
 
 
 @dataclass
@@ -59,6 +63,22 @@ def test_http_replica_probe_reads_provider_neutral_status(monkeypatch) -> None:
         "http://127.0.0.1:8080/v1/functions/word%20stats%2Fjava/replicas",
         "http://127.0.0.1:8080/v1/functions/word%20stats%2Fjava/replicas",
     ]
+
+
+def test_initial_autoscaling_replicas_requires_zero_desired_and_ready() -> None:
+    class _Probe:
+        def desired_replicas(self) -> int:
+            return 0
+
+        def ready_replicas(self) -> int:
+            return 1
+
+    try:
+        VerifyInitialAutoscalingReplicas(probe=_Probe()).run()
+    except RuntimeError as exc:
+        assert "expected desired=0 and ready=0" in str(exc)
+        return
+    raise AssertionError("expected RuntimeError")
 
 
 def test_verify_autoscaling_replicas_observes_scale_up_and_down(monkeypatch) -> None:

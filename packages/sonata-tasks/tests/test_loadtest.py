@@ -96,6 +96,36 @@ def test_the_watcher_brackets_the_run() -> None:
     assert watcher.events == ["start", "stop"]
 
 
+def test_initial_replica_check_runs_before_load_sampling() -> None:
+    events: list[str] = []
+
+    class InitialCheck:
+        def run(self) -> None:
+            events.append("initial")
+
+    class OrderedRun:
+        def run(self, inputs: TaskInputs) -> TaskOutcome[K6RunResult]:
+            del inputs
+            events.append("k6")
+            return TaskOutcome(value=_k6())
+
+    @dataclass
+    class OrderedWatcher:
+        def start(self) -> None:
+            events.append("start")
+
+        def stop(self) -> None:
+            events.append("stop")
+
+    _ = RunK6Task(  # pyright: ignore[reportArgumentType]
+        run_k6=OrderedRun(),
+        watcher=OrderedWatcher(),
+        initial_replicas=InitialCheck(),
+    ).run(TaskInputs.empty())
+
+    assert events == ["initial", "start", "k6", "stop"]
+
+
 def test_the_watcher_stops_even_when_k6_blows_up() -> None:
     class Exploding:
         def run(self, inputs: TaskInputs) -> TaskOutcome[K6RunResult]:
