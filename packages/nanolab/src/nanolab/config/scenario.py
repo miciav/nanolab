@@ -60,6 +60,7 @@ class ScenarioConfig(BaseModel):
     resources: dict[str, ResourceSpec] = Field(default_factory=dict)
     autoscaling: bool = False
     autoscaling_strategy: AutoscalingStrategy = Field(default="INTERNAL", alias="autoscalingStrategy")
+    hpa_scale_to_zero: bool = Field(default=False, alias="hpaScaleToZero")
     release: ReleaseConfig | None = None
 
     @model_validator(mode="after")
@@ -76,6 +77,8 @@ class ScenarioConfig(BaseModel):
             raise ValueError("HPA autoscaling requires autoscaling=true")
         if self.autoscaling_strategy == "HPA" and self.backend == "container":
             raise ValueError("HPA autoscaling requires the k8s backend")
+        if self.hpa_scale_to_zero and self.autoscaling_strategy != "HPA":
+            raise ValueError("HPA scale-to-zero requires autoscalingStrategy=HPA")
         if self.workflow == "release" and self.release is None:
             raise ValueError("release workflow requires a 'release' config block")
         return self

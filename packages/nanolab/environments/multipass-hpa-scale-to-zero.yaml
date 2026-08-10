@@ -1,0 +1,5 @@
+provider: multipass
+roles:
+  stack:
+    name: nanofaas-hpa-scale-to-zero
+    hpaScaleToZero: true

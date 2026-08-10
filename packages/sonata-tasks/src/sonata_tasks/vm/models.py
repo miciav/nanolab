@@ -36,6 +36,7 @@ class VmRequest(BaseModel):
     cpus: int = 4
     memory: str = "12G"
     disk: str = "30G"
+    hpa_scale_to_zero: bool = False
     azure_vm_size: str = "Standard_D4s_v5"
     azure_resource_group: str | None = None
     azure_location: str | None = None

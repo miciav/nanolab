@@ -91,6 +91,31 @@ def test_hpa_autoscaling_is_available_only_for_kubernetes_loadtests() -> None:
         )
 
 
+def test_hpa_scale_to_zero_requires_hpa() -> None:
+    config = ScenarioConfig.model_validate(
+        {
+            "workflow": "loadtest",
+            "backend": "k8s",
+            "functions": ["word-stats-java"],
+            "autoscaling": True,
+            "autoscalingStrategy": "HPA",
+            "hpaScaleToZero": True,
+        }
+    )
+
+    assert config.hpa_scale_to_zero is True
+
+    with pytest.raises(ValidationError, match="HPA scale-to-zero requires"):
+        ScenarioConfig.model_validate(
+            {
+                "workflow": "loadtest",
+                "backend": "k8s",
+                "functions": ["word-stats-java"],
+                "hpaScaleToZero": True,
+            }
+        )
+
+
 def test_autoscaling_is_rejected_outside_loadtest() -> None:
     with pytest.raises(ValidationError, match="autoscaling is only supported"):
         ScenarioConfig(

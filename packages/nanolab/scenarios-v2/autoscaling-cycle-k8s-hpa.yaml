@@ -2,5 +2,6 @@ workflow: loadtest
 backend: k8s
 autoscaling: true
 autoscalingStrategy: HPA
+hpaScaleToZero: true
 functions:
   - word-stats-java

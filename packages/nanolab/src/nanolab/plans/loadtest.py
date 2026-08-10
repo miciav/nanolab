@@ -164,11 +164,13 @@ def build_loadtest_plan(
     if backend == "container" and environment.provider != "local":
         raise ValueError("container load-test requires a local environment")
     hpa = config.autoscaling_strategy == "HPA"
+    hpa_scale_to_zero = hpa and config.hpa_scale_to_zero
+    replica_floor = 0 if hpa_scale_to_zero or not hpa else 1
     scaling_config: dict[str, object] | None = None
     if config.autoscaling:
         scaling_config = {
             "strategy": config.autoscaling_strategy,
-            "minReplicas": 1 if hpa else 0,
+            "minReplicas": replica_floor,
             "maxReplicas": 5,
             "metrics": [{"type": "in_flight", "target": "2"}],
         }
@@ -361,7 +363,7 @@ def build_loadtest_plan(
                     remote_dir=_REMOTE_DIR,
                     watcher=watcher,
                     probe=replica_probe,
-                    expected_final_replicas=1 if hpa else 0,
+                    expected_final_replicas=replica_floor,
                 )
             )
         )
@@ -463,7 +465,7 @@ def build_loadtest_plan(
                 watcher=watcher,
                 initial_replicas=(
                     VerifyInitialAutoscalingReplicas(
-                        replica_probe, expected_replicas=1 if hpa else 0
+                        replica_probe, expected_replicas=replica_floor
                     )
                     if replica_probe is not None
                     else None

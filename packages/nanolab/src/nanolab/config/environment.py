@@ -19,6 +19,7 @@ class RoleTarget(BaseModel):
     cpus: int = Field(default=4, gt=0)
     memory: str = "12G"
     disk: str = "30G"
+    hpa_scale_to_zero: bool = Field(default=False, alias="hpaScaleToZero")
 
 
 class AzureEnvironment(BaseModel):

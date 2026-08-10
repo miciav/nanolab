@@ -295,6 +295,7 @@ def plan_k3s_install(
             extra_vars={
                 "vm_user": vm_request.user,
                 "kubeconfig_path": _kubeconfig_path(vm_request),
+                "hpa_scale_to_zero": str(vm_request.hpa_scale_to_zero).lower(),
             },
             discover_private_key=discover_private_key,
         ),

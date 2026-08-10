@@ -9,7 +9,10 @@ from sonata_tasks.vm.models import VmLifecycle, VmRequest
 
 
 def _ctx(
-    *, lifecycle: VmLifecycle = "external", host: str | None = "vm.test"
+    *,
+    lifecycle: VmLifecycle = "external",
+    host: str | None = "vm.test",
+    hpa_scale_to_zero: bool = False,
 ) -> ScenarioExecutionContext:
     return ScenarioExecutionContext(
         repo_root=Path("/repo"),
@@ -18,7 +21,13 @@ def _ctx(
         namespace="nf",
         local_registry="localhost:5000",
         resolved_scenario=None,
-        vm_request=VmRequest(lifecycle=lifecycle, name="nanofaas-e2e", user="ubuntu", host=host),
+        vm_request=VmRequest(
+            lifecycle=lifecycle,
+            name="nanofaas-e2e",
+            user="ubuntu",
+            host=host,
+            hpa_scale_to_zero=hpa_scale_to_zero,
+        ),
         cleanup_vm=True,
         assets_root=Path("/nanolab/assets"),
     )
@@ -50,6 +59,12 @@ def test_provision_base_can_skip_uv() -> None:
 
 def test_k3s_install_planner_runs() -> None:
     assert len(bs.plan_k3s_install(_ctx())) >= 1
+
+
+def test_k3s_install_passes_the_scale_to_zero_feature_gate() -> None:
+    operation = _remote(bs.plan_k3s_install(_ctx(hpa_scale_to_zero=True))[0])
+
+    assert "hpa_scale_to_zero=true" in operation.argv
 
 
 def test_component_definitions_present() -> None:
