@@ -81,6 +81,17 @@ def test_initial_autoscaling_replicas_requires_zero_desired_and_ready() -> None:
     raise AssertionError("expected RuntimeError")
 
 
+def test_initial_autoscaling_replicas_accepts_a_configured_floor() -> None:
+    class _Probe:
+        def desired_replicas(self) -> int:
+            return 1
+
+        def ready_replicas(self) -> int:
+            return 1
+
+    VerifyInitialAutoscalingReplicas(probe=_Probe(), expected_replicas=1).run()
+
+
 def test_verify_autoscaling_replicas_observes_scale_up_and_down(monkeypatch) -> None:
     monkeypatch.setattr("sonata_tasks.loadtest.autoscaling.time.sleep", lambda _: None)
     runner = _Runner(["1", "1", "2", "2", "0"])

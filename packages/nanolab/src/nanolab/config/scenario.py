@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 WorkflowName = Literal["validate", "cli", "loadtest", "offload", "offload-loadtest", "release"]
 BackendName = Literal["container", "k8s"]
 BuildStrategy = Literal["docker", "buildpack"]
+AutoscalingStrategy = Literal["INTERNAL", "HPA"]
 
 
 class ResourceQuantity(BaseModel):
@@ -58,6 +59,7 @@ class ScenarioConfig(BaseModel):
     functions: list[str] = Field(min_length=1)
     resources: dict[str, ResourceSpec] = Field(default_factory=dict)
     autoscaling: bool = False
+    autoscaling_strategy: AutoscalingStrategy = Field(default="INTERNAL", alias="autoscalingStrategy")
     release: ReleaseConfig | None = None
 
     @model_validator(mode="after")
@@ -70,6 +72,10 @@ class ScenarioConfig(BaseModel):
             raise ValueError("resources must refer to selected functions")
         if self.autoscaling and self.workflow != "loadtest":
             raise ValueError("autoscaling is only supported by the loadtest workflow")
+        if self.autoscaling_strategy == "HPA" and not self.autoscaling:
+            raise ValueError("HPA autoscaling requires autoscaling=true")
+        if self.autoscaling_strategy == "HPA" and self.backend == "container":
+            raise ValueError("HPA autoscaling requires the k8s backend")
         if self.workflow == "release" and self.release is None:
             raise ValueError("release workflow requires a 'release' config block")
         return self

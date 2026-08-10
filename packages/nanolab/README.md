@@ -127,6 +127,11 @@ k6, observes autoscaling, and captures Prometheus data. Use an environment with
 a `loadgen` role when k6 must run on a dedicated VM. `--only`, `--from`, and
 `--until` select task subsets.
 
+`autoscaling-cycle-k8s.yaml` verifies NanoFaaS internal scale-to-zero. To test
+Kubernetes HPA instead, run `autoscaling-cycle-k8s-hpa.yaml`; it enables the
+Prometheus Adapter only for that run and verifies the portable HPA cycle
+`1 → N → 1`.
+
 ## Development
 
 For direct development inside this package:

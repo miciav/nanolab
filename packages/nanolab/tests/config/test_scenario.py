@@ -66,6 +66,31 @@ def test_autoscaling_is_opt_in_for_loadtest() -> None:
     assert config.autoscaling is True
 
 
+def test_hpa_autoscaling_is_available_only_for_kubernetes_loadtests() -> None:
+    config = ScenarioConfig.model_validate(
+        {
+            "workflow": "loadtest",
+            "backend": "k8s",
+            "functions": ["word-stats-java"],
+            "autoscaling": True,
+            "autoscalingStrategy": "HPA",
+        }
+    )
+
+    assert config.autoscaling_strategy == "HPA"
+
+    with pytest.raises(ValidationError, match="HPA autoscaling requires the k8s backend"):
+        ScenarioConfig.model_validate(
+            {
+                "workflow": "loadtest",
+                "backend": "container",
+                "functions": ["word-stats-java"],
+                "autoscaling": True,
+                "autoscalingStrategy": "HPA",
+            }
+        )
+
+
 def test_autoscaling_is_rejected_outside_loadtest() -> None:
     with pytest.raises(ValidationError, match="autoscaling is only supported"):
         ScenarioConfig(

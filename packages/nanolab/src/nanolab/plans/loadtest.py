@@ -4,7 +4,7 @@ import json
 from pathlib import Path, PurePosixPath
 from typing import Any, cast
 
-from sonata_engine import Task, Workflow
+from sonata_engine import Steps, Task, Workflow
 from sonata_tasks.command import CommandTask
 from sonata_tasks.compose import DockerComposeProject, docker_compose_resource
 from sonata_tasks.registry import docker_registry_resource
@@ -163,11 +163,12 @@ def build_loadtest_plan(
     backend = config.backend or "k8s"
     if backend == "container" and environment.provider != "local":
         raise ValueError("container load-test requires a local environment")
+    hpa = config.autoscaling_strategy == "HPA"
     scaling_config: dict[str, object] | None = None
     if config.autoscaling:
         scaling_config = {
-            "strategy": "INTERNAL",
-            "minReplicas": 0,
+            "strategy": config.autoscaling_strategy,
+            "minReplicas": 1 if hpa else 0,
             "maxReplicas": 5,
             "metrics": [{"type": "in_flight", "target": "2"}],
         }
@@ -239,7 +240,9 @@ def build_loadtest_plan(
         backend=backend,
         build=config.build,
         functions=functions,
-        additional_modules=("autoscaler", "async-queue", "sync-queue")
+        additional_modules=(
+            ("async-queue", "sync-queue") if hpa else ("autoscaler", "async-queue", "sync-queue")
+        )
         if config.autoscaling
         else (),
         build_images=not prebuilt,
@@ -255,16 +258,17 @@ def build_loadtest_plan(
     if backend == "k8s":
         # NodePort because the load generator reaches the control plane from outside
         # the cluster, unlike validate which curls it from within the VM.
+        helm_values = control_plane_helm_values(
+            namespace=request.namespace,
+            control_plane_image=request.control_plane_image_reference(),
+            expose_node_port=True,
+            metrics_profile="advanced",
+        )
+        if hpa:
+            helm_values["hpaMetricsAdapter.enabled"] = "true"
         request = replace(
             request,
-            helm_values=_set_args(
-                control_plane_helm_values(
-                    namespace=request.namespace,
-                    control_plane_image=request.control_plane_image_reference(),
-                    expose_node_port=True,
-                    metrics_profile="advanced",
-                )
-            ),
+            helm_values=_set_args(helm_values),
         )
 
     load_role: ExecutionRole = "loadgen" if dedicated else "stack"
@@ -357,6 +361,7 @@ def build_loadtest_plan(
                     remote_dir=_REMOTE_DIR,
                     watcher=watcher,
                     probe=replica_probe,
+                    expected_final_replicas=1 if hpa else 0,
                 )
             )
         )
@@ -408,6 +413,37 @@ def build_loadtest_plan(
             str(summary_path.parent),
         )
 
+    preflight: Task[Any] = CommandTask(
+        title="Check k6 is usable",
+        argv=("k6", "version"),
+        executor=executor,
+        role=load_role,
+    )
+    if hpa:
+        hpa_metric_path = (
+            f"/apis/external.metrics.k8s.io/v1beta1/namespaces/{request.namespace}/"
+            f"nanofaas_in_flight?labelSelector=function%3D{target.name}"
+        )
+        preflight = Steps(
+            title="Check HPA prerequisites",
+            steps=(
+                CommandTask(
+                    title="Check HPA external metric is usable",
+                    argv=(
+                        "bash",
+                        "-lc",
+                        f"set -eu; sudo kubectl get hpa fn-{target.name} -n {request.namespace}; "
+                        "for _ in $(seq 1 30); do "
+                        f"sudo kubectl get --raw {hpa_metric_path!r} >/dev/null && exit 0; "
+                        "sleep 2; done; exit 1",
+                    ),
+                    executor=executor,
+                    role="stack",
+                ),
+                preflight,
+            ),
+        )
+
     return build_loadtest_workflow(
         request,
         bindings,
@@ -415,12 +451,7 @@ def build_loadtest_plan(
         requires=platform_requires,
         local_endpoint=control_plane_url,
         load=loadtest_composite(
-            preflight=CommandTask(
-                title="Check k6 is usable",
-                argv=("k6", "version"),
-                executor=executor,
-                role=load_role,
-            ),
+            preflight=preflight,
             prepare=CommandTask(
                 title="Prepare the run directory",
                 argv=prepare_argv,
@@ -431,7 +462,9 @@ def build_loadtest_plan(
                 run_k6=run_k6,
                 watcher=watcher,
                 initial_replicas=(
-                    VerifyInitialAutoscalingReplicas(replica_probe)
+                    VerifyInitialAutoscalingReplicas(
+                        replica_probe, expected_replicas=1 if hpa else 0
+                    )
                     if replica_probe is not None
                     else None
                 ),
