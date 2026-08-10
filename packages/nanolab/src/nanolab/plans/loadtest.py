@@ -447,7 +447,7 @@ def build_loadtest_plan(
                         f"sudo kubectl get --raw {control_plane_metrics_path!r} "
                         "| grep '^function_' || true; "
                         f"sudo kubectl -n {request.namespace} exec deploy/nanofaas-prometheus -- "
-                        "wget -qO- 'http://localhost:9090/api/v1/query?query=function_in_flight' "
+                        "wget -qO- 'http://localhost:9090/api/v1/query?query=function_inFlight' "
                         "|| true; "
                         f"sudo kubectl get --raw {hpa_metric_path!r} || true; exit 1",
                     ),
