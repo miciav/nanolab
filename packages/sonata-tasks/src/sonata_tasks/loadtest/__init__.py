@@ -213,7 +213,7 @@ class FetchResultsTask(Task[LoadtestOutcome]):
 
 def loadtest_composite(
     *,
-    preflight: CommandTask,
+    preflight: Task[Any],
     prepare: CommandTask,
     run_k6: RunK6Task,
     steps_after_run: tuple[Task[Any], ...],

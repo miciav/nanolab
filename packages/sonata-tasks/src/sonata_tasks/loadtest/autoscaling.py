@@ -183,16 +183,18 @@ class ReplicaWatcher:
 
 @dataclass(frozen=True)
 class VerifyInitialAutoscalingReplicas:
-    """Require a scale-to-zero run to begin with no desired or ready replicas."""
+    """Require an autoscaling run to begin at its configured replica floor."""
 
     probe: ReplicaStatusProbe
+    expected_replicas: int = 0
 
     def run(self) -> None:
         desired = self.probe.desired_replicas()
         ready = self.probe.ready_replicas()
-        if desired != 0 or ready != 0:
+        if desired != self.expected_replicas or ready != self.expected_replicas:
             raise RuntimeError(
-                "initial autoscaling replicas: expected desired=0 and ready=0, "
+                "initial autoscaling replicas: "
+                f"expected desired={self.expected_replicas} and ready={self.expected_replicas}, "
                 f"got desired={desired} and ready={ready}"
             )
 
@@ -211,6 +213,7 @@ class VerifyAutoscalingReplicas:
     poll_interval_seconds: int = 5
     watcher: Watcher | None = None
     probe: ReplicaStatusProbe | None = None
+    expected_final_replicas: int = 0
     _result: AutoscalingSummary | None = field(default=None, init=False, repr=False)
 
     @property
@@ -262,15 +265,18 @@ class VerifyAutoscalingReplicas:
 
         time.sleep(self.scale_down_initial_delay_seconds)
         final_desired = self._desired_replicas()
-        if final_desired == 0:
+        if final_desired == self.expected_final_replicas:
             return self._complete(max_replicas, final_desired)
         for _ in range(self.scale_down_polls):
             time.sleep(self.poll_interval_seconds)
             final_desired = self._desired_replicas()
-            if final_desired == 0:
+            if final_desired == self.expected_final_replicas:
                 return self._complete(max_replicas, final_desired)
 
-        raise RuntimeError(f"Scale-down to 0 not observed: desired replicas = {final_desired}")
+        raise RuntimeError(
+            f"Scale-down to {self.expected_final_replicas} not observed: "
+            f"desired replicas = {final_desired}"
+        )
 
 
 @dataclass

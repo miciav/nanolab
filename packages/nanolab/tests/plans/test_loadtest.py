@@ -502,6 +502,44 @@ def test_autoscaling_loadtest_builds_registers_and_observes_scaler(tmp_path: Pat
     assert any("get deployment" in command for command in commands)
 
 
+def test_hpa_autoscaling_loadtest_enables_adapter_and_keeps_one_replica(tmp_path: Path) -> None:
+    executor = RecordingExecutor()
+    config = ScenarioConfig.model_validate(
+        {
+            "workflow": "loadtest",
+            "backend": "k8s",
+            "functions": ["word-stats-java"],
+            "autoscaling": True,
+            "autoscalingStrategy": "HPA",
+        }
+    )
+
+    workflow = build_loadtest_plan(
+        config,
+        EnvironmentConfig.model_validate(
+            {"provider": "multipass", "roles": {"stack": {"name": "stack"}}}
+        ),
+        RoleBindings(host=executor, stack=executor),
+        control_plane_url="http://stack:30080",
+        prometheus_client=NoopPrometheus(),
+        run_dir=tmp_path,
+        fetcher=FakeFetcher(),
+    )
+
+    commands = _run(workflow, executor)
+    install = next(command for command in commands if "helm upgrade" in command)
+    register = next(command for command in commands if "/v1/functions" in command)
+
+    assert "hpaMetricsAdapter.enabled=true" in install
+    assert '"strategy":"HPA"' in register
+    assert '"minReplicas":1' in register
+    assert any("get hpa fn-word-stats-java" in command for command in commands)
+    assert any(
+        "external.metrics.k8s.io" in command and "nanofaas_in_flight" in command
+        for command in commands
+    )
+
+
 def test_autoscaling_loadtest_rejects_nonzero_initial_replicas_before_k6(
     tmp_path: Path,
 ) -> None:
