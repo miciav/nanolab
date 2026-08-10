@@ -531,6 +531,7 @@ def test_hpa_autoscaling_loadtest_enables_adapter_and_keeps_one_replica(tmp_path
     register = next(command for command in commands if "/v1/functions" in command)
 
     assert "hpa-metrics-adapter.enabled=true" in install
+    assert "hpa-metrics-adapter.metricsRelistInterval=10s" in install
     assert '"strategy":"HPA"' in register
     assert '"minReplicas":1' in register
     assert any("get hpa fn-word-stats-java" in command for command in commands)

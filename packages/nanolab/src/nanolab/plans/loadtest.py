@@ -268,6 +268,7 @@ def build_loadtest_plan(
         )
         if hpa:
             helm_values["hpa-metrics-adapter.enabled"] = "true"
+            helm_values["hpa-metrics-adapter.metricsRelistInterval"] = "10s"
         request = replace(
             request,
             helm_values=_set_args(helm_values),
