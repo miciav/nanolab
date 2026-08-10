@@ -210,7 +210,7 @@ def provision_environment(
     keep: bool = False,
 ) -> Generator[None, None, None]:
     if environment.provider == "local":
-        raise ValueError("--provision requires a non-local environment")
+        raise ValueError("a non-local environment is required")
     if orchestrator_factory is not None:
         provider = orchestrator_factory(repo_root)
     elif environment.provider in {"azure", "proxmox"}:

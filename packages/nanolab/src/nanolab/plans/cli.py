@@ -223,7 +223,7 @@ def _control_plane_helm_resource(
 
 def _stack_vm_request(environment: EnvironmentConfig) -> VmRequest:
     if environment.provider == "local":
-        raise ValueError("--provision requires a non-local environment")
+        raise ValueError("a non-local environment is required")
     return vm_request_for_role(environment, "stack", loadtest=False)
 
 

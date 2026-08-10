@@ -239,12 +239,11 @@ def test_run_container_cli_requires_local_environment(
     build.assert_not_called()
 
 
-def test_run_container_cli_rejects_provision_even_with_a_nonlocal_environment(
+def test_run_container_cli_rejects_nonlocal_environment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # A local environment already trips the generic "--provision requires a
-    # non-local environment" guard; using multipass here proves the container
-    # workflow rejects --provision on its own terms, not just via that guard.
+    # A local environment is rejected generically; using Multipass here proves
+    # the container workflow rejects the non-local case on its own terms.
     build = MagicMock()
     monkeypatch.setattr(product_module, "_workflow", build)
 

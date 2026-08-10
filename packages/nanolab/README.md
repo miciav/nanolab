@@ -109,14 +109,14 @@ For a Multipass-backed Kubernetes run:
 NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab plan packages/nanolab/scenarios-v2/deployment-lifecycle-k8s.yaml \
   --environment packages/nanolab/environments/multipass.yaml
 NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab run packages/nanolab/scenarios-v2/deployment-lifecycle-k8s.yaml \
-  --environment packages/nanolab/environments/multipass.yaml \
-  --provision
+  --environment packages/nanolab/environments/multipass.yaml
 ```
 
-`--provision` creates or reuses a managed VM, runs the shared Ansible bootstrap,
-and synchronizes the repository. Managed VMs are deleted even after a failure;
-pass `--keep` when they must remain available for inspection. External hosts are
-never deleted. Remote commands run from `<home>/nanofaas`.
+The selected managed environment creates or reuses its VM, runs the shared
+Ansible bootstrap, and synchronizes the repository. Managed VMs are deleted
+even after a failure; pass `--keep` when they must remain available for
+inspection. External hosts are never deleted. Remote commands run from
+`<home>/nanofaas`.
 
 Copy the Azure or Proxmox example before CLI use and fill in provider values;
 pass the concrete `azure.yaml` or `proxmox.yaml` path explicitly. CLI path
@@ -132,7 +132,6 @@ NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab plan packages/n
   --environment packages/nanolab/environments/multipass.yaml
 NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab run packages/nanolab/scenarios-v2/autoscaling-cycle-k8s.yaml \
   --environment packages/nanolab/environments/multipass.yaml \
-  --provision \
   --run-dir packages/nanolab/runs/experiment-1
 ```
 
