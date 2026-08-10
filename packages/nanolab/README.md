@@ -128,9 +128,10 @@ a `loadgen` role when k6 must run on a dedicated VM. `--only`, `--from`, and
 `--until` select task subsets.
 
 `autoscaling-cycle-k8s.yaml` verifies NanoFaaS internal scale-to-zero. To test
-Kubernetes HPA instead, run `autoscaling-cycle-k8s-hpa.yaml`; it enables the
-Prometheus Adapter only for that run and verifies the portable HPA cycle
-`1 → N → 1`.
+Kubernetes HPA scale-to-zero, run `autoscaling-cycle-k8s-hpa.yaml` with
+`environments/multipass-hpa-scale-to-zero.yaml`; it enables the Prometheus
+Adapter and k3s's HPA alpha feature gate only for that VM, then verifies
+`0 → N → 0`.
 
 ## Development
 

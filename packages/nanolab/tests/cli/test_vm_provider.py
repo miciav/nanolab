@@ -4,6 +4,19 @@ from nanolab.cli.vm_provider import vm_request_for_role
 from nanolab.config import EnvironmentConfig
 
 
+def test_multipass_request_carries_the_scale_to_zero_feature_gate() -> None:
+    environment = EnvironmentConfig.model_validate(
+        {
+            "provider": "multipass",
+            "roles": {"stack": {"name": "nanofaas-hpa-zero", "hpaScaleToZero": True}},
+        }
+    )
+
+    request = vm_request_for_role(environment, "stack")
+
+    assert request.hpa_scale_to_zero is True
+
+
 def test_azure_stack_request_uses_cloud_defaults_and_node_ports() -> None:
     environment = EnvironmentConfig.model_validate(
         {

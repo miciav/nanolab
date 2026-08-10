@@ -40,6 +40,7 @@ def vm_request_for_role(
         "cpus": target.cpus,
         "memory": target.memory,
         "disk": target.disk,
+        "hpa_scale_to_zero": target.hpa_scale_to_zero,
     }
     if provider == "azure":
         azure = environment.azure

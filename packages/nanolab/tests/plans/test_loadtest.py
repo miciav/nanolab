@@ -540,6 +540,38 @@ def test_hpa_autoscaling_loadtest_enables_adapter_and_keeps_one_replica(tmp_path
     )
 
 
+def test_hpa_scale_to_zero_loadtest_registers_a_zero_replica_floor(tmp_path: Path) -> None:
+    executor = RecordingExecutor()
+    config = ScenarioConfig.model_validate(
+        {
+            "workflow": "loadtest",
+            "backend": "k8s",
+            "functions": ["word-stats-java"],
+            "autoscaling": True,
+            "autoscalingStrategy": "HPA",
+            "hpaScaleToZero": True,
+        }
+    )
+
+    workflow = build_loadtest_plan(
+        config,
+        EnvironmentConfig.model_validate(
+            {"provider": "multipass", "roles": {"stack": {"name": "stack"}}}
+        ),
+        RoleBindings(host=executor, stack=executor),
+        control_plane_url="http://stack:30080",
+        prometheus_client=NoopPrometheus(),
+        run_dir=tmp_path,
+        fetcher=FakeFetcher(),
+    )
+
+    commands = _run(workflow, executor)
+    register = next(command for command in commands if "/v1/functions" in command)
+
+    assert '"strategy":"HPA"' in register
+    assert '"minReplicas":0' in register
+
+
 def test_autoscaling_loadtest_rejects_nonzero_initial_replicas_before_k6(
     tmp_path: Path,
 ) -> None:

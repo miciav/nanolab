@@ -63,6 +63,25 @@
             else ""
           }}
 
+    - name: Ensure k3s configuration directory exists for HPA scale-to-zero
+      ansible.builtin.file:
+        path: /etc/rancher/k3s
+        state: directory
+        mode: "0755"
+      when: hpa_scale_to_zero | default(false) | bool
+
+    - name: Enable the HPA scale-to-zero feature gate
+      ansible.builtin.copy:
+        dest: /etc/rancher/k3s/config.yaml
+        content: |
+          kube-apiserver-arg:
+            - feature-gates=HPAScaleToZero=true
+          kube-controller-manager-arg:
+            - feature-gates=HPAScaleToZero=true
+        mode: "0600"
+      register: k3s_hpa_scale_to_zero_config
+      when: hpa_scale_to_zero | default(false) | bool
+
     - name: Install or upgrade k3s when version drifts
       ansible.builtin.shell: curl -sfL https://get.k3s.io | sh -s - {{ k3s_install_flags | join(" ") }}
       args:
@@ -71,7 +90,9 @@
         INSTALL_K3S_VERSION: "{{ k3s_target_version }}"
       register: k3s_install
       changed_when: true
-      when: k3s_installed_version != k3s_target_version
+      when: >-
+        k3s_installed_version != k3s_target_version or
+        (k3s_hpa_scale_to_zero_config is defined and k3s_hpa_scale_to_zero_config.changed)
 
     - name: Wait for k3s node readiness
       ansible.builtin.command: k3s kubectl get nodes --no-headers
