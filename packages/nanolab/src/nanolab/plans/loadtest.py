@@ -423,6 +423,10 @@ def build_loadtest_plan(
         role=load_role,
     )
     if hpa:
+        control_plane_metrics_path = (
+            f"/api/v1/namespaces/{request.namespace}/services/"
+            "http:control-plane:8081/proxy/actuator/prometheus"
+        )
         hpa_metric_path = (
             f"/apis/external.metrics.k8s.io/v1beta1/namespaces/{request.namespace}/"
             f"nanofaas_in_flight?labelSelector=function%3D{target.name}"
@@ -438,7 +442,14 @@ def build_loadtest_plan(
                         f"set -eu; sudo kubectl get hpa fn-{target.name} -n {request.namespace}; "
                         "for _ in $(seq 1 30); do "
                         f"sudo kubectl get --raw {hpa_metric_path!r} >/dev/null && exit 0; "
-                        "sleep 2; done; exit 1",
+                        "sleep 2; done; "
+                        "echo 'HPA external metric diagnostics:'; "
+                        f"sudo kubectl get --raw {control_plane_metrics_path!r} "
+                        "| grep '^function_' || true; "
+                        f"sudo kubectl -n {request.namespace} exec deploy/nanofaas-prometheus -- "
+                        "wget -qO- 'http://localhost:9090/api/v1/query?query=function_in_flight' "
+                        "|| true; "
+                        f"sudo kubectl get --raw {hpa_metric_path!r} || true; exit 1",
                     ),
                     executor=executor,
                     role="stack",

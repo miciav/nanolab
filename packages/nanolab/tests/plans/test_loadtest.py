@@ -539,6 +539,10 @@ def test_hpa_autoscaling_loadtest_enables_adapter_and_keeps_one_replica(tmp_path
         "external.metrics.k8s.io" in command and "nanofaas_in_flight" in command
         for command in commands
     )
+    assert any(
+        "actuator/prometheus" in command and "api/v1/query?query=function_in_flight" in command
+        for command in commands
+    )
 
 
 def test_hpa_scale_to_zero_loadtest_registers_a_zero_replica_floor(tmp_path: Path) -> None:
