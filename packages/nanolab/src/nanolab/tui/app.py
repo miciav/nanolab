@@ -17,6 +17,7 @@ from nanolab.cli.product import (
     _scenario,
     _validate_cli_container_options,
     _workflow,
+    _workflow_observers,
 )
 from nanolab.cli.provisioning import provision_environment
 from nanolab.tui.workflow_controller import TuiWorkflowController
@@ -417,10 +418,12 @@ class NanofaasTUI:
                             dry_run=False,
                         )
                         workflow.keep = keep
-                        return workflow.run()
+                        observers = _workflow_observers(scenario_path)
+                        return workflow.run(observers=observers) if observers else workflow.run()
                 workflow = self._build_workflow(scenario, environment, dry_run=False)
                 workflow.keep = keep
-                return workflow.run()
+                observers = _workflow_observers(scenario_path)
+                return workflow.run(observers=observers) if observers else workflow.run()
 
             self._controller.run_live_workflow(
                 title=title,

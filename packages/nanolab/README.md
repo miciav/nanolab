@@ -26,6 +26,20 @@ NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab doctor
 NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab list
 ```
 
+## Local Telegram notifications
+
+Set both variables before `nanolab run` to receive one message after the workflow
+and its cleanup complete. The message includes the workflow, scenario, duration,
+and any failure summary.
+
+```bash
+export NANOLAB_TELEGRAM_BOT_TOKEN='…'
+export NANOLAB_TELEGRAM_CHAT_ID='…'
+```
+
+The token is never read from YAML or written to a journal. Notifications are
+disabled when either variable is absent and are always disabled when `CI` is set.
+
 ## First validation
 
 Inspect the plan before executing it. The container scenario is the smallest

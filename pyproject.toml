@@ -17,4 +17,4 @@ members = [
 ]
 
 [tool.uv.sources]
-sonata-engine = { git = "https://github.com/miciav/sonata.git", rev = "818d53e6375f71930eb0a198ffb1dfc84cc6b077" }
+sonata-engine = { git = "https://github.com/miciav/sonata.git", rev = "e81d559" }

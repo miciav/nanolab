@@ -571,7 +571,13 @@ def test_run_passes_the_requested_selection_to_sonata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     workflow = MagicMock()
+    observers = (object(),)
     monkeypatch.setattr(product_module, "_workflow", MagicMock(return_value=workflow))
+    monkeypatch.setattr(
+        product_module,
+        "_workflow_observers",
+        lambda _scenario_path: observers,
+    )
 
     result = CliRunner().invoke(
         app,
@@ -580,7 +586,8 @@ def test_run_passes_the_requested_selection_to_sonata(
 
     assert result.exit_code == 0, result.output
     workflow.run.assert_called_once_with(
-        select=Selection(only="list-functions", start=None, until=None)
+        select=Selection(only="list-functions", start=None, until=None),
+        observers=observers,
     )
 
 

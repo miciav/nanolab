@@ -636,7 +636,7 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0.2" },
     { name = "questionary", specifier = ">=2.1.1" },
     { name = "rich", specifier = ">=13.8" },
-    { name = "sonata-engine", git = "https://github.com/miciav/sonata.git?rev=818d53e6375f71930eb0a198ffb1dfc84cc6b077" },
+    { name = "sonata-engine", git = "https://github.com/miciav/sonata.git?rev=e81d559" },
     { name = "sonata-tasks", editable = "packages/sonata-tasks" },
     { name = "tui-toolkit", editable = "packages/tui-toolkit" },
     { name = "typer", specifier = ">=0.12.5" },
@@ -661,7 +661,7 @@ dependencies = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "sonata-engine", git = "https://github.com/miciav/sonata.git?rev=818d53e6375f71930eb0a198ffb1dfc84cc6b077" }]
+requires-dist = [{ name = "sonata-engine", git = "https://github.com/miciav/sonata.git?rev=e81d559" }]
 
 [[package]]
 name = "nodejs-wheel-binaries"
@@ -1079,7 +1079,7 @@ wheels = [
 [[package]]
 name = "sonata-engine"
 version = "0.5.0"
-source = { git = "https://github.com/miciav/sonata.git?rev=818d53e6375f71930eb0a198ffb1dfc84cc6b077#818d53e6375f71930eb0a198ffb1dfc84cc6b077" }
+source = { git = "https://github.com/miciav/sonata.git?rev=e81d559#e81d559952d4a168edffbe3c7108bd9a017046e9" }
 
 [[package]]
 name = "sonata-tasks"
@@ -1115,7 +1115,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.9.2" },
     { name = "pydantic-settings", specifier = ">=2.5" },
     { name = "shellcraft", git = "https://github.com/miciav/shellcraft.git?rev=b6547835aac88d058810c7b9a592ad442c54ac99" },
-    { name = "sonata-engine", git = "https://github.com/miciav/sonata.git?rev=818d53e6375f71930eb0a198ffb1dfc84cc6b077" },
+    { name = "sonata-engine", git = "https://github.com/miciav/sonata.git?rev=e81d559" },
 ]
 
 [package.metadata.requires-dev]

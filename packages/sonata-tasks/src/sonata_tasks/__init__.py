@@ -70,6 +70,7 @@ from sonata_tasks.buildx import buildx_builder_resource
 from sonata_tasks.process import managed_process_resource
 from sonata_tasks.skopeo import SkopeoCopyTask, SkopeoInspectTask
 from sonata_tasks.transfer import FileTransferTask
+from sonata_tasks.telegram import TelegramWorkflowObserver, telegram_observer_from_environment
 from sonata_tasks.validate import (
     ValidateFunction,
     ValidateWorkflowRequest,
@@ -155,6 +156,8 @@ __all__ = [
     "load_outcome",
     "EvaluateConservationTask",
     "FileTransferTask",
+    "TelegramWorkflowObserver",
+    "telegram_observer_from_environment",
     "vm_resource",
     # Release composites
     "command_specs_composite",

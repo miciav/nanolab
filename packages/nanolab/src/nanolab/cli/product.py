@@ -16,6 +16,7 @@ from sonata_engine import (
     Selection,
     SelectionError,
     UnknownRetainedResourceError,
+    WorkflowObserver,
     release_retained,
 )
 from sonata_engine import Workflow as SonataWorkflow
@@ -23,6 +24,7 @@ from sonata_engine.journal import JournalConfig
 from sonata_engine.workflow.context import bind_workflow_sink
 from sonata_tasks.loadtest.adapters import HttpPrometheusClient
 from sonata_tasks.provisioning.providers import provider_for
+from sonata_tasks.telegram import telegram_observer_from_environment
 
 from nanolab.cli import diagnostics
 from nanolab.config import EnvironmentConfig, ScenarioConfig
@@ -70,6 +72,11 @@ def _environment(path: Path | None) -> EnvironmentConfig:
         if path
         else EnvironmentConfig(provider="local")
     )
+
+
+def _workflow_observers(scenario_path: Path) -> tuple[WorkflowObserver, ...]:
+    observer = telegram_observer_from_environment(scenario_path.name)
+    return (observer,) if observer is not None else ()
 
 
 def _print_offload_summary(run_dir: Path) -> None:
@@ -543,16 +550,30 @@ def install_product_commands(app: typer.Typer) -> None:
                     )
                     sonata_workflow.keep = keep
                     selection = Selection(only=only, start=start, until=until)
+                    observers = _workflow_observers(scenario)
                     try:
                         if release_request is not None:
-                            sonata_workflow.run(
-                                journal=release_journal,
-                                resume=resume,
-                                verifiers=release_verifiers(
-                                    release_request, release_provider
-                                ),
-                                select=selection,
-                            )
+                            if observers:
+                                sonata_workflow.run(
+                                    journal=release_journal,
+                                    resume=resume,
+                                    verifiers=release_verifiers(
+                                        release_request, release_provider
+                                    ),
+                                    select=selection,
+                                    observers=observers,
+                                )
+                            else:
+                                sonata_workflow.run(
+                                    journal=release_journal,
+                                    resume=resume,
+                                    verifiers=release_verifiers(
+                                        release_request, release_provider
+                                    ),
+                                    select=selection,
+                                )
+                        elif observers:
+                            sonata_workflow.run(select=selection, observers=observers)
                         else:
                             sonata_workflow.run(select=selection)
                         if (
