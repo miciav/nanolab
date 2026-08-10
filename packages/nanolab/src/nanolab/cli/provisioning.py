@@ -76,7 +76,7 @@ def _role_requests_and_operations(
     *,
     repo_root: Path,
 ) -> list[tuple[ExecutionRole, VmRequest, tuple[RemoteCommandOperation, ...]]]:
-    """The legacy per-role (role, request, operations) triples."""
+    """Build the per-role (role, request, operations) triples."""
     loadtest_workflow = scenario.workflow in ("loadtest", "offload-loadtest", "release")
     dedicated_loadgen = loadtest_workflow and "loadgen" in environment.roles
     dedicated_cloud = scenario.workflow == "offload-loadtest" and "cloud" in environment.roles
@@ -216,8 +216,7 @@ def provision_environment(
     elif environment.provider in {"azure", "proxmox"}:
         provider = provider_for(vm_request_for_role(environment, "stack"), repo_root)
     else:
-        # multipass and external: VmOrchestrator SSH-pings external hosts and
-        # launches multipass instances, exactly as the legacy routing did.
+        # Multipass and external providers share the orchestrator implementation.
         provider = VmOrchestrator(repo_root)
 
     roles: list[ProvisionedRole] = []

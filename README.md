@@ -55,23 +55,23 @@ uv lock --check
 uv sync --locked --all-packages --all-groups
 
 uv run --locked --all-packages --all-groups pytest -c packages/nanolab/pyproject.toml packages/nanolab/tests
-uv run --locked --all-packages --all-groups pytest -c packages/workflow-tasks/pyproject.toml packages/workflow-tasks/tests
+uv run --locked --all-packages --all-groups pytest -c packages/sonata-tasks/pyproject.toml packages/sonata-tasks/tests
 uv run --locked --all-packages --all-groups pytest -c packages/tui-toolkit/pyproject.toml packages/tui-toolkit/tests
 
 uv run --locked --all-packages --all-groups ruff check packages
 uv run --locked --all-packages --all-groups basedpyright --project packages/nanolab
-uv run --locked --all-packages --all-groups basedpyright --project packages/workflow-tasks
+uv run --locked --all-packages --all-groups basedpyright --project packages/sonata-tasks
 uv run --locked --all-packages --all-groups basedpyright --project packages/tui-toolkit
 
 uv run --locked --all-packages --all-groups lint-imports --config packages/nanolab/.importlinter --no-cache
-uv run --locked --all-packages --all-groups lint-imports --config packages/workflow-tasks/.importlinter --no-cache
+uv run --locked --all-packages --all-groups lint-imports --config packages/sonata-tasks/.importlinter --no-cache
 uv run --locked --all-packages --all-groups lint-imports --config packages/tui-toolkit/.importlinter --no-cache
 
 uv build --all-packages --out-dir dist --clear
 
 uv venv .wheel-smoke
-uv pip install dist/nanolab-0.1.0-py3-none-any.whl dist/workflow_tasks-0.1.0-py3-none-any.whl dist/tui_toolkit-0.1.0-py3-none-any.whl --python .wheel-smoke/bin/python
-.wheel-smoke/bin/python -c "import nanolab, workflow_tasks, tui_toolkit"
+uv pip install dist/nanolab-0.1.0-py3-none-any.whl dist/sonata_tasks-0.1.0-py3-none-any.whl dist/tui_toolkit-0.1.0-py3-none-any.whl --python .wheel-smoke/bin/python
+.wheel-smoke/bin/python -c "import nanolab, sonata_tasks, tui_toolkit"
 .wheel-smoke/bin/nanolab --help
 
 uv run --package nanolab nanolab plan packages/nanolab/scenarios-v2/deployment-lifecycle-container.yaml --environment packages/nanolab/environments/local.yaml

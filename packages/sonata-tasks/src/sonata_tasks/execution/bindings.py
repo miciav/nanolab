@@ -35,7 +35,7 @@ class RoleBoundCommandTaskExecutor:
 
 
 class RetargetingCommandTaskExecutor:
-    """Adapt a legacy target-checking executor to an explicitly bound role."""
+    """Retarget an executor to the role-bound command target."""
 
     def __init__(
         self,
