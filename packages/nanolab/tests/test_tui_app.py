@@ -76,8 +76,9 @@ class FakeSonataWorkflow:
     def compile(self) -> SimpleNamespace:
         return SimpleNamespace(tasks=self._compiled_tasks)
 
-    def run(self, **_kwargs: Any) -> None:
+    def run(self, **kwargs: Any) -> None:
         self.run_calls += 1
+        self.run_kwargs = kwargs
         if self._on_run is not None:
             self._on_run()
         if self._error is not None:
@@ -536,6 +537,7 @@ def test_run_passes_phase_titles_and_exact_summary_to_live_controller(
 ) -> None:
     environment_path = _install_paths(monkeypatch, tmp_path)
     workflow = FakeSonataWorkflow()
+    observers = (object(),)
     helper_calls: list[tuple[Any, ...]] = []
     _install_workflow_helpers(
         monkeypatch,
@@ -543,6 +545,7 @@ def test_run_passes_phase_titles_and_exact_summary_to_live_controller(
         workflow=workflow,
         calls=helper_calls,
     )
+    monkeypatch.setattr(tui_app, "_workflow_observers", lambda _scenario_path: observers)
     controller = RecordingController()
 
     NanofaasTUI(
@@ -561,6 +564,7 @@ def test_run_passes_phase_titles_and_exact_summary_to_live_controller(
         "Cleanup: cleanup",
     ]
     assert workflow.run_calls == 1
+    assert workflow.run_kwargs == {"observers": observers}
     loaded_scenario = next(call[1] for call in helper_calls if call[0] == "workflow")
     assert loaded_scenario.backend == "container"
 
