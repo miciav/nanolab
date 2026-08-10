@@ -63,7 +63,7 @@ def canonical_release_configs(tmp_path: Path, nanofaas_root: Path) -> tuple[Path
                     "profile": "azure-d8s-v5+d2s-v5-amd64-native-loadtest-v1",
                     "max_parallelism": 4,
                     "benchmark_runs": 3,
-                    "benchmark_scenario": "loadtest.yaml",
+                    "benchmark_scenario": "autoscaling-cycle-k8s.yaml",
                     "throughput_max_loss_percent": 10,
                     "p95_max_increase_percent": 15,
                     "error_rate_max": 0.30,
@@ -72,7 +72,7 @@ def canonical_release_configs(tmp_path: Path, nanofaas_root: Path) -> tuple[Path
         ),
         encoding="utf-8",
     )
-    (tmp_path / "loadtest.yaml").write_text(
+    (tmp_path / "autoscaling-cycle-k8s.yaml").write_text(
         "workflow: loadtest\nfunctions: [word-stats-java]\n", encoding="utf-8"
     )
     environment = tmp_path / "environment.yaml"

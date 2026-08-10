@@ -213,7 +213,7 @@ def test_tui_dispatches_a_stable_scenario_filename() -> None:
     dispatch: Callable[[str], None] = dispatched.append
     NanofaasTUI(choose=choose, dispatch_scenario=dispatch).run()
 
-    assert dispatched == ["cli-container.yaml"]
+    assert dispatched == ["cli-contract-container.yaml"]
 
 
 def test_cli_menu_offers_container_and_kubernetes_provisioned_choices() -> None:
@@ -262,7 +262,7 @@ def test_tools_inspect_selects_only_stable_scenarios_and_renders_validated_json(
         lambda **kwargs: frame_calls.append(kwargs) or frame,
     )
     console = RecordingConsole()
-    chooser = ScriptedChooser(iter(["inspect", "validate-container.yaml", "back"]))
+    chooser = ScriptedChooser(iter(["inspect", "deployment-lifecycle-container.yaml", "back"]))
 
     NanofaasTUI(
         choose=chooser,
@@ -272,15 +272,15 @@ def test_tools_inspect_selects_only_stable_scenarios_and_renders_validated_json(
 
     scenario_choices = chooser.calls[1][1]["choices"]
     assert [choice.value for choice in scenario_choices] == [
-        "validate-container.yaml",
-        "validate-k8s.yaml",
-        "offload.yaml",
-        "cli-container.yaml",
-        "cli-k8s.yaml",
-        "loadtest.yaml",
-        "offload-loadtest.yaml",
+        "deployment-lifecycle-container.yaml",
+        "deployment-lifecycle-k8s.yaml",
+        "edge-cloud-offload-contract.yaml",
+        "cli-contract-container.yaml",
+        "cli-contract-k8s.yaml",
+        "autoscaling-cycle-k8s.yaml",
+        "edge-cloud-offload-policy.yaml",
     ]
-    assert loaded_paths == [tmp_path / "scenarios-v2" / "validate-container.yaml"]
+    assert loaded_paths == [tmp_path / "scenarios-v2" / "deployment-lifecycle-container.yaml"]
     assert json.loads(str(frame_calls[0]["body"])) == {
         "workflow": "offload-loadtest",
         "x-function": "echo",
@@ -300,7 +300,7 @@ def test_tool_navigation_does_not_require_nanofaas_root(
     (environment_dir / "local.yaml").write_text("provider: local\n", encoding="utf-8")
     scenarios_dir = tmp_path / "scenarios-v2"
     scenarios_dir.mkdir()
-    (scenarios_dir / "validate-container.yaml").write_text(
+    (scenarios_dir / "deployment-lifecycle-container.yaml").write_text(
         "workflow: offload\nbackend: container\n",
         encoding="utf-8",
     )
@@ -420,10 +420,10 @@ def test_plan_uses_cli_helpers_and_renders_without_running(
         controller=RecordingController(),
         console=console,
         input_stream=input_stream,
-    )._workflow_menu("cli-container.yaml")
+    )._workflow_menu("cli-contract-container.yaml")
 
     assert [call[0] for call in helper_calls] == ["scenario", "environment", "workflow"]
-    assert helper_calls[0] == ("scenario", tmp_path / "scenarios-v2" / "cli-container.yaml")
+    assert helper_calls[0] == ("scenario", tmp_path / "scenarios-v2" / "cli-contract-container.yaml")
     assert workflow.run_calls == 0
     assert len(frame_calls) == 1
     assert frame_calls[0]["title"] == "CLI"
@@ -457,7 +457,7 @@ def test_static_plan_acknowledges_only_for_an_input_tty(
         controller=RecordingController(),
         console=console,
         input_stream=input_stream,
-    )._workflow_menu("cli-container.yaml")
+    )._workflow_menu("cli-contract-container.yaml")
 
     assert console.calls == [("clear", None), ("print", frame), ("clear", None)]
     assert frame_calls[0]["footer_hint"] == "Press Enter to continue"
@@ -486,7 +486,7 @@ def test_configuration_error_uses_the_shared_branded_static_view(
         choose=ScriptedChooser(iter([str(environment_path), "plan"])),
         console=console,
         input_stream=RecordingInput(tty=False),
-    )._workflow_menu("cli-container.yaml")
+    )._workflow_menu("cli-contract-container.yaml")
 
     assert frame_calls[0]["title"] == "Configuration error"
     assert frame_calls[0]["breadcrumb"] == "Main / CLI"
@@ -523,7 +523,7 @@ def test_run_preview_error_uses_static_view_without_starting_live_dashboard(
         controller=controller,
         console=console,
         input_stream=RecordingInput(tty=False),
-    )._workflow_menu("cli-container.yaml")
+    )._workflow_menu("cli-contract-container.yaml")
 
     assert frame_calls[0]["title"] == "Preview error"
     assert str(frame_calls[0]["body"]) == "preview failed"
@@ -548,7 +548,7 @@ def test_run_passes_phase_titles_and_exact_summary_to_live_controller(
     NanofaasTUI(
         choose=ScriptedChooser(iter([str(environment_path), "run", "cleanup"])),
         controller=controller,
-    )._workflow_menu("cli-container.yaml")
+    )._workflow_menu("cli-contract-container.yaml")
 
     assert len(controller.calls) == 1
     assert controller.calls[0]["title"] == "CLI"
@@ -556,7 +556,7 @@ def test_run_passes_phase_titles_and_exact_summary_to_live_controller(
         compiled.task.title for compiled in workflow.compile().tasks
     ]
     assert controller.calls[0]["summary_lines"] == [
-        "Scenario: cli-container.yaml",
+        "Scenario: cli-contract-container.yaml",
         "Environment: local.yaml",
         "Cleanup: cleanup",
     ]
@@ -581,7 +581,7 @@ def test_sonata_run_planned_steps_come_from_compiled_workflow(
     NanofaasTUI(
         choose=ScriptedChooser(iter([str(environment_path), "run", "cleanup"])),
         controller=controller,
-    )._workflow_menu("cli-container.yaml")
+    )._workflow_menu("cli-contract-container.yaml")
 
     assert controller.calls[0]["planned_steps"] == [
         "Build nanofaas-cli",
@@ -614,7 +614,7 @@ def test_loadtest_resolves_urls_before_building_workflow(
         controller=RecordingController(),
         console=RecordingConsole(),
         input_stream=RecordingInput(tty=False),
-    )._workflow_menu("loadtest.yaml")
+    )._workflow_menu("autoscaling-cycle-k8s.yaml")
 
     call_names = [call[0] for call in calls]
     assert call_names == ["scenario", "environment", "resolve", "workflow"]
@@ -640,7 +640,7 @@ def test_local_run_never_offers_or_enters_provisioning(
     )
     chooser = ScriptedChooser(iter([str(environment_path), "run", "cleanup"]))
 
-    NanofaasTUI(choose=chooser, controller=RecordingController())._workflow_menu("cli-container.yaml")
+    NanofaasTUI(choose=chooser, controller=RecordingController())._workflow_menu("cli-contract-container.yaml")
 
     assert "Provision environment?" not in [message for message, _ in chooser.calls]
     assert provision_calls == []
@@ -672,7 +672,7 @@ def test_container_cli_rejects_non_local_environment(
         controller=controller,
         console=RecordingConsole(),
         input_stream=RecordingInput(tty=False),
-    )._workflow_menu("cli-container.yaml")
+    )._workflow_menu("cli-contract-container.yaml")
 
     assert [call[0] for call in helper_calls] == ["scenario", "environment"]
     assert frame_calls[0]["title"] == "Configuration error"
@@ -707,7 +707,7 @@ def test_container_cli_rejects_keep(
         controller=controller,
         console=RecordingConsole(),
         input_stream=RecordingInput(tty=False),
-    )._workflow_menu("cli-container.yaml")
+    )._workflow_menu("cli-contract-container.yaml")
 
     assert [call[0] for call in helper_calls] == ["scenario", "environment"]
     assert frame_calls[0]["title"] == "Configuration error"
@@ -743,7 +743,7 @@ def test_kubernetes_provisioned_rejects_local_environment(
         controller=controller,
         console=RecordingConsole(),
         input_stream=RecordingInput(tty=False),
-    )._workflow_menu("cli-k8s.yaml")
+    )._workflow_menu("cli-contract-k8s.yaml")
 
     assert [call[0] for call in helper_calls] == ["scenario", "environment", "workflow", "workflow"]
     assert frame_calls == []
@@ -774,7 +774,7 @@ def test_kubernetes_provisioned_run_skips_provision_menu_forces_provision_and_av
     controller = RecordingController()
     chooser = ScriptedChooser(iter([str(environment_path), "run", "cleanup"]))
 
-    NanofaasTUI(choose=chooser, controller=controller)._workflow_menu("cli-k8s.yaml")
+    NanofaasTUI(choose=chooser, controller=controller)._workflow_menu("cli-contract-k8s.yaml")
 
     # No "Provision environment?" question anywhere in the flow.
     assert [message for message, _ in chooser.calls] == [
@@ -789,7 +789,7 @@ def test_kubernetes_provisioned_run_skips_provision_menu_forces_provision_and_av
     assert len(workflow_calls) == 2  # preview build + real run build
     assert workflow.run_calls == 1
     assert controller.calls[0]["summary_lines"] == [
-        "Scenario: cli-k8s.yaml",
+        "Scenario: cli-contract-k8s.yaml",
         "Environment: local.yaml",
         "Cleanup: cleanup",
     ]
@@ -827,7 +827,7 @@ def test_kubernetes_provisioned_keep_sets_keep_without_entering_legacy_provision
     NanofaasTUI(
         choose=ScriptedChooser(iter([str(environment_path), "run", "keep"])),
         controller=controller,
-    )._workflow_menu("cli-k8s.yaml")
+    )._workflow_menu("cli-contract-k8s.yaml")
 
     assert provision_calls == []
     assert preview.keep is False
@@ -835,7 +835,7 @@ def test_kubernetes_provisioned_keep_sets_keep_without_entering_legacy_provision
     assert workflow.keep is True
     assert workflow.run_calls == 1
     assert controller.calls[0]["summary_lines"] == [
-        "Scenario: cli-k8s.yaml",
+        "Scenario: cli-contract-k8s.yaml",
         "Environment: local.yaml",
         "Cleanup: keep",
     ]
@@ -859,7 +859,7 @@ def test_kubernetes_provisioned_back_from_cleanup_returns_to_action(
 
     NanofaasTUI(
         choose=chooser, controller=RecordingController()
-    )._workflow_menu("cli-k8s.yaml")
+    )._workflow_menu("cli-contract-k8s.yaml")
 
     # Back from Cleanup returns straight to Action (the "Provision environment?"
     # state is never inserted for this path), and this is not local-environment
@@ -899,7 +899,7 @@ def test_non_local_run_enters_existing_provisioning_context(
             iter([str(environment_path), "run", "cleanup"])
         ),
         controller=RecordingController(),
-    )._workflow_menu("cli-container.yaml")
+    )._workflow_menu("cli-contract-container.yaml")
 
     assert [event[0] for event in lifecycle] == ["enter", "exit"]
     assert workflow.run_calls == 1
@@ -970,7 +970,7 @@ def test_nonlocal_loadtest_runs_provision_build_and_cleanup_inside_live_sink(
             iter([str(environment_path), "run", "cleanup"])
         ),
         controller=controller,
-    )._workflow_menu("loadtest.yaml")
+    )._workflow_menu("autoscaling-cycle-k8s.yaml")
 
     assert [event[0] for event in events] == [
         "scenario",
@@ -1042,7 +1042,7 @@ def test_provision_cleanup_error_reaches_real_controller_dashboard_and_acknowled
             iter([str(environment_path), "run", "cleanup"])
         ),
         controller=controller,
-    )._workflow_menu("cli-container.yaml")
+    )._workflow_menu("cli-contract-container.yaml")
 
     assert [(event.kind, event.title, event.line) for event in emitted[:2]] == [
         ("task.started", "Provision stack", ""),
@@ -1080,7 +1080,7 @@ def test_keep_applies_to_provisioning_and_workflow_cleanup(
     NanofaasTUI(
         choose=ScriptedChooser(iter([str(environment_path), "run", "keep"])),
         controller=RecordingController(),
-    )._workflow_menu("cli-container.yaml")
+    )._workflow_menu("cli-contract-container.yaml")
 
     assert provision_kwargs[0]["keep"] is True
     assert preview.keep is False
@@ -1128,12 +1128,12 @@ def test_remote_environment_runs_with_automatic_provisioning(
         )
     )
 
-    NanofaasTUI(choose=chooser, controller=controller)._workflow_menu("cli-container.yaml")
+    NanofaasTUI(choose=chooser, controller=controller)._workflow_menu("cli-contract-container.yaml")
 
     assert len(provision_calls) == 1
     assert workflow.run_calls == 1
     assert controller.calls[0]["summary_lines"] == [
-        "Scenario: cli-container.yaml",
+        "Scenario: cli-contract-container.yaml",
         "Environment: remote.yaml",
         "Cleanup: cleanup",
     ]
@@ -1341,7 +1341,7 @@ def test_provider_setup_never_loads_template_as_executable_yaml(
     tui = NanofaasTUI(choose=chooser)
     monkeypatch.setattr(tui, "_show_static", lambda *args, **kwargs: None)
 
-    tui._workflow_menu("cli-container.yaml")
+    tui._workflow_menu("cli-contract-container.yaml")
 
     assert loaded_paths == [environment_path]
     assert all(not path.name.endswith(".yaml.example") for path in loaded_paths)
@@ -1405,7 +1405,7 @@ def test_workflow_back_navigation_returns_to_exact_parent(
     )
     chooser = ScriptedChooser(resolved_answers)
 
-    NanofaasTUI(choose=chooser, controller=RecordingController())._workflow_menu("cli-container.yaml")
+    NanofaasTUI(choose=chooser, controller=RecordingController())._workflow_menu("cli-contract-container.yaml")
 
     assert [message for message, _ in chooser.calls] == expected_messages
     assert all(kwargs["include_back"] is True for _, kwargs in chooser.calls)

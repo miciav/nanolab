@@ -147,8 +147,8 @@ def test_release_request_rejects_non_azure_environment():
         image_plan=ImagePlan(version="v1", registry="localhost:5000", targets=(), cells=()),
         settings=ReleaseSettings(
             max_parallelism=4,
-            scenario=Path("loadtest.yaml"),
-            scenario_name="loadtest.yaml",
+            scenario=Path("autoscaling-cycle-k8s.yaml"),
+            scenario_name="autoscaling-cycle-k8s.yaml",
             benchmark_runs=3,
             profile="default",
             throughput_max_loss_percent=10.0,
@@ -172,8 +172,8 @@ def test_release_request_is_frozen():
         image_plan=ImagePlan(version="v1", registry="localhost:5000", targets=(), cells=()),
         settings=ReleaseSettings(
             max_parallelism=4,
-            scenario=Path("loadtest.yaml"),
-            scenario_name="loadtest.yaml",
+            scenario=Path("autoscaling-cycle-k8s.yaml"),
+            scenario_name="autoscaling-cycle-k8s.yaml",
             benchmark_runs=3,
             profile="default",
             throughput_max_loss_percent=10.0,
@@ -556,7 +556,7 @@ def _stage_attest_inputs(phases: Mapping[str, ReleasePhaseTask]) -> dict[str, st
                         loadgen_vm="Standard_D2s_v5",
                         architecture="amd64",
                         flavor="native",
-                        scenario="loadtest.yaml",
+                        scenario="autoscaling-cycle-k8s.yaml",
                     ),
                     run_count=3,
                     metrics={"throughputRps": 100.0, "latencyP95Ms": 10.0, "errorRate": 0.0},
@@ -1023,7 +1023,7 @@ def test_release_scenario_matches_comparable_history() -> None:
 
     assert scenario.release is not None
     assert scenario.release.profile == "azure-d8s-v5+d2s-v5-amd64-native-loadtest-v1"
-    assert scenario.release.benchmark_scenario == "loadtest.yaml"
+    assert scenario.release.benchmark_scenario == "autoscaling-cycle-k8s.yaml"
     assert scenario.release.throughput_max_loss_percent == 10
     assert scenario.release.p95_max_increase_percent == 15
     assert scenario.release.error_rate_max == 0.30
@@ -1143,7 +1143,7 @@ def test_build_release_request_rejects_missing_benchmark_scenario(
     canonical_release_configs: tuple[Path, Path],
 ) -> None:
     scenario_path, environment_path = canonical_release_configs
-    (tmp_path / "loadtest.yaml").unlink()
+    (tmp_path / "autoscaling-cycle-k8s.yaml").unlink()
     monkeypatch.setattr(
         release_plan,
         "git_state",

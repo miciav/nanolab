@@ -174,7 +174,7 @@ def build_release_request(
     )
     if policy != (
         "azure-d8s-v5+d2s-v5-amd64-native-loadtest-v1",
-        "loadtest.yaml",
+        "autoscaling-cycle-k8s.yaml",
         10.0,
         15.0,
         0.30,

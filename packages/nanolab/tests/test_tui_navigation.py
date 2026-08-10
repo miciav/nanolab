@@ -9,13 +9,13 @@ from nanolab.tui.app import NanofaasTUI
 
 
 EXPECTED_SCENARIOS = {
-    ("validation", "container"): "validate-container.yaml",
-    ("validation", "kubernetes"): "validate-k8s.yaml",
-    ("validation", "offload"): "offload.yaml",
-    ("cli", "container"): "cli-container.yaml",
-    ("cli", "kubernetes"): "cli-k8s.yaml",
-    ("loadtest", "run"): "loadtest.yaml",
-    ("loadtest", "offload"): "offload-loadtest.yaml",
+    ("validation", "container"): "deployment-lifecycle-container.yaml",
+    ("validation", "kubernetes"): "deployment-lifecycle-k8s.yaml",
+    ("validation", "offload"): "edge-cloud-offload-contract.yaml",
+    ("cli", "container"): "cli-contract-container.yaml",
+    ("cli", "kubernetes"): "cli-contract-k8s.yaml",
+    ("loadtest", "run"): "autoscaling-cycle-k8s.yaml",
+    ("loadtest", "offload"): "edge-cloud-offload-policy.yaml",
 }
 
 

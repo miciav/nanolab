@@ -281,7 +281,7 @@ def test_cleanup_covers_both_control_planes(tmp_path: Path) -> None:
 
 def test_scenario_file_parses_with_two_ordered_functions() -> None:
     payload = yaml.safe_load(
-        (NANOLAB_ROOT / "scenarios-v2/offload-loadtest.yaml").read_text()
+        (NANOLAB_ROOT / "scenarios-v2/edge-cloud-offload-policy.yaml").read_text()
     )
     config = ScenarioConfig.model_validate(payload)
     assert config.workflow == "offload-loadtest"

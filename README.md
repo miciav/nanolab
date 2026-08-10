@@ -23,8 +23,8 @@ export NANOFAAS_ROOT=/path/to/nanofaas
 For example:
 
 ```bash
-NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab plan packages/nanolab/scenarios-v2/validate-container.yaml
-NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab run packages/nanolab/scenarios-v2/validate-container.yaml
+NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab plan packages/nanolab/scenarios-v2/deployment-lifecycle-container.yaml
+NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab run packages/nanolab/scenarios-v2/deployment-lifecycle-container.yaml
 ```
 
 Or use the bundled launcher, which checks for `uv` and forwards all
@@ -32,7 +32,7 @@ arguments — equivalent to `uv run --package nanolab nanolab ...`:
 
 ```bash
 export NANOFAAS_ROOT=/path/to/nanofaas
-./nanolab.sh plan packages/nanolab/scenarios-v2/validate-container.yaml
+./nanolab.sh plan packages/nanolab/scenarios-v2/deployment-lifecycle-container.yaml
 ```
 
 ## CI gate
@@ -74,8 +74,8 @@ uv pip install dist/nanolab-0.1.0-py3-none-any.whl dist/workflow_tasks-0.1.0-py3
 .wheel-smoke/bin/python -c "import nanolab, workflow_tasks, tui_toolkit"
 .wheel-smoke/bin/nanolab --help
 
-uv run --package nanolab nanolab plan packages/nanolab/scenarios-v2/validate-container.yaml --environment packages/nanolab/environments/local.yaml
-uv run --package nanolab nanolab plan packages/nanolab/scenarios-v2/validate-k8s.yaml --environment packages/nanolab/environments/multipass.yaml
+uv run --package nanolab nanolab plan packages/nanolab/scenarios-v2/deployment-lifecycle-container.yaml --environment packages/nanolab/environments/local.yaml
+uv run --package nanolab nanolab plan packages/nanolab/scenarios-v2/deployment-lifecycle-k8s.yaml --environment packages/nanolab/environments/multipass.yaml
 ```
 
 Nothing in this gate should modify `uv.lock`; if it does, run `uv lock` and
@@ -89,7 +89,7 @@ checkout (e.g. picking up source changes that haven't been re-pinned yet),
 just point `NANOFAAS_ROOT` at that checkout instead:
 
 ```bash
-NANOFAAS_ROOT=/path/to/newer/nanofaas uv run --package nanolab nanolab plan packages/nanolab/scenarios-v2/validate-container.yaml
+NANOFAAS_ROOT=/path/to/newer/nanofaas uv run --package nanolab nanolab plan packages/nanolab/scenarios-v2/deployment-lifecycle-container.yaml
 ```
 
 Bumping the pin used by CI means updating both the `ref:` in

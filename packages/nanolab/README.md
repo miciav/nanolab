@@ -32,8 +32,8 @@ Inspect the plan before executing it. The container scenario is the smallest
 local path and does not require a Kubernetes cluster:
 
 ```bash
-NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab plan packages/nanolab/scenarios-v2/validate-container.yaml
-NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab run packages/nanolab/scenarios-v2/validate-container.yaml
+NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab plan packages/nanolab/scenarios-v2/deployment-lifecycle-container.yaml
+NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab run packages/nanolab/scenarios-v2/deployment-lifecycle-container.yaml
 ```
 
 The interactive UI uses exactly the same plan/run implementation:
@@ -92,9 +92,9 @@ Local execution is the default. VM-backed workflows bind the `stack` and optiona
 For a Multipass-backed Kubernetes run:
 
 ```bash
-NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab plan packages/nanolab/scenarios-v2/validate-k8s.yaml \
+NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab plan packages/nanolab/scenarios-v2/deployment-lifecycle-k8s.yaml \
   --environment packages/nanolab/environments/multipass.yaml
-NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab run packages/nanolab/scenarios-v2/validate-k8s.yaml \
+NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab run packages/nanolab/scenarios-v2/deployment-lifecycle-k8s.yaml \
   --environment packages/nanolab/environments/multipass.yaml \
   --provision
 ```
@@ -114,9 +114,9 @@ Proxmox reads its password from the environment variable named by `password_env`
 Load testing follows the same plan-first workflow:
 
 ```bash
-NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab plan packages/nanolab/scenarios-v2/loadtest.yaml \
+NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab plan packages/nanolab/scenarios-v2/autoscaling-cycle-k8s.yaml \
   --environment packages/nanolab/environments/multipass.yaml
-NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab run packages/nanolab/scenarios-v2/loadtest.yaml \
+NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab run packages/nanolab/scenarios-v2/autoscaling-cycle-k8s.yaml \
   --environment packages/nanolab/environments/multipass.yaml \
   --provision \
   --run-dir packages/nanolab/runs/experiment-1

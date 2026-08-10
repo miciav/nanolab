@@ -43,7 +43,7 @@ def test_performance_profile_uses_the_tool_relative_scenario(
     assert profile.loadgen_vm == "Standard_D2s_v5"
     assert profile.architecture == "amd64"
     assert profile.flavor == "native"
-    assert profile.scenario == "scenarios-v2/loadtest.yaml"
+    assert profile.scenario == "scenarios-v2/autoscaling-cycle-k8s.yaml"
 
 
 def test_sonata_benchmarks_use_isolated_dirs_and_exact_registry_digests(

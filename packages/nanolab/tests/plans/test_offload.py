@@ -70,7 +70,7 @@ def test_offload_scenario_file_parses() -> None:
     import yaml
 
     payload = yaml.safe_load(
-        (NANOLAB_ROOT / "scenarios-v2/offload.yaml").read_text()
+        (NANOLAB_ROOT / "scenarios-v2/edge-cloud-offload-contract.yaml").read_text()
     )
     config = ScenarioConfig.model_validate(payload)
     assert config.workflow == "offload"

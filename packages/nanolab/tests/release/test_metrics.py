@@ -28,7 +28,7 @@ PROFILE = PerformanceProfile(
     loadgen_vm="Standard_D2s_v5",
     architecture="amd64",
     flavor="native",
-    scenario="scenarios-v2/loadtest.yaml",
+    scenario="scenarios-v2/autoscaling-cycle-k8s.yaml",
 )
 POLICY = RegressionPolicy(
     throughput_max_loss_percent=10,
@@ -277,7 +277,7 @@ def test_release_configuration_owns_the_versioned_policy() -> None:
         "schemaVersion": 1,
         "build": {"maxParallelism": 4},
         "benchmark": {
-            "scenario": "scenarios-v2/loadtest.yaml",
+            "scenario": "scenarios-v2/autoscaling-cycle-k8s.yaml",
             "runs": 3,
             "profile": "azure-d8s-v5+d2s-v5-amd64-native-loadtest-v1",
             "regression": {
