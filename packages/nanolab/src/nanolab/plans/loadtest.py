@@ -267,7 +267,7 @@ def build_loadtest_plan(
             metrics_profile="advanced",
         )
         if hpa:
-            helm_values["hpaMetricsAdapter.enabled"] = "true"
+            helm_values["hpa-metrics-adapter.enabled"] = "true"
         request = replace(
             request,
             helm_values=_set_args(helm_values),
