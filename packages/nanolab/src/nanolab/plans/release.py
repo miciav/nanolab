@@ -24,13 +24,13 @@ from sonata_tasks.release_composites import (
 )
 from sonata_tasks.transfer import FileTransferTask
 from sonata_tasks.provisioning.providers import provider_for
-from nanolab.plans import loadtest as loadtest_plan
 from sonata_tasks.registry_tunnel import registry_tunnel_resource
 from sonata_tasks.execution.bindings import RoleBoundCommandTaskExecutor
 
 from nanolab.cli.execution import build_role_bindings
 from nanolab.plans.release_phases import (
     build_amd64_phase,
+    build_benchmark_phase,
     build_registry_push_phase,
     build_source_test_phase,
 )
@@ -49,7 +49,6 @@ from nanolab.release.benchmark import (
     performance_profile,
     regression_policy,
     run_sonata_aggregate,
-    run_sonata_benchmark,
     run_sonata_regression_gate,
 )
 from nanolab.release import attest as release_attest
@@ -75,7 +74,6 @@ from nanolab.release.tasks import (
     aggregate_benchmarks_task,
     arm64_build_task,
     arm64_smoke_task,
-    benchmark_task,
     regression_gate_task,
     run_steps,
     registry_artifacts_from_receipt,
@@ -359,32 +357,18 @@ def build_release_workflow(
         scenario=benchmark_config,
         run_dir=versioned_release_run_dir(request.run_dir, identity.prepared_version),
     )
-    benchmark_runs = []
-    for i in range(1, request.settings.benchmark_runs + 1):
-        benchmark_runs.append(
-            benchmark_task(
-                index=i,
-                identity=identity,
-                run_dir=request.run_dir,
-                phase_inputs={
-                    "run": i,
-                    "scenario": digest_path(request.settings.scenario),
-                    "images": release_images,
-                },
-                prerequisites=(registry_push.receipt,),
-                work=lambda inputs, index=i: (
-                    run_sonata_benchmark(
-                        benchmark_plan,
-                        index,
-                        loadtest_plan.build_loadtest_plan,
-                        bindings,
-                        fetcher,
-                        inputs.resource(infrastructure.endpoints),
-                        registry_push.receipt,
-                    ),
-                ),
-            )
-        )
+    benchmark_runs = build_benchmark_phase(
+        identity=identity,
+        run_dir=request.run_dir,
+        benchmark_plan=benchmark_plan,
+        runs=request.settings.benchmark_runs,
+        scenario=request.settings.scenario,
+        release_images=release_images,
+        registry_push=registry_push,
+        bindings=bindings,
+        fetcher=fetcher,
+        endpoints=infrastructure.endpoints,
+    )
 
     # --- Phase 7: Aggregate ---
     aggregate = aggregate_benchmarks_task(

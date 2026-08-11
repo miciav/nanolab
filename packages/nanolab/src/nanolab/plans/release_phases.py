@@ -8,14 +8,20 @@ re-read. The phases were already there in the comments; this gives them names.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sonata_tasks.release_composites import command_specs_composite, registry_push_composite
 from sonata_tasks.execution.bindings import RoleBoundCommandTaskExecutor
 
 from nanolab.images.plan import ImagePlan
+from nanolab.plans import loadtest as loadtest_plan
+from nanolab.release.benchmark import run_sonata_benchmark
+from nanolab.release.model import digest_path
 from nanolab.release.build import amd64_build_commands, source_test_commands
 from nanolab.release.model import ReleaseIdentity
+
+if TYPE_CHECKING:  # pragma: no cover - import cycle guard
+    from nanolab.plans.release import ReleaseRequest
 from nanolab.release.resources import (
     ReleaseResources,
     ReleaseSourceResources,
@@ -24,6 +30,7 @@ from nanolab.release.resources import (
 from nanolab.release.tasks import (
     ReleasePhaseTask,
     amd64_build_task,
+    benchmark_task,
     registry_push_task,
     run_image_steps,
     run_source_steps,
@@ -164,3 +171,46 @@ def build_registry_push_phase(
             registry=True,
         ),
     )
+
+
+def build_benchmark_phase(
+    *,
+    identity: ReleaseIdentity,
+    run_dir: Path,
+    benchmark_plan: ReleaseRequest,
+    runs: int,
+    scenario: Path,
+    release_images: tuple[str, ...],
+    registry_push: ReleasePhaseTask,
+    bindings: Any,
+    fetcher: Any,
+    endpoints: Any,
+) -> tuple[ReleasePhaseTask, ...]:
+    """Run the loadtest benchmark the configured number of times."""
+    benchmark_runs = []
+    for i in range(1, runs + 1):
+        benchmark_runs.append(
+            benchmark_task(
+                index=i,
+                identity=identity,
+                run_dir=run_dir,
+                phase_inputs={
+                    "run": i,
+                    "scenario": digest_path(scenario),
+                    "images": release_images,
+                },
+                prerequisites=(registry_push.receipt,),
+                work=lambda inputs, index=i: (
+                    run_sonata_benchmark(
+                        benchmark_plan,
+                        index,
+                        loadtest_plan.build_loadtest_plan,
+                        bindings,
+                        fetcher,
+                        inputs.resource(endpoints),
+                        registry_push.receipt,
+                    ),
+                ),
+            )
+        )
+    return tuple(benchmark_runs)
