@@ -10,6 +10,11 @@ from __future__ import annotations
 DEFAULT_NAMESPACE = "nanofaas-e2e"
 LOCAL_REGISTRY = "localhost:5000"
 
+# Literal, not f"{DEFAULT_NAMESPACE}-registry": live environments already have
+# a container running under this name, and deriving it from the namespace
+# would silently rename (and orphan) it the moment the namespace changes.
+REGISTRY_CONTAINER_NAME = "nanofaas-e2e-registry"
+
 # NodePorts the stack VM publishes.
 CONTROL_PLANE_NODE_PORT = 30080
 PROMETHEUS_NODE_PORT = 30090

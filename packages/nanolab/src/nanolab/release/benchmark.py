@@ -147,7 +147,7 @@ def run_sonata_benchmark(
     run_dir = _clean_local_run_dir(Path(plan.run_dir), index)
     summary = run_dir / "summary.json"
     role = plan.environment.target("loadgen" if "loadgen" in plan.environment.roles else "stack")
-    home = role.home or ("/root" if role.user == "root" else f"/home/{role.user}")
+    home = role.remote_home
     remote_run_dir = Path(home) / "nanofaas-release" / plan.version / "benchmarks" / f"run-{index}"
     workflow = loadtest_builder(
         plan.scenario,

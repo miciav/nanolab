@@ -8,7 +8,7 @@ from typing import cast
 
 from multipass import find_ssh_public_key
 
-from sonata_tasks.deployment import DEFAULT_NAMESPACE
+from sonata_tasks.deployment import DEFAULT_NAMESPACE, REGISTRY_CONTAINER_NAME
 from sonata_tasks.vm.multipass import (
     _find_ssh_private_key_path,
     repo_rsync_command,
@@ -273,7 +273,7 @@ def plan_registry_ensure_container(
                 "registry": context.local_registry,
                 "registry_host": registry_host,
                 "registry_port": registry_port,
-                "registry_container_name": f"{DEFAULT_NAMESPACE}-registry",
+                "registry_container_name": REGISTRY_CONTAINER_NAME,
             },
             discover_private_key=discover_private_key,
         ),

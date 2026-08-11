@@ -54,8 +54,7 @@ def build_validate_plan(
         product_root = tool_root or discover_tool_root()
         if environment is not None and environment.provider != "local":
             target = environment.target("stack")
-            home = target.home or ("/root" if target.user == "root" else f"/home/{target.user}")
-            queue_burst_script = Path(home) / "nanolab-assets/k6/k8s-queue-burst.js"
+            queue_burst_script = Path(target.remote_home) / "nanolab-assets/k6/k8s-queue-burst.js"
         else:
             queue_burst_script = product_root / "assets/k6/k8s-queue-burst.js"
         request = replace(

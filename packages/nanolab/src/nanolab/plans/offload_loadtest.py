@@ -257,9 +257,7 @@ def build_offload_loadtest_plan(
     remote = dedicated_loadgen and environment.provider != "local"
     if remote:
         role_target = environment.target("loadgen")
-        home = role_target.home or (
-            "/root" if role_target.user == "root" else f"/home/{role_target.user}"
-        )
+        home = role_target.remote_home
         script_path = Path(home) / "nanolab-assets/k6/offload-mixed.js"
         summary_path = Path(home) / "nanofaas-loadtest/k6-summary.json"
     else:

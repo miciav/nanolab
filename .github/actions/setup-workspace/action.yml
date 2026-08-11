@@ -83,10 +83,10 @@ runs:
     - name: Report whether the nanoFaaS source is present
       id: report
       shell: bash -euo pipefail {0}
+      env:
+        HAS_TOKEN: ${{ inputs.nanofaas-token != '' }}
       run: |
-        if [ -n "${{ inputs.nanofaas-token }}" ]; then
-          echo "nanofaas=true" >>"$GITHUB_OUTPUT"
-        else
-          echo "nanofaas=false" >>"$GITHUB_OUTPUT"
+        echo "nanofaas=$HAS_TOKEN" >>"$GITHUB_OUTPUT"
+        if [ "$HAS_TOKEN" != "true" ]; then
           echo "::notice::No nanoFaaS token (fork pull request): steps needing NANOFAAS_ROOT will be skipped."
         fi

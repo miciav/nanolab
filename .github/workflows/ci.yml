@@ -44,10 +44,12 @@ jobs:
         with:
           nanofaas-token: ${{ secrets.NANOFAAS_CHECKOUT_TOKEN }}
 
-      # The tests read the pinned nanoFaaS checkout; the type check and the
-      # import contracts do not, so a fork pull request still gets those two.
+      # Only nanolab's tests read the pinned nanoFaaS checkout; sonata-tasks
+      # and tui-toolkit pass with NANOFAAS_ROOT unset, so a fork pull request
+      # still gets those two. The type check and the import contracts never
+      # need the checkout either.
       - name: Run ${{ matrix.package }} tests
-        if: ${{ !cancelled() && steps.sync.outcome == 'success' && steps.sync.outputs.nanofaas == 'true' }}
+        if: ${{ !cancelled() && steps.sync.outcome == 'success' && (matrix.package != 'nanolab' || steps.sync.outputs.nanofaas == 'true') }}
         run: uv run --locked --all-packages --all-groups pytest -c packages/${{ matrix.package }}/pyproject.toml packages/${{ matrix.package }}/tests
 
       - name: Type-check ${{ matrix.package }}
@@ -157,7 +159,7 @@ jobs:
           # The gate is that no registry bootstrap task exists, not that the
           # word never appears: a substring match over the whole plan fails on
           # any future task that merely mentions a registry.
-          if grep -qE '^[0-9]+\.[a-z0-9-]*(acquire|ensure|configure)-[a-z0-9-]*registry' "$provisioned_plan"; then
+          if grep -qE '^[0-9]+\.[a-z0-9-]*registry' "$provisioned_plan"; then
             echo "provisioned plan reuses the legacy registry bootstrap:" >&2
             grep -nE 'registry' "$provisioned_plan" >&2
             exit 1
