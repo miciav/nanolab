@@ -171,7 +171,7 @@ jobs:
           # The gate is that no registry bootstrap task exists, not that the
           # word never appears: a substring match over the whole plan fails on
           # any future task that merely mentions a registry.
-          if grep -qE '^[0-9]+\.[a-z0-9-]*(acquire|ensure|configure)-[a-z0-9-]*registry' "$provisioned_plan"; then
+          if grep -qE '^[0-9]+\.[a-z0-9-]*registry' "$provisioned_plan"; then
             echo "provisioned plan reuses the legacy registry bootstrap:" >&2
             grep -nE 'registry' "$provisioned_plan" >&2
             exit 1
