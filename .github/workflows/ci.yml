@@ -126,7 +126,9 @@ jobs:
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: |
           uv venv .wheel-smoke
-          uv pip install dist/nanolab-0.1.0-py3-none-any.whl dist/sonata_tasks-0.1.0-py3-none-any.whl dist/tui_toolkit-0.1.0-py3-none-any.whl --python .wheel-smoke/bin/python
+          # Glob, not names: the filenames carry the package version, and
+          # repeating it here means a version bump breaks CI for no reason.
+          uv pip install dist/*.whl --python .wheel-smoke/bin/python
           .wheel-smoke/bin/python -c "import nanolab, sonata_tasks, tui_toolkit"
           .wheel-smoke/bin/nanolab --help
 
@@ -166,9 +168,14 @@ jobs:
           done
           test "$vm_acquired" -lt "$helm_acquired"
           test "$helm_released" -lt "$vm_released"
-          # Images come from GHCR; a registry step here means the legacy bootstrap
-          # sequence was reused wholesale again.
-          ! grep -Fq 'registry' "$provisioned_plan"
+          # The gate is that no registry bootstrap task exists, not that the
+          # word never appears: a substring match over the whole plan fails on
+          # any future task that merely mentions a registry.
+          if grep -qE '^[0-9]+\.[a-z0-9-]*(acquire|ensure|configure)-[a-z0-9-]*registry' "$provisioned_plan"; then
+            echo "provisioned plan reuses the legacy registry bootstrap:" >&2
+            grep -nE 'registry' "$provisioned_plan" >&2
+            exit 1
+          fi
 
       - name: Run cli-container smoke test
         if: ${{ !cancelled() && steps.sync.outcome == 'success' }}
