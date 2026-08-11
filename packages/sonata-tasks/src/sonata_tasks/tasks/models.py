@@ -8,16 +8,23 @@ from typing import Literal
 
 from sonata_tasks.execution.roles import ExecutionRole
 
-ExecutionTarget = Literal["host", "vm"]
 TaskStatus = Literal["pending", "running", "passed", "failed", "skipped"]
 
 
 @dataclass(frozen=True, slots=True)
 class CommandTaskSpec:
+    """One command, and the role that says where it runs.
+
+    The role is the only answer to "where": `RoleBindings` maps it to an
+    executor, and that executor already knows whether it reaches a VM. A spec
+    used to carry a second answer — a `target` of "host" or "vm" — which the
+    bindings then had to keep in agreement with the role. Two names for one
+    decision is one more than can be kept true.
+    """
+
     task_id: str
     summary: str
     argv: tuple[str, ...]
-    target: ExecutionTarget = "host"
     role: ExecutionRole | None = None
     env: Mapping[str, str] = field(default_factory=lambda: MappingProxyType({}))
     cwd: Path | None = None
@@ -30,7 +37,7 @@ class CommandTaskSpec:
 
     @property
     def execution_role(self) -> ExecutionRole:
-        return self.role or ("host" if self.target == "host" else "stack")
+        return self.role or "host"
 
 
 @dataclass(frozen=True, slots=True)

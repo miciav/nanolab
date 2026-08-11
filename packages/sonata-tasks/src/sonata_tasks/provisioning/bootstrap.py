@@ -63,12 +63,14 @@ def operation_task(
     *,
     title: str | None = None,
 ) -> OperationTask:
-    target = "vm" if operation.execution_target == "vm" else "host"
     spec = CommandTaskSpec(
         task_id=operation.operation_id,
         summary=operation.summary,
         argv=tuple(operation.argv),
-        target=target,
+        # The components speak of a "target"; the execution layer speaks of a
+        # role. Translating here keeps that vocabulary at the edge instead of
+        # carrying both words through every spec.
+        role="stack" if operation.execution_target == "vm" else "host",
         env=dict(operation.env),
         remote_dir=None,
     )
@@ -89,13 +91,29 @@ def run_bootstrap_operations(
     runner = cast(
         HostCommandRunner, getattr(provider, "shell", None) or SubprocessShell()
     )
+    # Materialised because it is inspected before it is run, and a generator
+    # would arrive at the loop already spent.
+    planned = tuple(operations)
+    # Bootstrap holds one executor, and it runs here. An operation that asks for
+    # the VM has no way to get there, so say so rather than running it locally:
+    # this used to be caught by a mismatched target deep in the executor.
+    inside_vm = [
+        operation.operation_id
+        for operation in planned
+        if operation.execution_target == "vm"
+    ]
+    if inside_vm:
+        raise ValueError(
+            "bootstrap runs on the host, but these operations ask for the VM: "
+            + ", ".join(inside_vm)
+        )
     executor = HostCommandTaskExecutor(runner)
     tasks = [
         operation_task(
             replace(operation, operation_id=f"provision.{role}.{operation.operation_id}"),
             executor,
         )
-        for operation in operations
+        for operation in planned
     ]
     for task in tasks:
         with subtask(task_id=task.task_id, title=task.title):

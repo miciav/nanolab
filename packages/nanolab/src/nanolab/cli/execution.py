@@ -11,7 +11,7 @@ from typing import Any, cast
 from urllib.parse import urlsplit
 
 from multipass import MultipassClient
-from sonata_tasks.execution.bindings import RetargetingCommandTaskExecutor, RoleBindings
+from sonata_tasks.execution.bindings import RoleBindings
 from sonata_tasks.provisioning.providers import provider_for
 from sonata_tasks.tasks.executors import (
     HostCommandRunner,
@@ -352,7 +352,7 @@ def build_role_bindings(
                     ),
                 )
             )
-            return RetargetingCommandTaskExecutor(executor, "vm"), request
+            return executor, request
 
         stack, stack_request = provider_remote("stack")
         loadgen_result = provider_remote("loadgen") if "loadgen" in environment.roles else None
@@ -377,7 +377,7 @@ def build_role_bindings(
         executor = VmCommandTaskExecutor(
             _RemoteRunner(command_runner, target, environment.provider, default_env)
         )
-        return RetargetingCommandTaskExecutor(executor, "vm")
+        return executor
 
     stack = remote("stack")
     loadgen = remote("loadgen") if "loadgen" in environment.roles else None

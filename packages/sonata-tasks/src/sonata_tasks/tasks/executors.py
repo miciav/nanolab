@@ -31,8 +31,6 @@ class HostCommandTaskExecutor:
         self._runner = runner
 
     def run(self, task: CommandTaskSpec, *, dry_run: bool = False) -> TaskResult:
-        if task.target != "host":
-            raise ValueError(f"HostCommandTaskExecutor cannot run {task.target!r} task")
         result = self._runner.run(list(task.argv), cwd=task.cwd, env=dict(task.env), dry_run=dry_run)
         status = "passed" if result.return_code in task.expected_exit_codes else "failed"
         return TaskResult(
@@ -70,8 +68,6 @@ class VmCommandTaskExecutor:
         self._runner = runner
 
     def run(self, task: CommandTaskSpec, *, dry_run: bool = False) -> TaskResult:
-        if task.target != "vm":
-            raise ValueError(f"VmCommandTaskExecutor cannot run {task.target!r} task")
         result = self._runner.run_vm_command(
             task.argv,
             env=dict(task.env),

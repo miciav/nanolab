@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-import pytest
 
 from sonata_tasks.tasks.executors import HostCommandTaskExecutor, VmCommandTaskExecutor
 from sonata_tasks.tasks.models import CommandTaskSpec
@@ -75,14 +74,6 @@ def test_host_executor_marks_nonzero_unexpected_code_as_failed() -> None:
     assert result.stderr == "failed"
 
 
-def test_host_executor_rejects_vm_tasks() -> None:
-    executor = HostCommandTaskExecutor(runner=_RecordingCommandRunner())
-    task = CommandTaskSpec(task_id="x", summary="X", argv=("echo", "hi"), target="vm")
-
-    with pytest.raises(ValueError, match="cannot run 'vm' task"):
-        executor.run(task)
-
-
 @dataclass(frozen=True)
 class _VmResult:
     return_code: int
@@ -112,7 +103,6 @@ def test_vm_executor_delegates_to_injected_runner() -> None:
     task = CommandTaskSpec(
         task_id="vm.x",
         summary="VM X",
-        target="vm",
         argv=("docker", "ps"),
         env={"A": "B"},
         remote_dir="/home/ubuntu/nanofaas",

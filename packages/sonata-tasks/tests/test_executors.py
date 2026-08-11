@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-import pytest
 
 from sonata_tasks.tasks.executors import HostCommandTaskExecutor, VmCommandTaskExecutor
 from sonata_tasks.tasks.models import CommandTaskSpec
@@ -52,13 +51,6 @@ def test_host_executor_marks_nonzero_unexpected_code_as_failed() -> None:
     assert result.stderr == "failed"
 
 
-def test_host_executor_rejects_vm_tasks() -> None:
-    executor = HostCommandTaskExecutor(runner=_RecordingHostRunner())
-    task = CommandTaskSpec(task_id="x", summary="X", argv=("echo", "hi"), target="vm")
-    with pytest.raises(ValueError, match="cannot run 'vm' task"):
-        executor.run(task)
-
-
 @dataclass(frozen=True)
 class _VmResult:
     return_code: int
@@ -81,7 +73,7 @@ def test_vm_executor_delegates_to_injected_runner() -> None:
     runner = _RecordingVmRunner()
     executor = VmCommandTaskExecutor(runner=runner)
     task = CommandTaskSpec(
-        task_id="vm.x", summary="VM X", target="vm",
+        task_id="vm.x", summary="VM X", role="stack",
         argv=("docker", "ps"), env={"A": "B"}, remote_dir="/home/ubuntu/nanofaas",
     )
 
@@ -99,7 +91,6 @@ def test_vm_executor_does_not_use_host_cwd_as_remote_dir() -> None:
         CommandTaskSpec(
             task_id="vm.x",
             summary="VM X",
-            target="vm",
             argv=("kubectl", "version"),
             cwd=Path("/Users/alice/mcFaas"),
         )
@@ -108,8 +99,3 @@ def test_vm_executor_does_not_use_host_cwd_as_remote_dir() -> None:
     assert runner.commands == [(("kubectl", "version"), {}, None, False)]
 
 
-def test_vm_executor_rejects_host_tasks() -> None:
-    executor = VmCommandTaskExecutor(runner=_RecordingVmRunner())
-    task = CommandTaskSpec(task_id="x", summary="X", argv=("echo", "hi"), target="host")
-    with pytest.raises(ValueError, match="cannot run 'host' task"):
-        executor.run(task)

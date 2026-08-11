@@ -5,20 +5,18 @@ from typing import get_args
 
 from sonata_tasks.tasks.models import (
     CommandTaskSpec,
-    ExecutionTarget,
     TaskResult,
     TaskStatus,
 )
 
 
 def test_task_type_aliases_cover_expected_values() -> None:
-    assert set(get_args(ExecutionTarget)) == {"host", "vm"}
     assert set(get_args(TaskStatus)) == {"pending", "running", "passed", "failed", "skipped"}
 
 
-def test_command_task_spec_defaults_to_host_target_and_empty_env() -> None:
+def test_command_task_spec_defaults_to_the_host_role_and_empty_env() -> None:
     task = CommandTaskSpec(task_id="build.compile", summary="Compile project", argv=("./gradlew", "build"))
-    assert task.target == "host"
+    assert task.execution_role == "host"
     assert task.env == {}
     assert task.cwd is None
     assert task.remote_dir is None
@@ -29,11 +27,11 @@ def test_vm_command_task_can_declare_remote_dir() -> None:
     task = CommandTaskSpec(
         task_id="images.build",
         summary="Build image",
-        target="vm",
+        role="stack",
         argv=("docker", "build", "-t", "img", "."),
         remote_dir="/home/ubuntu/nanofaas",
     )
-    assert task.target == "vm"
+    assert task.execution_role == "stack"
     assert task.remote_dir == "/home/ubuntu/nanofaas"
 
 
