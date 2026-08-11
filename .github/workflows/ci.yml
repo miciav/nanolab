@@ -146,9 +146,26 @@ jobs:
           trap 'rm -f "$provisioned_plan"' EXIT
           uv run --package nanolab nanolab plan packages/nanolab/scenarios-v2/cli-contract-k8s.yaml \
             --environment packages/nanolab/environments/multipass.yaml >"$provisioned_plan"
-          grep -Fq '002.acquire-stack-vm' "$provisioned_plan"
-          grep -Fq '006.acquire-control-plane-helm-release' "$provisioned_plan"
-          grep -Fq '012.release-stack-vm' "$provisioned_plan"
+          # By position in the plan, not by ordinal: what matters is that the VM
+          # is acquired before the chart needs it and released after, in reverse
+          # order of acquisition. Pinning the numbers asserted the same thing
+          # more weakly and went stale the moment a task was inserted.
+          line_of() {
+            grep -n -- "$1" "$provisioned_plan" | head -1 | cut -d: -f1
+          }
+          vm_acquired="$(line_of 'acquire-stack-vm')"
+          helm_acquired="$(line_of 'acquire-control-plane-helm-release')"
+          helm_released="$(line_of 'release-control-plane-helm-release')"
+          vm_released="$(line_of 'release-stack-vm')"
+          for step in "$vm_acquired" "$helm_acquired" "$helm_released" "$vm_released"; do
+            if [ -z "$step" ]; then
+              echo "provisioned plan is missing a VM or Helm step:" >&2
+              cat "$provisioned_plan" >&2
+              exit 1
+            fi
+          done
+          test "$vm_acquired" -lt "$helm_acquired"
+          test "$helm_released" -lt "$vm_released"
           # Images come from GHCR; a registry step here means the legacy bootstrap
           # sequence was reused wholesale again.
           ! grep -Fq 'registry' "$provisioned_plan"
