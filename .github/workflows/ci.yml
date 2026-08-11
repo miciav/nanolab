@@ -102,7 +102,11 @@ jobs:
           uv run --package nanolab nanolab plan packages/nanolab/scenarios-v2/deployment-lifecycle-container.yaml --environment packages/nanolab/environments/local.yaml
           uv run --package nanolab nanolab plan packages/nanolab/scenarios-v2/deployment-lifecycle-k8s.yaml --environment packages/nanolab/environments/multipass.yaml
           uv run --package nanolab nanolab plan packages/nanolab/scenarios-v2/cli-contract-k8s.yaml --control-plane-url http://control-plane.example:30080
-          uv run --package nanolab nanolab plan packages/nanolab/scenarios-v2/cli-contract-container.yaml | grep -q '010.release-local-control-plane'
+          # Without the ordinal: the gate is that the plan releases the control
+          # plane, not that it does so tenth. Pinning the number made this stale
+          # the moment the plan grew a registry, and the failure stayed hidden
+          # behind an earlier red step for days.
+          uv run --package nanolab nanolab plan packages/nanolab/scenarios-v2/cli-contract-container.yaml | grep -q 'release-local-control-plane'
           provisioned_plan="$(mktemp)"
           trap 'rm -f "$provisioned_plan"' EXIT
           uv run --package nanolab nanolab plan packages/nanolab/scenarios-v2/cli-contract-k8s.yaml \
