@@ -314,6 +314,25 @@ def test_remote_cleanup_rejects_paths_outside_release_benchmark_run(
         )
 
 
+def test_a_remote_run_dir_must_be_an_absolute_run_child(tmp_path: Path) -> None:
+    """The remote run directory is validated by shape; a relative one is refused
+    with a message about the directory, not a type error about a boolean."""
+    executor = RecordingExecutor()
+
+    with pytest.raises(ValueError, match="absolute run-N child"):
+        build_loadtest_plan(
+            SCENARIO,
+            EnvironmentConfig.model_validate(
+                {"provider": "multipass", "roles": {"stack": {"name": "nanofaas-stack"}}}
+            ),
+            RoleBindings(host=executor, stack=executor),
+            control_plane_url="http://stack:30080",
+            prometheus_client=NoopPrometheus(),
+            run_dir=tmp_path,
+            remote_run_dir=Path("nanofaas-release/v1/benchmarks/run-1"),
+        )
+
+
 def test_local_loadtest_reads_k6_script_from_the_nanolab_package(tmp_path: Path) -> None:
     tool_root = tmp_path / "nanolab"
     executor = RecordingExecutor()

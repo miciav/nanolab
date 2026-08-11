@@ -215,17 +215,17 @@ def build_loadtest_plan(
         script_path = Path(home) / f"nanolab-assets/k6/{script_name}"
         output_dir = remote_run_dir or Path(home) / "nanofaas-loadtest"
         if remote_run_dir is not None:
-            remote = PurePosixPath(str(remote_run_dir))
+            requested = PurePosixPath(str(remote_run_dir))
             selected_home = PurePosixPath(home)
             try:
-                relative = remote.relative_to(selected_home)
+                relative = requested.relative_to(selected_home)
             except ValueError:
                 relative = PurePosixPath()
             parts = relative.parts
-            run_number = remote.name.removeprefix("run-")
+            run_number = requested.name.removeprefix("run-")
             if (
-                not remote.is_absolute()
-                or ".." in remote.parts
+                not requested.is_absolute()
+                or ".." in requested.parts
                 or len(parts) != 4
                 or parts[0] != "nanofaas-release"
                 or not parts[1]
