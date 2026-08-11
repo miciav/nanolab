@@ -30,6 +30,7 @@ from sonata_tasks.execution.bindings import RoleBoundCommandTaskExecutor
 from nanolab.cli.execution import build_role_bindings
 from nanolab.plans.release_phases import (
     build_amd64_phase,
+    build_arm64_phase,
     build_benchmark_phase,
     build_regression_phase,
     build_registry_push_phase,
@@ -41,7 +42,6 @@ from nanolab.config.scenario import ScenarioConfig
 from nanolab.images.plan import DEFAULT_REGISTRY, ImagePlan, build_image_plan
 from nanolab.release.arm import build_arm64_image_plan
 from nanolab.release import arm as release_arm
-from nanolab.release import build as release_build
 from nanolab.release.build import extract_commit_tree
 from nanolab.release.environment import validate_release_environment
 from nanolab.release.evidence import release_evidence_verifiers
@@ -60,8 +60,6 @@ from nanolab.release.resources import (
     release_execution_guard,
 )
 from nanolab.release.model import (
-    Amd64ReleasePlan,
-    BuilderConfiguration,
     CredentialFiles,
     ReleaseIdentity,
     ReleaseSettings,
@@ -69,11 +67,7 @@ from nanolab.release.model import (
     git_state,
 )
 from nanolab.release.tasks import (
-    arm64_build_task,
-    arm64_smoke_task,
     run_steps,
-    registry_artifacts_from_receipt,
-    registry_evidence,
     publish_architectures_task,
     publish_manifests_task,
     publish_aliases_task,
@@ -406,66 +400,18 @@ def build_release_workflow(
         validate=release_arm.require_arm64_builder,
         replace_existing=True,
     )
-    arm_runtime_plan = Amd64ReleasePlan(
-        repo_root=nanofaas,
-        run_dir=release_dir / "domain",
-        version=identity.prepared_version,
+    arm_runtime_plan, arm_images, arm64_build, arm64_smoke = build_arm64_phase(
+        request=request,
         identity=identity,
-        environment=env,
-        scenario=request.scenario,
-        settings=request.settings,
-        image_plan=arm_plan,
-        builder=BuilderConfiguration(
-            name=f"release-arm64-{request.version}",
-            max_parallelism=request.settings.max_parallelism,
-        ),
-        bake_file=release_dir / "docker-bake-arm64.json",
-        buildkit_config=release_dir / "buildkitd-arm64.toml",
-        performance_root=request.performance_root,
-        credentials=request.credentials,
-    )
-    arm_images = tuple(cell.image for cell in arm_plan.cells)
-    arm64_build = arm64_build_task(
-        identity=identity,
-        run_dir=request.run_dir,
-        phase_inputs={"images": arm_images, "source": identity.source_commit},
-        prerequisites=(reg_gate.receipt, source_tests.receipt),
-        expected_images=arm_images,
-        work=lambda _inputs: registry_evidence(
-            release_build._build_arm64_images(  # noqa: SLF001
-                arm_runtime_plan,
-                arm_plan,
-                arm_runtime_plan.bake_file,
-                provider,
-                arm_req,
-                f"{remote_root}/docker-bake-arm64.json",
-                f"{remote_root}/buildkitd-arm64.toml",
-                source_dir,
-                registry_upstream="",
-                stage_inputs=False,
-                manage_resources=False,
-            )
-        ),
-    )
-
-    # --- Phase 10: ARM64 Smoke ---
-    arm64_smoke = arm64_smoke_task(
-        identity=identity,
-        run_dir=request.run_dir,
-        phase_inputs={"images": arm_images},
-        prerequisites=(arm64_build.receipt,),
-        work=lambda _inputs: tuple(
-            Evidence("file-digest", artifact.reference, artifact.digest)
-            for artifact in release_build._smoke_arm64_images(  # noqa: SLF001
-                arm_runtime_plan,
-                arm_plan,
-                provider,
-                arm_req,
-                registry_artifacts_from_receipt(arm64_build.receipt, arm_images),
-                registry_upstream="",
-                ensure_tunnel=False,
-            )
-        ),
+        release_dir=release_dir,
+        nanofaas=nanofaas,
+        arm_plan=arm_plan,
+        remote_root=remote_root,
+        source_dir=source_dir,
+        provider=provider,
+        arm_request=arm_req,
+        reg_gate=reg_gate,
+        source_tests=source_tests,
     )
 
     # --- Publish, attest, and finalize ---

@@ -11,6 +11,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from sonata_engine import Evidence
 from sonata_tasks.release_composites import command_specs_composite, registry_push_composite
 from sonata_tasks.execution.bindings import RoleBoundCommandTaskExecutor
 
@@ -25,7 +26,8 @@ from nanolab.release.benchmark import (
 )
 from nanolab.release.model import digest_path
 from nanolab.release.build import amd64_build_commands, source_test_commands
-from nanolab.release.model import ReleaseIdentity
+from nanolab.release import build as release_build
+from nanolab.release.model import Amd64ReleasePlan, BuilderConfiguration, ReleaseIdentity
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle guard
     from nanolab.plans.release import ReleaseRequest
@@ -38,8 +40,12 @@ from nanolab.release.tasks import (
     ReleasePhaseTask,
     aggregate_benchmarks_task,
     amd64_build_task,
+    arm64_build_task,
+    arm64_smoke_task,
     benchmark_task,
     regression_gate_task,
+    registry_artifacts_from_receipt,
+    registry_evidence,
     registry_push_task,
     run_image_steps,
     run_source_steps,
@@ -258,3 +264,82 @@ def build_regression_phase(
         ),
     )
     return aggregate, reg_gate
+
+
+def build_arm64_phase(
+    *,
+    request: ReleaseRequest,
+    identity: ReleaseIdentity,
+    release_dir: Path,
+    nanofaas: Path,
+    arm_plan: ImagePlan,
+    remote_root: str,
+    source_dir: str,
+    provider: Any,
+    arm_request: Any,
+    reg_gate: ReleasePhaseTask,
+    source_tests: ReleasePhaseTask,
+) -> tuple[Amd64ReleasePlan, tuple[str, ...], ReleasePhaseTask, ReleasePhaseTask]:
+    """Build the ARM64 images on the ARM builder VM and smoke-test them."""
+    arm_runtime_plan = Amd64ReleasePlan(
+        repo_root=nanofaas,
+        run_dir=release_dir / "domain",
+        version=identity.prepared_version,
+        identity=identity,
+        environment=request.environment,
+        scenario=request.scenario,
+        settings=request.settings,
+        image_plan=arm_plan,
+        builder=BuilderConfiguration(
+            name=f"release-arm64-{request.version}",
+            max_parallelism=request.settings.max_parallelism,
+        ),
+        bake_file=release_dir / "docker-bake-arm64.json",
+        buildkit_config=release_dir / "buildkitd-arm64.toml",
+        performance_root=request.performance_root,
+        credentials=request.credentials,
+    )
+    arm_images = tuple(cell.image for cell in arm_plan.cells)
+    arm64_build = arm64_build_task(
+        identity=identity,
+        run_dir=request.run_dir,
+        phase_inputs={"images": arm_images, "source": identity.source_commit},
+        prerequisites=(reg_gate.receipt, source_tests.receipt),
+        expected_images=arm_images,
+        work=lambda _inputs: registry_evidence(
+            release_build._build_arm64_images(  # noqa: SLF001
+                arm_runtime_plan,
+                arm_plan,
+                arm_runtime_plan.bake_file,
+                provider,
+                arm_request,
+                f"{remote_root}/docker-bake-arm64.json",
+                f"{remote_root}/buildkitd-arm64.toml",
+                source_dir,
+                registry_upstream="",
+                stage_inputs=False,
+                manage_resources=False,
+            )
+        ),
+    )
+
+    # --- Phase 10: ARM64 Smoke ---
+    arm64_smoke = arm64_smoke_task(
+        identity=identity,
+        run_dir=request.run_dir,
+        phase_inputs={"images": arm_images},
+        prerequisites=(arm64_build.receipt,),
+        work=lambda _inputs: tuple(
+            Evidence("file-digest", artifact.reference, artifact.digest)
+            for artifact in release_build._smoke_arm64_images(  # noqa: SLF001
+                arm_runtime_plan,
+                arm_plan,
+                provider,
+                arm_request,
+                registry_artifacts_from_receipt(arm64_build.receipt, arm_images),
+                registry_upstream="",
+                ensure_tunnel=False,
+            )
+        ),
+    )
+    return arm_runtime_plan, arm_images, arm64_build, arm64_smoke
