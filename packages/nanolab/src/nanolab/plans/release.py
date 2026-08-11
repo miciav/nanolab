@@ -9,7 +9,7 @@ selectable.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import asdict, dataclass, replace
+from dataclasses import dataclass, replace
 import json
 from pathlib import Path
 from typing import Any
@@ -31,6 +31,7 @@ from nanolab.cli.execution import build_role_bindings
 from nanolab.plans.release_phases import (
     build_amd64_phase,
     build_benchmark_phase,
+    build_regression_phase,
     build_registry_push_phase,
     build_source_test_phase,
 )
@@ -46,10 +47,7 @@ from nanolab.release.environment import validate_release_environment
 from nanolab.release.evidence import release_evidence_verifiers
 from nanolab.release.benchmark import (
     _aggregate_from_payload,
-    performance_profile,
     regression_policy,
-    run_sonata_aggregate,
-    run_sonata_regression_gate,
 )
 from nanolab.release import attest as release_attest
 from nanolab.release import publish as release_publish
@@ -71,10 +69,8 @@ from nanolab.release.model import (
     git_state,
 )
 from nanolab.release.tasks import (
-    aggregate_benchmarks_task,
     arm64_build_task,
     arm64_smoke_task,
-    regression_gate_task,
     run_steps,
     registry_artifacts_from_receipt,
     registry_evidence,
@@ -370,31 +366,13 @@ def build_release_workflow(
         endpoints=infrastructure.endpoints,
     )
 
-    # --- Phase 7: Aggregate ---
-    aggregate = aggregate_benchmarks_task(
+    # --- Phases 7-8: Aggregate and Regression Gate ---
+    aggregate, reg_gate = build_regression_phase(
         identity=identity,
         run_dir=request.run_dir,
-        phase_inputs={
-            "runs": request.settings.benchmark_runs,
-            "profile": asdict(performance_profile(benchmark_plan)),
-        },
-        prerequisites=tuple(task.receipt for task in benchmark_runs),
-        work=lambda _inputs: (
-            run_sonata_aggregate(
-                benchmark_plan, tuple(task.receipt for task in benchmark_runs)
-            ),
-        ),
-    )
-
-    # --- Phase 8: Regression Gate ---
-    reg_gate = regression_gate_task(
-        identity=identity,
-        run_dir=request.run_dir,
-        phase_inputs={"policy": asdict(regression_policy(benchmark_plan))},
-        prerequisites=(aggregate.receipt,),
-        work=lambda _inputs: (
-            run_sonata_regression_gate(benchmark_plan, aggregate.receipt),
-        ),
+        benchmark_plan=benchmark_plan,
+        runs=request.settings.benchmark_runs,
+        benchmark_runs=benchmark_runs,
     )
 
     # --- Phase 9: ARM64 Build ---

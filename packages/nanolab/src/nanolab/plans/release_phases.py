@@ -7,6 +7,7 @@ re-read. The phases were already there in the comments; this gives them names.
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -15,7 +16,13 @@ from sonata_tasks.execution.bindings import RoleBoundCommandTaskExecutor
 
 from nanolab.images.plan import ImagePlan
 from nanolab.plans import loadtest as loadtest_plan
-from nanolab.release.benchmark import run_sonata_benchmark
+from nanolab.release.benchmark import (
+    performance_profile,
+    regression_policy,
+    run_sonata_aggregate,
+    run_sonata_benchmark,
+    run_sonata_regression_gate,
+)
 from nanolab.release.model import digest_path
 from nanolab.release.build import amd64_build_commands, source_test_commands
 from nanolab.release.model import ReleaseIdentity
@@ -29,8 +36,10 @@ from nanolab.release.resources import (
 )
 from nanolab.release.tasks import (
     ReleasePhaseTask,
+    aggregate_benchmarks_task,
     amd64_build_task,
     benchmark_task,
+    regression_gate_task,
     registry_push_task,
     run_image_steps,
     run_source_steps,
@@ -214,3 +223,38 @@ def build_benchmark_phase(
             )
         )
     return tuple(benchmark_runs)
+
+
+def build_regression_phase(
+    *,
+    identity: ReleaseIdentity,
+    run_dir: Path,
+    benchmark_plan: ReleaseRequest,
+    runs: int,
+    benchmark_runs: tuple[ReleasePhaseTask, ...],
+) -> tuple[ReleasePhaseTask, ReleasePhaseTask]:
+    """Aggregate the benchmark runs and gate the release on the regression policy."""
+    aggregate = aggregate_benchmarks_task(
+        identity=identity,
+        run_dir=run_dir,
+        phase_inputs={
+            "runs": runs,
+            "profile": asdict(performance_profile(benchmark_plan)),
+        },
+        prerequisites=tuple(task.receipt for task in benchmark_runs),
+        work=lambda _inputs: (
+            run_sonata_aggregate(
+                benchmark_plan, tuple(task.receipt for task in benchmark_runs)
+            ),
+        ),
+    )
+    reg_gate = regression_gate_task(
+        identity=identity,
+        run_dir=run_dir,
+        phase_inputs={"policy": asdict(regression_policy(benchmark_plan))},
+        prerequisites=(aggregate.receipt,),
+        work=lambda _inputs: (
+            run_sonata_regression_gate(benchmark_plan, aggregate.receipt),
+        ),
+    )
+    return aggregate, reg_gate
