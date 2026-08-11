@@ -27,7 +27,11 @@ from sonata_tasks.telegram import telegram_observer_from_environment
 
 from nanolab.cli import diagnostics
 from nanolab.config import EnvironmentConfig, ScenarioConfig
-from nanolab.cli.execution import build_role_bindings, resolve_loadtest_urls
+from nanolab.cli.execution import (
+    build_role_bindings,
+    prometheus_over_ssh,
+    resolve_loadtest_urls,
+)
 from nanolab.cli.progress import ConsoleProgressSink
 from nanolab.cli.provisioning import provision_environment
 from nanolab.cli.vm_provider import vm_request_for_role
@@ -470,13 +474,21 @@ def install_product_commands(app: typer.Typer) -> None:
                     )
                 else:
                     provisioning = nullcontext()
-                with provisioning:
+                with provisioning, ExitStack() as forwarding:
                     if scenario_config.workflow == "loadtest":
+                        chosen_prometheus_url = prometheus_url
                         control_plane_url, prometheus_url = resolve_loadtest_urls(
                             environment_config,
                             backend=scenario_config.backend or "k8s",
                             control_plane_url=control_plane_url,
                             prometheus_url=prometheus_url,
+                        )
+                        prometheus_url = forwarding.enter_context(
+                            prometheus_over_ssh(
+                                environment_config,
+                                prometheus_url,
+                                enabled=chosen_prometheus_url is None,
+                            )
                         )
                     sonata_workflow = (
                         build_release_workflow(release_request, provider=release_provider)

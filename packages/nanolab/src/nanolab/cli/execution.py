@@ -1,9 +1,14 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 import shlex
-from typing import cast
+import socket
+import subprocess
+import time
+from typing import Any, cast
+from urllib.parse import urlsplit
 
 from multipass import MultipassClient
 from sonata_tasks.execution.bindings import RetargetingCommandTaskExecutor, RoleBindings
@@ -97,6 +102,102 @@ def resolve_loadtest_urls(
         control_plane_url or f"http://{host}:30080",
         prometheus_url or f"http://{host}:30090",
     )
+
+
+def _free_local_port() -> int:
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return int(probe.getsockname()[1])
+
+
+def _accepts_connections(port: int) -> bool:
+    with socket.socket() as probe:
+        probe.settimeout(0.5)
+        return probe.connect_ex(("127.0.0.1", port)) == 0
+
+
+@contextmanager
+def prometheus_over_ssh(
+    environment: EnvironmentConfig,
+    url: str,
+    *,
+    enabled: bool = True,
+    spawn: Callable[..., Any] = subprocess.Popen,
+    ready: Callable[[int], bool] = _accepts_connections,
+    timeout_seconds: float = 15.0,
+) -> Iterator[str]:
+    """Yield a Prometheus URL the host process can actually open.
+
+    On a Multipass environment the VM's address is a local-network peer, and
+    macOS refuses those to binaries it has not been granted Local Network
+    access — which the uv-managed Python is not. Every host-side query then
+    fails instantly with EHOSTUNREACH, so retrying is pointless: the snapshot
+    simply never worked from a Mac, while the same scenario passed on `local`
+    because there the URL is loopback.
+
+    Forwarding the port makes it loopback for everyone, on any machine, without
+    asking each developer to grant a permission or to remember a wrapper.
+
+    Yields `url` untouched when there is nothing to forward: a non-Multipass
+    provider, or a URL the caller chose explicitly and may already be tunnelling
+    themselves.
+    """
+    parts = urlsplit(url)
+    if not enabled or environment.provider != "multipass" or not parts.port:
+        yield url
+        return
+
+    # The address is taken from the URL rather than resolved again: whoever
+    # produced it already asked Multipass where the VM answers, and asking twice
+    # is how the two would drift apart.
+    host = parts.hostname
+    if not host:
+        yield url
+        return
+    target = environment.target("stack")
+    local_port = _free_local_port()
+    process = spawn(
+        [
+            "ssh",
+            "-N",
+            "-o", "StrictHostKeyChecking=no",
+            "-o", "UserKnownHostsFile=/dev/null",
+            # Without this ssh stays up after failing to bind, and the readiness
+            # wait below would blame the timeout instead of the port.
+            "-o", "ExitOnForwardFailure=yes",
+            "-L", f"127.0.0.1:{local_port}:127.0.0.1:{parts.port}",
+            f"{target.user}@{host}",
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        deadline = time.monotonic() + timeout_seconds
+        while time.monotonic() < deadline:
+            if process.poll() is not None:
+                detail = ""
+                if process.stderr is not None:
+                    detail = process.stderr.read().decode("utf-8", "replace").strip()
+                raise RuntimeError(
+                    f"Prometheus tunnel to {host} exited: {detail or 'no output'}"
+                )
+            if ready(local_port):
+                break
+            time.sleep(0.2)
+        else:
+            raise RuntimeError(
+                f"Prometheus tunnel to {host} never accepted a connection "
+                f"within {timeout_seconds:g}s"
+            )
+        yield f"http://127.0.0.1:{local_port}"
+    finally:
+        if process.poll() is None:
+            process.terminate()
+            try:
+                _ = process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                _ = process.wait(timeout=5)
 
 
 def _home(target: RoleTarget) -> str:

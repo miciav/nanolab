@@ -3,7 +3,7 @@ import json
 import subprocess
 from pathlib import Path
 from dataclasses import dataclass
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -385,6 +385,11 @@ def test_run_provisions_before_executing_workflow(monkeypatch, tmp_path: Path) -
             actions.append("resolve") or "http://stack:30080",
             "http://stack:30090",
         ),
+    )
+    # Forwarding the Prometheus port would open a real ssh to the fake host.
+    monkeypatch.setattr(
+        "nanolab.cli.product.prometheus_over_ssh",
+        lambda _environment, url, **_kwargs: nullcontext(url),
     )
     # Sonata's run takes `select`; the point here is the ordering of provisioning
     # around it, not what it runs.
