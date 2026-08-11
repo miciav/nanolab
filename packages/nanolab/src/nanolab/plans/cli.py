@@ -33,7 +33,7 @@ from nanolab.cli.vm_provider import vm_request_for_role
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.plans import _local_control_plane
-from nanolab.plans.validate import _resolve_function
+from nanolab.plans.functions import resolve_function
 from nanolab.release.publish import GHCR_REPOSITORY
 from nanolab.release.environment import secure_release_endpoints
 from nanolab.release.versioning import normalize_version, read_project_version
@@ -284,7 +284,7 @@ def _build_k8s_plan(
             build_argv=None,
         )
         for key in config.functions
-        for resolved in (_resolve_function(config, key),)
+        for resolved in (resolve_function(config, key),)
     )
     request = CliWorkflowRequest(
         functions=functions,
@@ -344,7 +344,7 @@ def build_cli_plan(
             image_build_argv=resolved.image_build_argv if local else None,
         )
         for key in config.functions
-        for resolved in (_resolve_function(config, key),)
+        for resolved in (resolve_function(config, key),)
     )
     request = CliWorkflowRequest(
         functions=functions,

@@ -44,7 +44,7 @@ from sonata_tasks.tasks.models import CommandTaskSpec
 
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
-from nanolab.plans.validate import _resolve_function, _sonata_function
+from nanolab.plans.functions import resolve_function, sonata_function
 from nanolab.workspace.paths import discover_tool_root
 from nanolab.workspace.provenance import source_fingerprint
 
@@ -171,7 +171,7 @@ def build_loadtest_plan(
             "metrics": [{"type": "in_flight", "target": "2"}],
         }
     resolved = tuple(
-        _resolve_function(config, key, tool_root=tool_root) for key in config.functions
+        resolve_function(config, key, tool_root=tool_root) for key in config.functions
     )
     prebuilt = prebuilt_control_plane_image is not None or prebuilt_function_images is not None
     if prebuilt:
@@ -186,7 +186,7 @@ def build_loadtest_plan(
             replace(function, image=prebuilt_function_images[function.key])
             for function in resolved
         )
-    functions = tuple(_sonata_function(function) for function in resolved)
+    functions = tuple(sonata_function(function) for function in resolved)
     if scaling_config is not None:
         functions = tuple(
             replace(

@@ -16,7 +16,7 @@ from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskEx
 from sonata_tasks.registry import docker_registry_resource
 
 from nanolab.config.scenario import ScenarioConfig
-from nanolab.plans.validate import _resolve_function
+from nanolab.plans.functions import resolve_function
 
 JAR_PATH = "platform/control-plane/build/libs/app.jar"
 
@@ -115,7 +115,7 @@ def build_offload_plan(
                 max_retries=resolved.max_retries,
             )
             for key in config.functions
-            for resolved in (_resolve_function(config, key),)
+            for resolved in (resolve_function(config, key),)
         ),
         cloud_endpoint=CLOUD_ENDPOINT,
         edge_endpoint=EDGE_ENDPOINT,

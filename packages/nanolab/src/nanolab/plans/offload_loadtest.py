@@ -30,7 +30,7 @@ from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.workspace.paths import discover_tool_root
 from nanolab.workspace.provenance import source_fingerprint
-from nanolab.plans.validate import _resolve_function, _sonata_function
+from nanolab.plans.functions import resolve_function, sonata_function
 
 _ACTUATOR_PORT = 30081
 _CONTROL_PLANE_PORT = 30080
@@ -210,13 +210,13 @@ def build_offload_loadtest_plan(
     # locally once it elapses) — the default 5s is too tight for a cross-VM hop
     # to a function pod that may still be warming up under real load.
     offloadable = replace(
-        _sonata_function(_resolve_function(config, offloadable_key, tool_root=tool_root)),
+        sonata_function(resolve_function(config, offloadable_key, tool_root=tool_root)),
         concurrency=2,
         queue_size=8,
         timeout_ms=15000,
     )
     control = replace(
-        _sonata_function(_resolve_function(config, control_key, tool_root=tool_root)),
+        sonata_function(resolve_function(config, control_key, tool_root=tool_root)),
         concurrency=2,
         queue_size=8,
         # The control must never be offloaded: if it were, the conservation
