@@ -551,12 +551,6 @@ def build_publication_phase(
         (publish_manifests.receipt, "publish-manifests"),
         (publish_aliases.receipt, "publish-aliases"),
     )
-
-    publication_receipts = (
-        (publish_architectures.receipt, "publish-architectures"),
-        (publish_manifests.receipt, "publish-manifests"),
-        (publish_aliases.receipt, "publish-aliases"),
-    )
     return PublicationPhase(
         ghcr=ghcr,
         cosign=cosign,
