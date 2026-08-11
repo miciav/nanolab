@@ -131,7 +131,7 @@ jobs:
             exit 1
           fi
           uv run --locked --package nanolab \
-            nanolab run packages/nanolab/scenarios-v2/cli-container.yaml
+            nanolab run packages/nanolab/scenarios-v2/cli-contract-container.yaml
           if curl -sS -m 2 http://127.0.0.1:18080/v1/functions >/dev/null 2>&1; then
             echo "API port 18080 remained open after cleanup" >&2
             exit 1
