@@ -21,7 +21,6 @@ from sonata_tasks.command import CommandTask
 from sonata_tasks.cosign import CosignTask
 from sonata_tasks.release_composites import (
     attest_composite,
-    command_specs_composite,
     registry_push_composite,
 )
 from sonata_tasks.transfer import FileTransferTask
@@ -31,7 +30,7 @@ from sonata_tasks.registry_tunnel import registry_tunnel_resource
 from sonata_tasks.execution.bindings import RoleBoundCommandTaskExecutor
 
 from nanolab.cli.execution import build_role_bindings
-from nanolab.plans.release_phases import build_source_test_phase
+from nanolab.plans.release_phases import build_amd64_phase, build_source_test_phase
 from nanolab.cli.vm_provider import vm_request_for_role
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
@@ -39,7 +38,7 @@ from nanolab.images.plan import DEFAULT_REGISTRY, ImagePlan, build_image_plan
 from nanolab.release.arm import build_arm64_image_plan
 from nanolab.release import arm as release_arm
 from nanolab.release import build as release_build
-from nanolab.release.build import amd64_build_commands, extract_commit_tree
+from nanolab.release.build import extract_commit_tree
 from nanolab.release.environment import validate_release_environment
 from nanolab.release.evidence import release_evidence_verifiers
 from nanolab.release.benchmark import (
@@ -71,7 +70,6 @@ from nanolab.release.model import (
 )
 from nanolab.release.tasks import (
     aggregate_benchmarks_task,
-    amd64_build_task,
     arm64_build_task,
     arm64_smoke_task,
     benchmark_task,
@@ -328,37 +326,16 @@ def build_release_workflow(
         buildkitd_config=f"{remote_root}/buildkitd-amd64.toml",
         replace_existing=True,
     )
-    amd64_commands = amd64_build_commands(
-        request.image_plan,
-        builder_name=amd64_builder_name,
-        remote_bake_file=f"{remote_root}/docker-bake-amd64.json",
-        remote_source_dir=source_dir,
-    )
-    amd64_steps = command_specs_composite(
-        amd64_commands, executor=executor, title="Build AMD64 images"
-    )
-    release_images = tuple(cell.image for cell in request.image_plan.cells)
-    amd64_build = amd64_build_task(
+    release_images, amd64_build = build_amd64_phase(
         identity=identity,
         run_dir=request.run_dir,
-        phase_inputs={
-            "commands": tuple(
-                (command.argv, command.role, str(command.remote_dir))
-                for command in amd64_commands
-            ),
-            "maxParallelism": request.settings.max_parallelism,
-            "sourceDir": source_dir,
-        },
-        prerequisites=(source_tests.receipt,),
-        expected_images=release_images,
-        work=lambda inputs: run_image_steps(
-            amd64_steps,
-            inputs,
-            executor,
-            release_images,
-            registry=False,
-            architecture="amd64",
-        ),
+        image_plan=request.image_plan,
+        max_parallelism=request.settings.max_parallelism,
+        builder_name=amd64_builder_name,
+        remote_root=remote_root,
+        source_dir=source_dir,
+        executor=executor,
+        source_tests=source_tests,
     )
 
     # --- Phase 3: Registry Push ---

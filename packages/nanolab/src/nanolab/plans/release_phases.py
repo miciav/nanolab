@@ -13,7 +13,8 @@ from typing import Any
 from sonata_tasks.release_composites import command_specs_composite
 from sonata_tasks.execution.bindings import RoleBoundCommandTaskExecutor
 
-from nanolab.release.build import source_test_commands
+from nanolab.images.plan import ImagePlan
+from nanolab.release.build import amd64_build_commands, source_test_commands
 from nanolab.release.model import ReleaseIdentity
 from nanolab.release.resources import (
     ReleaseResources,
@@ -22,6 +23,8 @@ from nanolab.release.resources import (
 )
 from nanolab.release.tasks import (
     ReleasePhaseTask,
+    amd64_build_task,
+    run_image_steps,
     run_source_steps,
     source_test_task,
 )
@@ -79,3 +82,51 @@ def build_source_test_phase(
         ),
     )
     return sources, source_tests
+
+
+def build_amd64_phase(
+    *,
+    identity: ReleaseIdentity,
+    run_dir: Path,
+    image_plan: ImagePlan,
+    max_parallelism: int,
+    builder_name: str,
+    remote_root: str,
+    source_dir: str,
+    executor: RoleBoundCommandTaskExecutor,
+    source_tests: ReleasePhaseTask,
+) -> tuple[tuple[str, ...], ReleasePhaseTask]:
+    """Build the AMD64 images on the stack VM from the staged source tree."""
+    amd64_commands = amd64_build_commands(
+        image_plan,
+        builder_name=builder_name,
+        remote_bake_file=f"{remote_root}/docker-bake-amd64.json",
+        remote_source_dir=source_dir,
+    )
+    amd64_steps = command_specs_composite(
+        amd64_commands, executor=executor, title="Build AMD64 images"
+    )
+    release_images = tuple(cell.image for cell in image_plan.cells)
+    amd64_build = amd64_build_task(
+        identity=identity,
+        run_dir=run_dir,
+        phase_inputs={
+            "commands": tuple(
+                (command.argv, command.role, str(command.remote_dir))
+                for command in amd64_commands
+            ),
+            "maxParallelism": max_parallelism,
+            "sourceDir": source_dir,
+        },
+        prerequisites=(source_tests.receipt,),
+        expected_images=release_images,
+        work=lambda inputs: run_image_steps(
+            amd64_steps,
+            inputs,
+            executor,
+            release_images,
+            registry=False,
+            architecture="amd64",
+        ),
+    )
+    return release_images, amd64_build
