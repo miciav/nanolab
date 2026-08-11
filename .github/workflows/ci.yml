@@ -9,6 +9,13 @@ on:
 permissions:
   contents: read
 
+defaults:
+  run:
+    # GitHub's default is `bash -e`, without pipefail: a failure inside a pipe
+    # passes unnoticed. Setting it once beats repeating `set -euo pipefail` in
+    # each block and forgetting it in half of them.
+    shell: bash -euo pipefail {0}
+
 jobs:
   gate:
     runs-on: ubuntu-latest
@@ -135,7 +142,6 @@ jobs:
       - name: Generate representative plans
         if: ${{ !cancelled() && steps.sync.outcome == 'success' }}
         run: |
-          set -euo pipefail
           uv run --package nanolab nanolab plan packages/nanolab/scenarios-v2/deployment-lifecycle-container.yaml --environment packages/nanolab/environments/local.yaml
           uv run --package nanolab nanolab plan packages/nanolab/scenarios-v2/deployment-lifecycle-k8s.yaml --environment packages/nanolab/environments/multipass.yaml
           uv run --package nanolab nanolab plan packages/nanolab/scenarios-v2/cli-contract-k8s.yaml --control-plane-url http://control-plane.example:30080
@@ -181,7 +187,6 @@ jobs:
         if: ${{ !cancelled() && steps.sync.outcome == 'success' }}
         timeout-minutes: 15
         run: |
-          set -euo pipefail
           if curl -sS -m 2 http://127.0.0.1:18080/v1/functions >/dev/null 2>&1; then
             echo "API port 18080 is already in use" >&2
             exit 1
