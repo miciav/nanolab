@@ -6,6 +6,8 @@ masked for months by a stale tofu workspace that skipped the launch path.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 from sonata_tasks.vm.adapters import AzureVmAdapter
 from sonata_tasks.vm.models import VmConfig, VmRequest
 
@@ -53,7 +55,7 @@ def test_azure_provider_forwards_open_ports_to_sdk(monkeypatch) -> None:
         def ensure_running(self, name, **kwargs):
             captured.update(kwargs, name=name)
 
-    provider = AzureVmProvider(repo_root=".")
+    provider = AzureVmProvider(repo_root=Path("."))
     monkeypatch.setattr(provider, "_client", lambda request: _FakeClient())
     # A live VM keeps the SDK fast path; recreation is covered in test_azure_provider.
     monkeypatch.setattr(provider, "_exists_in_azure", lambda request: True)

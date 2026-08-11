@@ -12,7 +12,7 @@ from sonata_tasks.loadtest.models import PrometheusQuery, TimeWindow
 from sonata_tasks.loadtest.ports import PrometheusClient, RemoteFileFetcher
 
 if TYPE_CHECKING:
-    from sonata_tasks.loadtest.autoscaling import VerifyAutoscalingReplicas
+    from sonata_tasks.loadtest.autoscaling import AutoscalingResult
 
 
 @dataclass
@@ -222,7 +222,7 @@ class WriteLoadtestSummary:
     title: str
     data_dir: Path
     output_dir: Path
-    autoscaling: "VerifyAutoscalingReplicas | None" = None
+    autoscaling: "AutoscalingResult | None" = None
 
     def run(self) -> Path:
         k6 = json.loads((self.data_dir / "k6-summary.json").read_text(encoding="utf-8"))

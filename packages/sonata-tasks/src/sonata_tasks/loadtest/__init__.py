@@ -9,9 +9,9 @@ from sonata_engine import Resource, Steps, Task, TaskInputs, TaskOutcome, Workfl
 from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
 from sonata_tasks.loadtest.autoscaling import (
     AutoscalingSummary,
-    ReplicaWatcher,
+    InitialReplicaCheck,
+    Sampling,
     VerifyAutoscalingReplicas,
-    VerifyInitialAutoscalingReplicas,
 )
 from sonata_tasks.loadtest.models import K6RunResult, TimeWindow
 from sonata_tasks.loadtest.tasks import (
@@ -76,14 +76,17 @@ class RunK6Task(Task[LoadtestOutcome]):
         self,
         *,
         run_k6: Task[K6RunResult],
-        watcher: ReplicaWatcher | None = None,
-        initial_replicas: VerifyInitialAutoscalingReplicas | None = None,
+        # Sampling, not Watcher: this only brackets the run. Reading the peak is
+        # the verifier's job, and asking for it here would exclude a sampler
+        # that reports somewhere else.
+        watcher: Sampling | None = None,
+        initial_replicas: InitialReplicaCheck | None = None,
         title: str = "Run k6",
     ) -> None:
         self.title = title
         self._run_k6 = run_k6
         self._watcher = watcher
-        self._initial_replicas: VerifyInitialAutoscalingReplicas | None = initial_replicas
+        self._initial_replicas: InitialReplicaCheck | None = initial_replicas
 
     def _run(self) -> K6RunResult:
         # K6Task always carries its result; the outcome type allows None, and an

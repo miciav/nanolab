@@ -57,7 +57,7 @@ select = ["F", "SLF"]
 "tests/**/*.py" = ["F841", "SLF001"]
 
 [tool.basedpyright]
-include = ["src/sonata_tasks"]
+include = ["src/sonata_tasks", "tests"]
 typeCheckingMode = "basic"
 reportMissingTypeStubs = false
 reportPrivateUsage = false

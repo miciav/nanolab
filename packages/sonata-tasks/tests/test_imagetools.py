@@ -132,6 +132,7 @@ class TestImagetoolsInspectTask:
         )
         result = task.run(TaskInputs.empty())
 
+        assert result.value is not None
         assert result.value.stdout == "sha256:def456"
 
     def test_fails_on_error(self) -> None:

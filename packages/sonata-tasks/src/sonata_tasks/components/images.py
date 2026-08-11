@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from types import MappingProxyType
 
 from sonata_tasks.components.context import ScenarioExecutionContext
-from sonata_tasks.components.operations import RemoteCommandOperation, ScenarioOperation
+from sonata_tasks.components.operations import RemoteCommandOperation
 
 
 def control_image(local_registry: str) -> str:
@@ -42,7 +42,7 @@ _RUST_CP_DIR = (
 )
 
 
-def plan_build_core(context: ScenarioExecutionContext) -> tuple[ScenarioOperation, ...]:
+def plan_build_core(context: ScenarioExecutionContext) -> tuple[RemoteCommandOperation, ...]:
     control_plane_image = control_image(context.local_registry)
     warm_echo = warm_echo_image(context.local_registry)
     if context.runtime == "rust":
@@ -52,7 +52,7 @@ def plan_build_core(context: ScenarioExecutionContext) -> tuple[ScenarioOperatio
         control_context = "platform/control-plane"
         control_dockerfile = "platform/control-plane/Dockerfile"
 
-    operations: list[ScenarioOperation] = []
+    operations: list[RemoteCommandOperation] = []
 
     if context.runtime != "rust":
         # Rust Dockerfile is a self-contained multi-stage build (cargo runs inside Docker);

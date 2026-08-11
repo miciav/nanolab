@@ -24,7 +24,12 @@ class ResolvedScenarioView(Protocol):
     """
 
     namespace: str | None
-    functions: Sequence[ResolvedFunctionView]
+
+    # A read-only property, not an attribute: as a mutable member this is
+    # invariant, so a scenario holding its own function type — which is every
+    # real one — could not satisfy the protocol it was written against.
+    @property
+    def functions(self) -> Sequence[ResolvedFunctionView]: ...
 
 
 @dataclass(frozen=True, slots=True)

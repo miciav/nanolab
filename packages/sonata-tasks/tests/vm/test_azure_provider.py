@@ -3,20 +3,21 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from sonata_tasks.vm.azure import AzureVmProvider
 from sonata_tasks.vm.models import VmRequest
 
 
-def _make_provider() -> object:
-    from sonata_tasks.vm.azure import AzureVmProvider
+def _make_provider() -> AzureVmProvider:
     return AzureVmProvider(repo_root=Path("/repo"))
 
 
-def _make_request(**kwargs) -> VmRequest:
-    defaults = dict(
+def _make_request(**kwargs: Any) -> VmRequest:
+    defaults: dict[str, Any] = dict(
         lifecycle="azure",
         name="test-vm",
         user="ubuntu",
@@ -28,7 +29,7 @@ def _make_request(**kwargs) -> VmRequest:
     return VmRequest(**defaults)
 
 
-def _make_azure_client_mock() -> MagicMock:
+def _make_azure_client_mock() -> tuple[MagicMock, MagicMock]:
     client = MagicMock()
     vm = MagicMock()
     vm.wait_for_ip.return_value = "10.0.0.1"

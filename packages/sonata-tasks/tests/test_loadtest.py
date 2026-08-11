@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from sonata_engine import TaskInputs, TaskOutcome, Workflow
+from sonata_engine import Task, TaskInputs, TaskOutcome, Workflow
 from sonata_engine.errors import NoUpstreamValueError
 from sonata_engine.workflow.context import bind_workflow_sink
 from sonata_tasks.loadtest.autoscaling import AutoscalingSummary
@@ -41,7 +41,10 @@ def _inputs(upstream: object) -> TaskInputs:
 
 
 @dataclass
-class FakeRunK6:
+class FakeRunK6(Task[K6RunResult]):
+    """A Task, because that is what RunK6Task is handed and runs."""
+
+    title: str = "Run k6"
     result_value: K6RunResult = field(default_factory=_k6)
     calls: int = 0
 
@@ -103,7 +106,9 @@ def test_initial_replica_check_runs_before_load_sampling() -> None:
         def run(self) -> None:
             events.append("initial")
 
-    class OrderedRun:
+    class OrderedRun(Task[K6RunResult]):
+        title = "Run k6"
+
         def run(self, inputs: TaskInputs) -> TaskOutcome[K6RunResult]:
             del inputs
             events.append("k6")

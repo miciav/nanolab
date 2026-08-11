@@ -6,6 +6,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from typing import cast
+
 import pytest
 from sonata_engine import Evidence, Steps, Workflow
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
@@ -275,9 +277,10 @@ class TestAttestComposite:
         # One Steps per image, so a resume picks up from the unsigned image.
         # `Steps` keeps its inner tasks on the private `_steps` attribute --
         # there is no public accessor, so introspection has to reach past it.
-        assert len(composite._steps) == 2
-        for image, per_image in zip(images, composite._steps, strict=True):
-            titles = [step.title for step in per_image._steps]
+        steps = cast(Steps, composite)._steps
+        assert len(steps) == 2
+        for image, per_image in zip(images, steps, strict=True):
+            titles = [step.title for step in cast(Steps, per_image)._steps]
             # Exact ordered titles, not just a count: a dropped, renamed, or
             # reordered operation (e.g. losing the standalone `verify` step
             # that checks `sign`'s signature, distinct from what

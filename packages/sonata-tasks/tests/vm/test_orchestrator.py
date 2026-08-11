@@ -4,7 +4,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 from multipass import MultipassCommandError
-from sonata_tasks.shell import RecordingShell, ShellExecutionResult
+from sonata_tasks.shell import ShellBackend, RecordingShell, ShellExecutionResult
 from sonata_tasks.vm.models import VmRequest
 from sonata_tasks.vm.orchestrator import VmOrchestrator
 
@@ -15,7 +15,7 @@ from sonata_tasks.vm.orchestrator import VmOrchestrator
 
 def _make_orch(
     repo_root: Path = Path("/repo"),
-    shell: object | None = None,
+    shell: ShellBackend | None = None,
     ansible: object | None = None,
     multipass_client: object | None = None,
 ) -> VmOrchestrator:

@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from typing import cast
+
 import pytest
 
 from sonata_tasks.components.operations import RemoteCommandOperation
@@ -60,13 +62,13 @@ def test_run_bootstrap_operations_records_each_command() -> None:
 def test_run_bootstrap_operations_keeps_stdout_failure_alongside_stderr() -> None:
     @dataclass
     class FailingShell:
-        def run(self, argv: list[str], *, cwd, env, dry_run: bool) -> TaskResult:
+        def run(self, command: list[str], /, *, cwd, env, dry_run: bool) -> TaskResult:
             return TaskResult(
                 task_id="x", status="failed", return_code=2,
                 stdout="fatal: k6 download failed", stderr="warning: remote_tmp"
             )
 
-    provider = FakeOrchestrator(shell=FailingShell())
+    provider = FakeOrchestrator(shell=cast(RecordingShell, FailingShell()))
     with pytest.raises(RuntimeError, match="fatal: k6 download failed") as error:
         run_bootstrap_operations(
             provider, [RemoteCommandOperation(operation_id="k6", summary="install", argv=("k6",))], role="loadgen"

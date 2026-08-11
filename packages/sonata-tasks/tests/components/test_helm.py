@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 from sonata_tasks.components import helm as helm_mod
-from sonata_tasks.components.context import ScenarioExecutionContext
+from sonata_tasks.components.context import (
+    ResolvedFunctionView,
+    ScenarioExecutionContext,
+)
 from sonata_tasks.loadtest.two_vm import LOADTEST_SCENARIOS
 from sonata_tasks.vm.models import VmRequest
 
@@ -12,7 +16,7 @@ from sonata_tasks.vm.models import VmRequest
 @dataclass
 class _RS:
     namespace: str | None
-    functions: list
+    functions: Sequence[ResolvedFunctionView]
 
 
 def _ctx(scenario_name: str) -> ScenarioExecutionContext:

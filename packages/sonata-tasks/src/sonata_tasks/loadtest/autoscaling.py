@@ -13,14 +13,49 @@ from sonata_tasks.loadtest.ports import RemoteFileFetcher
 from sonata_tasks.tasks.executors import VmCommandRunner
 
 
-class Watcher(Protocol):
-    errors: list[str]
+class Sampling(Protocol):
+    """Something that samples for as long as the load runs.
 
-    @property
-    def max_observed(self) -> int: ...
+    All the load task does is bracket the run, so this is all it should have to
+    be given — asking for the reading too would exclude a sampler that only
+    records elsewhere.
+    """
 
     def start(self) -> None: ...
     def stop(self) -> None: ...
+
+
+class InitialReplicaCheck(Protocol):
+    """Whatever asserts the run starts where it should.
+
+    A protocol so the load task depends on the assertion, not on the one class
+    that happens to make it today.
+    """
+
+    def run(self) -> None: ...
+
+
+class AutoscalingResult(Protocol):
+    """Somewhere to read what the autoscaling verification concluded.
+
+    The summary writer reads `.result` and nothing else, so asking for the whole
+    verifier made callers cast a shim into a class it never was.
+    """
+
+    @property
+    def result(self) -> AutoscalingSummary: ...
+
+
+class Watcher(Protocol):
+    """Somewhere to read the highest replica count someone observed.
+
+    Independent of Sampling on purpose: the verifier only reads, and requiring
+    start/stop here would demand of it a lifecycle it never drives. `errors` is
+    absent for the same reason — it is read through getattr.
+    """
+
+    @property
+    def max_observed(self) -> int: ...
 
 
 class ReplicaStatusProbe(Protocol):

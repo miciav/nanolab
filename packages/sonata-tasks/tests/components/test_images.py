@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from sonata_tasks.components.context import ScenarioExecutionContext
+from sonata_tasks.components.context import (
+    ResolvedFunctionView,
+    ScenarioExecutionContext,
+)
 from sonata_tasks.components.images import (
     control_image,
     function_image_specs,
@@ -32,7 +36,7 @@ class _Fn:
 @dataclass
 class _RS:
     namespace: str | None
-    functions: list
+    functions: Sequence[ResolvedFunctionView]
 
 
 def _ctx(*, runtime: str = "java", functions: list | None = None) -> ScenarioExecutionContext:

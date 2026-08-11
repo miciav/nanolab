@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -21,7 +22,8 @@ class _FakeFunction:
 @dataclass
 class _FakeResolvedScenario:
     namespace: str | None
-    functions: list[_FakeFunction]
+    # Sequence: the protocol only reads them, and list is invariant.
+    functions: Sequence[_FakeFunction]
 
 
 def test_context_holds_neutral_fields() -> None:
@@ -44,7 +46,7 @@ def test_context_holds_neutral_fields() -> None:
 def test_resolved_scenario_view_is_satisfied_structurally() -> None:
     rs: ResolvedScenarioView = _FakeResolvedScenario(
         namespace="ns",
-        functions=[_FakeFunction(key="echo", family="echo", runtime="java", image=None)],
+        functions=(_FakeFunction(key="echo", family="echo", runtime="java", image=None),),
     )
     ctx = ScenarioExecutionContext(
         repo_root=Path("/repo"),

@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from types import MappingProxyType
 
 from sonata_tasks.components.context import ScenarioExecutionContext
-from sonata_tasks.components.operations import RemoteCommandOperation, ScenarioOperation
+from sonata_tasks.components.operations import RemoteCommandOperation
 from sonata_tasks.components.images import control_image
 from sonata_tasks.loadtest.two_vm import (
     LOADTEST_SCENARIOS,
@@ -103,7 +103,7 @@ def _set_args(values: Mapping[str, str]) -> tuple[str, ...]:
     return tuple(args)
 
 
-def plan_deploy_control_plane(context: ScenarioExecutionContext) -> tuple[ScenarioOperation, ...]:
+def plan_deploy_control_plane(context: ScenarioExecutionContext) -> tuple[RemoteCommandOperation, ...]:
     namespace = _effective_namespace(context)
     loadtest = context.scenario_name in LOADTEST_SCENARIOS
     values = control_plane_helm_values(

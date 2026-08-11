@@ -16,7 +16,7 @@ from sonata_tasks.vm.multipass import (
 
 from sonata_tasks.vm.models import VmRequest
 from sonata_tasks.components.context import ScenarioExecutionContext
-from sonata_tasks.components.operations import RemoteCommandOperation, ScenarioOperation
+from sonata_tasks.components.operations import RemoteCommandOperation
 
 
 def _remote_home(vm_request: VmRequest) -> str:
@@ -93,7 +93,7 @@ def _ansible_operation(
     )
 
 
-def plan_vm_ensure_running(context: ScenarioExecutionContext) -> tuple[ScenarioOperation, ...]:
+def plan_vm_ensure_running(context: ScenarioExecutionContext) -> tuple[RemoteCommandOperation, ...]:
     vm_request = context.vm_request
     if vm_request.lifecycle == "external":
         return (
@@ -129,7 +129,7 @@ def plan_vm_provision_base(
     *,
     discover_private_key: bool = True,
     install_uv: bool = False,
-) -> tuple[ScenarioOperation, ...]:
+) -> tuple[RemoteCommandOperation, ...]:
     return (
         _ansible_operation(
             context=context,
@@ -185,7 +185,7 @@ def plan_repo_sync_to_vm(
     context: ScenarioExecutionContext,
     *,
     discover_private_key: bool = True,
-) -> tuple[ScenarioOperation, ...]:
+) -> tuple[RemoteCommandOperation, ...]:
     return (
         _rsync_operation(
             context.vm_request,
@@ -202,7 +202,7 @@ def plan_assets_sync_to_vm(
     context: ScenarioExecutionContext,
     *,
     discover_private_key: bool = True,
-) -> tuple[ScenarioOperation, ...]:
+) -> tuple[RemoteCommandOperation, ...]:
     if context.assets_root is None:
         raise ValueError("assets sync requires context.assets_root")
     return (
@@ -260,7 +260,7 @@ def plan_registry_ensure_container(
     context: ScenarioExecutionContext,
     *,
     discover_private_key: bool = True,
-) -> tuple[ScenarioOperation, ...]:
+) -> tuple[RemoteCommandOperation, ...]:
     registry_host, registry_port = context.local_registry.rsplit(":", 1)
     return (
         _ansible_operation(
@@ -283,7 +283,7 @@ def plan_k3s_install(
     context: ScenarioExecutionContext,
     *,
     discover_private_key: bool = True,
-) -> tuple[ScenarioOperation, ...]:
+) -> tuple[RemoteCommandOperation, ...]:
     vm_request = context.vm_request
     return (
         _ansible_operation(
@@ -305,7 +305,7 @@ def plan_k3s_configure_registry(
     context: ScenarioExecutionContext,
     *,
     discover_private_key: bool = True,
-) -> tuple[ScenarioOperation, ...]:
+) -> tuple[RemoteCommandOperation, ...]:
     registry_host, registry_port = context.local_registry.rsplit(":", 1)
     return (
         _ansible_operation(
@@ -323,7 +323,7 @@ def plan_k3s_configure_registry(
     )
 
 
-def plan_loadtest_install_k6(context: ScenarioExecutionContext) -> tuple[ScenarioOperation, ...]:
+def plan_loadtest_install_k6(context: ScenarioExecutionContext) -> tuple[RemoteCommandOperation, ...]:
     return (
         _ansible_operation(
             context=context,

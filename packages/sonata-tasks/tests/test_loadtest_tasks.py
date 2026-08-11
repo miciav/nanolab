@@ -39,6 +39,7 @@ def test_k6_task_is_a_role_bound_sonata_command(tmp_path: Path) -> None:
     assert executor.spec.remote_dir == "."
     assert executor.spec.expected_exit_codes == frozenset({0, 99})
     assert "--summary-trend-stats" in executor.spec.argv
+    assert outcome.value is not None
     assert outcome.value.passed is True
 
 
@@ -49,6 +50,7 @@ def test_k6_task_keeps_a_threshold_failure_as_an_outcome(tmp_path: Path) -> None
         TaskInputs.empty()
     )
 
+    assert outcome.value is not None
     assert outcome.value.passed is False
 
 
