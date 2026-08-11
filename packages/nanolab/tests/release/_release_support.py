@@ -145,10 +145,10 @@ class _ArchiveProvider:
         argv: tuple[str, ...],
         *,
         env: dict[str, str] | None,
-        cwd: str | None,
+        remote_dir: str | None,
         dry_run: bool,
     ) -> _TransferResult:
-        self.actions.append(("exec", request, argv, env, cwd, dry_run))
+        self.actions.append(("exec", request, argv, env, remote_dir, dry_run))
         if argv[0] == "sha256sum":
             return _TransferResult(stdout=f"{self.digest.removeprefix('sha256:')}  {argv[1]}\n")
         return _TransferResult()
@@ -225,12 +225,12 @@ class _ReleaseProvider(_ArchiveProvider):
         argv: tuple[str, ...],
         *,
         env: dict[str, str] | None,
-        cwd: str | None,
+        remote_dir: str | None,
         dry_run: bool,
     ) -> _TransferResult:
         del request, env, dry_run
         argv = _unwrap_bounded(argv)
-        self.actions.append(("exec", object(), argv, None, cwd, False))
+        self.actions.append(("exec", object(), argv, None, remote_dir, False))
         self.events.append("exec:" + " ".join(argv))
         if argv[:3] == ("docker", "buildx", "create") and self.remote_source_mutated:
             return _TransferResult(return_code=1)
@@ -285,7 +285,7 @@ class _ArmFailureProvider(_ReleaseProvider):
         argv: tuple[str, ...],
         *,
         env: dict[str, str] | None,
-        cwd: str | None,
+        remote_dir: str | None,
         dry_run: bool,
     ) -> _TransferResult:
         argv = _unwrap_bounded(argv)
@@ -293,7 +293,7 @@ class _ArmFailureProvider(_ReleaseProvider):
             request,
             argv,
             env=env,
-            cwd=cwd,
+            remote_dir=remote_dir,
             dry_run=dry_run,
         )
         if (

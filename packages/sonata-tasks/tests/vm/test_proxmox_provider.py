@@ -590,7 +590,7 @@ def test_exec_argv_with_cwd_and_env(mock_client_cls, mock_subproc, mock_routing_
     provider = _make_provider()
     req = _make_request()
 
-    result = provider.exec_argv(req, ["ls"], cwd="/home/ubuntu", env={"FOO": "bar"})
+    result = provider.exec_argv(req, ["ls"], remote_dir="/home/ubuntu", env={"FOO": "bar"})
 
     assert result.return_code == 0
     remote_cmd = mock_subproc.call_args[0][0][-1]

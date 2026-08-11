@@ -41,10 +41,10 @@ class _Provider:
         argv: tuple[str, ...],
         *,
         env: dict[str, str] | None,
-        cwd: str | None,
+        remote_dir: str | None,
         dry_run: bool,
     ) -> _Result:
-        del request, cwd, dry_run
+        del request, remote_dir, dry_run
         self.exec_calls.append((argv, env))
         if argv[:2] == ("mktemp", "-d"):
             return _Result(stdout="/tmp/nanofaas-release-credentials.ABC123\n")

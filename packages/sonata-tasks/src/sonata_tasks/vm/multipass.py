@@ -161,11 +161,11 @@ class MultipassVmProvider:
         argv: tuple[str, ...] | list[str],
         *,
         env: dict[str, str] | None = None,
-        cwd: str | None = None,
+        remote_dir: str | None = None,
     ) -> str:
         parts: list[str] = []
-        if cwd:
-            parts.append(f"cd {shlex.quote(cwd)}")
+        if remote_dir:
+            parts.append(f"cd {shlex.quote(remote_dir)}")
         for k, v in (env or {}).items():
             parts.append(f"export {k}={shlex.quote(v)}")
         parts.append(shlex.join(list(argv)))
@@ -245,10 +245,10 @@ class MultipassVmProvider:
         argv: tuple[str, ...] | list[str],
         *,
         env: dict[str, str] | None = None,
-        cwd: str | None = None,
+        remote_dir: str | None = None,
         dry_run: bool = False,
     ) -> ShellExecutionResult:
-        command = self._build_exec_script(argv, env=env, cwd=cwd)
+        command = self._build_exec_script(argv, env=env, remote_dir=remote_dir)
         return self.remote_exec(request, command=command, dry_run=dry_run)
 
     def remote_exec(

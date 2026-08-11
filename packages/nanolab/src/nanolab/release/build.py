@@ -38,7 +38,7 @@ def _provider_exec(
     request: object,
     argv: tuple[str, ...],
     *,
-    cwd: str | None = None,
+    remote_dir: str | None = None,
     env: dict[str, str] | None = None,
     bounded: bool = False,
 ) -> object:
@@ -59,7 +59,7 @@ def _provider_exec(
         )
     result = retry_on_connection_death(
         lambda: provider.exec_argv(  # type: ignore[attr-defined]
-            request, argv, env=env, cwd=cwd, dry_run=False
+            request, argv, env=env, remote_dir=remote_dir, dry_run=False
         ),
         describe="remote command",
     )
@@ -540,7 +540,7 @@ def _build_arm64_images(
             provider,
             request,
             command.argv,
-            cwd=command.remote_dir,
+            remote_dir=command.remote_dir,
             # The builder task's stdout is parsed below — keep it clean.
             bounded=command.task_id != "release.arm64.builder",
         )
@@ -613,7 +613,7 @@ def _smoke_arm64_images(
             _pinned_image(watchdog.image, watchdog_digest),
         ),
         env=None,
-        cwd=None,
+        remote_dir=None,
         dry_run=False,
     )
     arm.require_expected_watchdog_exit(
@@ -716,7 +716,7 @@ def _smoke_arm64_server(
                 request,
                 ("docker", "rm", "--force", smoke.container_name),
                 env=None,
-                cwd=None,
+                remote_dir=None,
                 dry_run=False,
             )
         except BaseException:
@@ -743,7 +743,7 @@ def _reset_named_builder(
         request,
         ("docker", "buildx", "inspect", plan.builder.name),
         env=None,
-        cwd=None,
+        remote_dir=None,
         dry_run=False,
     )
     if int(getattr(result, "return_code", 0)) == 0:

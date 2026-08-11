@@ -337,7 +337,7 @@ def _exec(
 ) -> object:
     result = retry_on_connection_death(
         lambda: provider.exec_argv(  # type: ignore[attr-defined]
-            request, argv, env=env, cwd=None, dry_run=False
+            request, argv, env=env, remote_dir=None, dry_run=False
         ),
         describe=f"publication {argv[0]}",
     )

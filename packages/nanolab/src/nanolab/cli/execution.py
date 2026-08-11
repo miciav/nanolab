@@ -199,7 +199,7 @@ class _ProviderRunner:
                 self._request,
                 argv,
                 env=merged or None,
-                cwd=remote_dir or self._default_dir,
+                remote_dir=remote_dir or self._default_dir,
                 dry_run=dry_run,
             ),
         )

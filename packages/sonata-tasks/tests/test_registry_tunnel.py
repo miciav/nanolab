@@ -15,7 +15,7 @@ class _RecordingProvider:
     calls: list[tuple[object, tuple[str, ...]]] = field(default_factory=list)
     fail_on: int | None = None
 
-    def exec_argv(self, request, argv, *, env=None, cwd=None, dry_run=False) -> object:
+    def exec_argv(self, request, argv, *, env=None, remote_dir=None, dry_run=False) -> object:
         self.calls.append((request, argv))
         if self.fail_on is not None and len(self.calls) - 1 == self.fail_on:
             return _result(return_code=1, stderr="command failed")
@@ -51,7 +51,7 @@ def test_acquire_runs_socat_tunnel_with_upstream_host():
 
 def test_acquire_tolerates_an_absent_previous_transient_unit():
     class Provider(_RecordingProvider):
-        def exec_argv(self, request, argv, *, env=None, cwd=None, dry_run=False):
+        def exec_argv(self, request, argv, *, env=None, remote_dir=None, dry_run=False):
             self.calls.append((request, argv))
             if argv[:2] == ("sudo", "systemctl"):
                 return _result(return_code=5, stderr="Unit nanofaas-registry-tunnel not loaded")

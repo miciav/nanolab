@@ -280,8 +280,8 @@ class _ArmWorkflowProvider:
         self.remote_digests[destination] = digest_path(source)
         return SimpleNamespace(return_code=0, stdout="", stderr="")
 
-    def exec_argv(self, _request, argv, *, env=None, cwd=None, dry_run=False):
-        del env, cwd, dry_run
+    def exec_argv(self, _request, argv, *, env=None, remote_dir=None, dry_run=False):
+        del env, remote_dir, dry_run
         self.commands.append(argv)
         rendered = " ".join(argv)
         if argv[:2] == ("mktemp", "-d"):

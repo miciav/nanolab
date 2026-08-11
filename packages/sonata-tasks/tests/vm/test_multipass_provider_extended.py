@@ -285,7 +285,7 @@ def test_exec_argv_multipass() -> None:
     provider, shell, client = _make_provider()
     shell.run.return_value = MagicMock(return_code=0, stdout="ok", stderr="", command=[])
     req = VmRequest(lifecycle="multipass", name="my-vm")
-    result = provider.exec_argv(req, ["echo", "hello"], env={"K": "V"}, cwd="/home")
+    result = provider.exec_argv(req, ["echo", "hello"], env={"K": "V"}, remote_dir="/home")
     shell.run.assert_called_once()
 
 
@@ -293,7 +293,7 @@ def test_exec_argv_with_env_and_cwd() -> None:
     provider, shell, client = _make_provider()
     shell.run.return_value = MagicMock(return_code=0, stdout="", stderr="", command=[])
     req = VmRequest(lifecycle="multipass", name="my-vm")
-    provider.exec_argv(req, ("ls", "-la"), env={"PATH": "/usr/bin"}, cwd="/tmp")
+    provider.exec_argv(req, ("ls", "-la"), env={"PATH": "/usr/bin"}, remote_dir="/tmp")
     call_args = shell.run.call_args[0][0]
     assert any(part.startswith("bash -lc") for part in call_args)
 

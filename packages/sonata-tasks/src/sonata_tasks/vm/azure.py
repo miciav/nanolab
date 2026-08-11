@@ -254,12 +254,13 @@ class AzureVmProvider:
         argv: tuple[str, ...] | list[str],
         *,
         env: dict[str, str] | None = None,
-        cwd: str | None = None,
+        remote_dir: str | None = None,
         dry_run: bool = False,
     ) -> ShellExecutionResult:
         del dry_run
         vm = self._client(request).get_vm(self._vm_name(request))
-        result = vm.exec_structured(list(argv), env=env, cwd=cwd)
+        # The Azure client's `cwd` is the directory on the VM, same meaning.
+        result = vm.exec_structured(list(argv), env=env, cwd=remote_dir)
         return ShellExecutionResult(
             command=list(argv),
             return_code=result.returncode,

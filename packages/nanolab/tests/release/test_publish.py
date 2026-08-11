@@ -64,10 +64,10 @@ class _PublishProvider:
         argv: tuple[str, ...],
         *,
         env: dict[str, str] | None,
-        cwd: str | None,
+        remote_dir: str | None,
         dry_run: bool,
     ) -> _Result:
-        del request, env, cwd, dry_run
+        del request, env, remote_dir, dry_run
         self.commands.append(argv)
         if self.fail_on_prefix is not None and argv[: len(self.fail_on_prefix)] == self.fail_on_prefix:
             return _Result(return_code=1, stderr=self.failure_stderr)

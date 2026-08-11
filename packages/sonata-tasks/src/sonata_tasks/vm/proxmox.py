@@ -362,7 +362,7 @@ class ProxmoxVmProvider:
         argv: tuple[str, ...] | list[str],
         *,
         env: dict[str, str] | None = None,
-        cwd: str | None = None,
+        remote_dir: str | None = None,
         dry_run: bool = False,
     ) -> ShellExecutionResult:
         del dry_run
@@ -375,8 +375,8 @@ class ProxmoxVmProvider:
             ssh_cmd += ["-i", str(ssh_key)]
 
         remote_parts: list[str] = []
-        if cwd:
-            remote_parts.append(f"cd {shlex.quote(cwd)} &&")
+        if remote_dir:
+            remote_parts.append(f"cd {shlex.quote(remote_dir)} &&")
         if env:
             remote_parts.append("env")
             remote_parts.extend(f"{k}={shlex.quote(v)}" for k, v in env.items())

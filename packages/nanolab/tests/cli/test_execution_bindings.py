@@ -20,8 +20,8 @@ class RecordingVmProvider:
         self.exec_calls = []
         self.fetch_calls = []
 
-    def exec_argv(self, request, argv, *, env, cwd, dry_run):
-        self.exec_calls.append((request, tuple(argv), env, cwd, dry_run))
+    def exec_argv(self, request, argv, *, env, remote_dir, dry_run):
+        self.exec_calls.append((request, tuple(argv), env, remote_dir, dry_run))
         return type("Result", (), {"return_code": 0, "stdout": "", "stderr": ""})()
 
     def transfer_from(self, request, *, source, destination):
