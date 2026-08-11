@@ -55,33 +55,64 @@ jobs:
         run: uv python install 3.12
 
       - name: Verify lock and sync workspace
+        id: sync
         run: |
           uv lock --check
           uv sync --locked --all-packages --all-groups
 
+      # One step per check, and each runs even when an earlier one failed
+      # — !cancelled() rather than always(), so cancelling the job still stops.
+      # Bundled in a single step they hid each other: ruff failed on an unused
+      # import, so the type check behind it never ran and accumulated fifteen
+      # errors unseen, and behind those sat a stale wheel pin and two stale
+      # paths. Every red should be visible in one push, not one per push.
+      #
+      # `steps.sync.outcome` is the exception: with no workspace there is
+      # nothing to check, and reporting fifteen failures for one cause is its
+      # own kind of hiding.
       - name: Run nanolab tests
+        if: ${{ !cancelled() && steps.sync.outcome == 'success' }}
         run: uv run --locked --all-packages --all-groups pytest -c packages/nanolab/pyproject.toml packages/nanolab/tests
 
       - name: Run sonata-tasks tests
+        if: ${{ !cancelled() && steps.sync.outcome == 'success' }}
         run: uv run --locked --all-packages --all-groups pytest -c packages/sonata-tasks/pyproject.toml packages/sonata-tasks/tests
 
       - name: Run tui-toolkit tests
+        if: ${{ !cancelled() && steps.sync.outcome == 'success' }}
         run: uv run --locked --all-packages --all-groups pytest -c packages/tui-toolkit/pyproject.toml packages/tui-toolkit/tests
 
-      - name: Run static checks
-        run: |
-          uv run --locked --all-packages --all-groups ruff check packages
-          uv run --locked --all-packages --all-groups basedpyright --project packages/nanolab
-          uv run --locked --all-packages --all-groups basedpyright --project packages/sonata-tasks
-          uv run --locked --all-packages --all-groups basedpyright --project packages/tui-toolkit
+      - name: Lint
+        if: ${{ !cancelled() && steps.sync.outcome == 'success' }}
+        run: uv run --locked --all-packages --all-groups ruff check packages
 
-      - name: Run import contracts
-        run: |
-          uv run --locked --all-packages --all-groups lint-imports --config packages/nanolab/.importlinter --no-cache
-          uv run --locked --all-packages --all-groups lint-imports --config packages/sonata-tasks/.importlinter --no-cache
-          uv run --locked --all-packages --all-groups lint-imports --config packages/tui-toolkit/.importlinter --no-cache
+      - name: Type-check nanolab
+        if: ${{ !cancelled() && steps.sync.outcome == 'success' }}
+        run: uv run --locked --all-packages --all-groups basedpyright --project packages/nanolab
+
+      - name: Type-check sonata-tasks
+        if: ${{ !cancelled() && steps.sync.outcome == 'success' }}
+        run: uv run --locked --all-packages --all-groups basedpyright --project packages/sonata-tasks
+
+      - name: Type-check tui-toolkit
+        if: ${{ !cancelled() && steps.sync.outcome == 'success' }}
+        run: uv run --locked --all-packages --all-groups basedpyright --project packages/tui-toolkit
+
+      - name: Check nanolab import contracts
+        if: ${{ !cancelled() && steps.sync.outcome == 'success' }}
+        run: uv run --locked --all-packages --all-groups lint-imports --config packages/nanolab/.importlinter --no-cache
+
+      - name: Check sonata-tasks import contracts
+        if: ${{ !cancelled() && steps.sync.outcome == 'success' }}
+        run: uv run --locked --all-packages --all-groups lint-imports --config packages/sonata-tasks/.importlinter --no-cache
+
+      - name: Check tui-toolkit import contracts
+        if: ${{ !cancelled() && steps.sync.outcome == 'success' }}
+        run: uv run --locked --all-packages --all-groups lint-imports --config packages/tui-toolkit/.importlinter --no-cache
 
       - name: Build distributions
+        id: build
+        if: ${{ !cancelled() && steps.sync.outcome == 'success' }}
         # No --clear: the runner checks out fresh, so there is nothing to clear,
         # and clearing races with the .gitignore uv keeps in the output directory
         # while four packages build into it. That race failed one run of PR #3
@@ -89,7 +120,10 @@ jobs:
         # already built successfully.
         run: uv build --all-packages --out-dir dist
 
+      # Depends on the wheels rather than on the workspace: without a build
+      # there is nothing to install.
       - name: Smoke-test installed wheels
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: |
           uv venv .wheel-smoke
           uv pip install dist/nanolab-0.1.0-py3-none-any.whl dist/sonata_tasks-0.1.0-py3-none-any.whl dist/tui_toolkit-0.1.0-py3-none-any.whl --python .wheel-smoke/bin/python
@@ -97,6 +131,7 @@ jobs:
           .wheel-smoke/bin/nanolab --help
 
       - name: Generate representative plans
+        if: ${{ !cancelled() && steps.sync.outcome == 'success' }}
         run: |
           set -euo pipefail
           uv run --package nanolab nanolab plan packages/nanolab/scenarios-v2/deployment-lifecycle-container.yaml --environment packages/nanolab/environments/local.yaml
@@ -119,6 +154,7 @@ jobs:
           ! grep -Fq 'registry' "$provisioned_plan"
 
       - name: Run cli-container smoke test
+        if: ${{ !cancelled() && steps.sync.outcome == 'success' }}
         timeout-minutes: 15
         run: |
           set -euo pipefail
