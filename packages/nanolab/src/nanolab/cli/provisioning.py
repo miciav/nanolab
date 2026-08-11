@@ -233,7 +233,14 @@ def provision_environment(
     def after_ensure(role: str, request: VmRequest) -> None:
         if post_ensure_verifier is not None:
             post_ensure_verifier(cast(ExecutionRole, role), request)
-        if role == "stack" and environment.provider == "azure" and environment.azure.operator_source_cidr:
+        # `azure is not None` is guaranteed by EnvironmentConfig's validation for
+        # this provider; saying it here is what lets the checker follow.
+        if (
+            role == "stack"
+            and environment.provider == "azure"
+            and environment.azure is not None
+            and environment.azure.operator_source_cidr
+        ):
             secure_release_endpoints(environment, provider, stack_request, loadgen_request)
 
     with provision_roles(

@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from sonata_engine import Resource, Steps, TaskInputs
 from sonata_tasks.execution.bindings import CommandTaskExecutor
@@ -111,7 +112,9 @@ def docker_compose_resource(
     *,
     executor: CommandTaskExecutor,
     cwd: Path | None = None,
-    requires: tuple[Resource[object], ...] = (),
+    # Resource is invariant, so Resource[object] would reject the very resources
+    # callers hold — a registry resource carries its own state type.
+    requires: tuple[Resource[Any], ...] = (),
 ) -> Resource[DockerComposeProject]:
     deploy = Steps(
         title=f"Acquire Docker Compose project {project.name}",

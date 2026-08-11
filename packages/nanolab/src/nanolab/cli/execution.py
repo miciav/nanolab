@@ -19,10 +19,11 @@ from sonata_tasks.tasks.executors import (
     VmCommandResult,
     VmCommandTaskExecutor,
 )
-from sonata_tasks.shell import SubprocessShell
+from sonata_tasks.shell import ShellBackend, SubprocessShell
 from sonata_tasks.vm.models import VmRequest, vm_remote_home
 from sonata_tasks.vm.multipass import resolve_connection_host
 from sonata_tasks.vm.orchestrator import VmOrchestrator
+from sonata_tasks.vm.ports import VmCommandProvider
 from sonata_tasks.vm.runners import VmFileFetcher
 
 from nanolab.cli.vm_provider import vm_request_for_role
@@ -310,7 +311,7 @@ def build_role_bindings(
     environment: EnvironmentConfig,
     *,
     runner: HostCommandRunner | None = None,
-    vm_provider: object | None = None,
+    vm_provider: VmCommandProvider | None = None,
     repo_root: Path | None = None,
 ) -> tuple[RoleBindings, _RemoteFetcher | VmFileFetcher | None]:
     command_runner = runner or SubprocessShell()
@@ -322,7 +323,9 @@ def build_role_bindings(
         if environment.provider == "multipass":
             provider = vm_provider or VmOrchestrator(
                 repo_root or default_tool_paths().nanofaas_root,
-                shell=command_runner,
+                # The injected runner stands in for the shell backend too: that
+                # is how a test captures the commands a provider would run.
+                shell=cast(ShellBackend, command_runner),
             )
         else:
             provider = vm_provider or provider_for(

@@ -69,7 +69,11 @@ def _inspection_task(
 
 
 def build_validate_workflow(
-    request: PlatformRequest,
+    # ValidateWorkflowRequest, not PlatformRequest: this reads queue_probe,
+    # extended_k8s_checks and queue_burst_script, none of which exist on the
+    # base. Every caller already passes the subclass — the wider annotation only
+    # hid that from the checker.
+    request: ValidateWorkflowRequest,
     bindings: RoleBindings,
     *,
     workflow_id: str = "validate",

@@ -253,7 +253,11 @@ def _build_k8s_plan(
     vm_request = _stack_vm_request(environment)
     orchestrator = _stack_orchestrator(environment, repo_root, orchestrator_factory)
     def after_ensure(_info: VmInfo) -> None:
-        if environment.provider == "azure" and environment.azure.operator_source_cidr:
+        if (
+            environment.provider == "azure"
+            and environment.azure is not None
+            and environment.azure.operator_source_cidr
+        ):
             secure_release_endpoints(environment, orchestrator, vm_request, None)
 
     vm = provisioned_vm(

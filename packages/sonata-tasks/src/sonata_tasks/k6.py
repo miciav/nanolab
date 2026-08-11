@@ -51,7 +51,9 @@ class K6Task(Task[K6RunResult]):
         self.title = title
         self._config = config
         self._executor = executor
-        self._role = role
+        # Annotated: assigning a Literal to a bare attribute widens it to str,
+        # and the spec below wants the Literal back.
+        self._role: ExecutionRole = role
         self._remote_dir = remote_dir
         self._cwd = cwd
         self._require_pass = require_pass

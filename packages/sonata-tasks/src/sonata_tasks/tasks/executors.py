@@ -16,9 +16,13 @@ class CommandRunResult(Protocol):
 
 
 class HostCommandRunner(Protocol):
+    # Positional-only: the shell backend calls this parameter `command` and this
+    # protocol called it `argv`, so nothing ever matched structurally — every
+    # caller passed it positionally and the checker had to be told to look away.
     def run(
         self,
-        argv: list[str],
+        command: list[str],
+        /,
         *,
         cwd: Path | None,
         env: dict[str, str],

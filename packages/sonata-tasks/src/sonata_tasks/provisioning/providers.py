@@ -6,11 +6,12 @@ from pathlib import Path
 
 from sonata_tasks.vm.azure import AzureVmProvider
 from sonata_tasks.vm.models import VmRequest
+from sonata_tasks.vm.ports import VmCommandProvider
 from sonata_tasks.vm.orchestrator import VmOrchestrator
 from sonata_tasks.vm.proxmox import ProxmoxVmProvider
 
 
-def provider_for(request: VmRequest, repo_root: Path) -> object:
+def provider_for(request: VmRequest, repo_root: Path) -> VmCommandProvider:
     """Return the managed VM provider for a request's lifecycle.
 
     `external` has no managed provider: the caller already owns the VM.

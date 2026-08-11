@@ -42,6 +42,18 @@ def _argv(endpoint: Endpoint, build: Callable[[str], tuple[str, ...]]) -> Argv:
     return lambda inputs: build(inputs.resource(endpoint))
 
 
+
+def _command_result(outcome: TaskOutcome[TaskResult], what: str) -> TaskResult:
+    """A CommandTask always carries its result; the outcome type allows None.
+
+    Saying so here turns what would be an AttributeError on None into a sentence
+    that names the command.
+    """
+    if outcome.value is None:
+        raise RuntimeError(f"{what}: command produced no result")
+    return outcome.value
+
+
 class HttpFunctionRegisterTask(CommandTask):
     """POST a function manifest to the control plane."""
 
@@ -193,7 +205,7 @@ class HttpFunctionEnqueueTask(Task[str]):
         )
 
     def run(self, inputs: TaskInputs) -> TaskOutcome[str]:
-        result = self._command.run(inputs).value
+        result = _command_result(self._command.run(inputs), self._name)
         try:
             response = json.loads(result.stdout)
         except json.JSONDecodeError as error:
@@ -226,7 +238,7 @@ class HttpExecutionSuccessTask(Task[None]):
         self.title = "Wait for enqueued execution"
         self._endpoint = endpoint
         self._executor = executor
-        self._role = role
+        self._role: ExecutionRole = role
         self._timeout_seconds = timeout_seconds
         self._poll_seconds = poll_seconds
         self._cwd = cwd
@@ -244,7 +256,7 @@ class HttpExecutionSuccessTask(Task[None]):
         )
         deadline = monotonic() + self._timeout_seconds
         while True:
-            result = command.run(inputs).value
+            result = _command_result(command.run(inputs), self.title)
             try:
                 response = json.loads(result.stdout)
             except json.JSONDecodeError as error:

@@ -86,7 +86,13 @@ class RunK6Task(Task[LoadtestOutcome]):
         self._initial_replicas: VerifyInitialAutoscalingReplicas | None = initial_replicas
 
     def _run(self) -> K6RunResult:
-        return self._run_k6.run(TaskInputs.empty()).value
+        # K6Task always carries its result; the outcome type allows None, and an
+        # unchecked None would surface later as an attribute error on the
+        # summary rather than as a load test that produced nothing.
+        outcome = self._run_k6.run(TaskInputs.empty())
+        if outcome.value is None:
+            raise RuntimeError(f"{self.title}: k6 produced no result")
+        return outcome.value
 
     @override
     def run(self, inputs: TaskInputs) -> TaskOutcome[LoadtestOutcome]:
