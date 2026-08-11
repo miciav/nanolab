@@ -11,7 +11,11 @@ dependencies = [
     "pydantic>=2.9.2",
     "pydantic-settings>=2.5",
     "shellcraft @ git+https://github.com/miciav/shellcraft.git@b6547835aac88d058810c7b9a592ad442c54ac99",
-    "sonata-engine @ git+https://github.com/miciav/sonata.git@818d53e6375f71930eb0a198ffb1dfc84cc6b077",
+    # Keep this commit equal to [tool.uv.sources] in the root pyproject. Inside
+    # the workspace the root's pin wins, so a stale one here goes unnoticed
+    # until the built wheel is installed on its own — which is how this package
+    # ended up importing WorkflowCompletion from an engine that predates it.
+    "sonata-engine @ git+https://github.com/miciav/sonata.git@e81d559952d4a168edffbe3c7108bd9a017046e9",
 ]
 
 [build-system]
