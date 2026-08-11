@@ -6,6 +6,7 @@ from typing import Protocol
 
 from multipass import MultipassClient
 
+from sonata_tasks.deployment import DEFAULT_NAMESPACE
 from sonata_tasks.shell import (
     ShellBackend,
     ShellExecutionResult,
@@ -168,7 +169,7 @@ class AnsibleAdapter:
         request: VmRequest,
         *,
         registry: str,
-        container_name: str = "nanofaas-e2e-registry",
+        container_name: str = f"{DEFAULT_NAMESPACE}-registry",
         dry_run: bool = False,
     ) -> ShellExecutionResult:
         return self.run_playbook(
@@ -200,7 +201,7 @@ class AnsibleAdapter:
         request: VmRequest,
         *,
         registry: str,
-        container_name: str = "nanofaas-e2e-registry",
+        container_name: str = f"{DEFAULT_NAMESPACE}-registry",
         dry_run: bool = False,
     ) -> ShellExecutionResult:
         ensure_result = self.ensure_registry_container(

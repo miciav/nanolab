@@ -12,6 +12,10 @@ from sonata_tasks.offload import (
     build_offload_workflow,
 )
 from sonata_tasks.process import managed_process_resource
+from sonata_tasks.deployment import (
+    LOCAL_CONTROL_PLANE_API_PORT,
+    LOCAL_CONTROL_PLANE_MANAGEMENT_PORT,
+)
 from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
 from sonata_tasks.registry import docker_registry_resource
 
@@ -23,8 +27,8 @@ JAR_PATH = "platform/control-plane/build/libs/app.jar"
 # Two control planes on one machine, so the ports are split rather than
 # discovered. The edge reuses validate's pair because a container-backed
 # nanoFaaS always answers there; the cloud takes the next block.
-EDGE_ENDPOINT = "http://127.0.0.1:18080"
-EDGE_MANAGEMENT = "http://127.0.0.1:18081"
+EDGE_ENDPOINT = f"http://127.0.0.1:{LOCAL_CONTROL_PLANE_API_PORT}"
+EDGE_MANAGEMENT = f"http://127.0.0.1:{LOCAL_CONTROL_PLANE_MANAGEMENT_PORT}"
 CLOUD_ENDPOINT = "http://127.0.0.1:19090"
 CLOUD_MANAGEMENT = "http://127.0.0.1:19091"
 
@@ -64,8 +68,8 @@ def _edge_argv(repo_root: Path) -> tuple[str, ...]:
         "java",
         "-jar",
         str(repo_root / JAR_PATH),
-        "--server.port=18080",
-        "--management.server.port=18081",
+        f"--server.port={LOCAL_CONTROL_PLANE_API_PORT}",
+        f"--management.server.port={LOCAL_CONTROL_PLANE_MANAGEMENT_PORT}",
         "--sync-queue.enabled=false",
         f"--nanofaas.offload.target-url={CLOUD_ENDPOINT}",
     )

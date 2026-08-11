@@ -11,6 +11,7 @@ from typing import Any, cast
 from urllib.parse import urlsplit
 
 from multipass import MultipassClient
+from sonata_tasks.deployment import CONTROL_PLANE_NODE_PORT, PROMETHEUS_NODE_PORT
 from sonata_tasks.execution.bindings import RoleBindings
 from sonata_tasks.provisioning.providers import provider_for
 from sonata_tasks.tasks.executors import (
@@ -73,7 +74,7 @@ def resolve_loadtest_urls(
         if dry_run:
             if environment.provider == "azure":
                 host = f"<azure-ip:{request.name}>"
-                discovered_prometheus = f"http://{host}:30090"
+                discovered_prometheus = f"http://{host}:{PROMETHEUS_NODE_PORT}"
             else:
                 host = f"<proxmox-guest-ip:{request.name}>"
                 discovered_prometheus = f"http://<proxmox-prometheus:{request.name}>"
@@ -83,15 +84,15 @@ def resolve_loadtest_urls(
             )
             if environment.provider == "azure":
                 host = provider.connection_host(request)  # type: ignore[attr-defined]
-                discovered_prometheus = f"http://{host}:30090"
+                discovered_prometheus = f"http://{host}:{PROMETHEUS_NODE_PORT}"
             else:
                 host = provider.guest_host(request)  # type: ignore[attr-defined]
                 metrics_host, metrics_port = provider.publish_port(  # type: ignore[attr-defined]
-                    request, service="PROMETHEUS_HTTP", guest_port=30090
+                    request, service="PROMETHEUS_HTTP", guest_port=PROMETHEUS_NODE_PORT
                 )
                 discovered_prometheus = f"http://{metrics_host}:{metrics_port}"
         return (
-            control_plane_url or f"http://{host}:30080",
+            control_plane_url or f"http://{host}:{CONTROL_PLANE_NODE_PORT}",
             prometheus_url or discovered_prometheus,
         )
     elif target.host:
@@ -100,8 +101,8 @@ def resolve_loadtest_urls(
         raise ValueError(f"{environment.provider} stack requires a host or explicit load-test URLs")
 
     return (
-        control_plane_url or f"http://{host}:30080",
-        prometheus_url or f"http://{host}:30090",
+        control_plane_url or f"http://{host}:{CONTROL_PLANE_NODE_PORT}",
+        prometheus_url or f"http://{host}:{PROMETHEUS_NODE_PORT}",
     )
 
 

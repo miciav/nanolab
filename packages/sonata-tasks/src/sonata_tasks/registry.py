@@ -12,6 +12,7 @@ from sonata_tasks.execution.roles import ExecutionRole
 from sonata_tasks.tasks.models import TaskResult
 
 from sonata_tasks.compensation import best_effort
+from sonata_tasks.deployment import DEFAULT_NAMESPACE
 from sonata_tasks.docker import DockerTask
 
 RegistryState = Literal["created", "started", "existing"]
@@ -29,7 +30,7 @@ def docker_registry_resource(
     *,
     executor: CommandTaskExecutor,
     role: ExecutionRole,
-    container: str = "nanofaas-e2e-registry",
+    container: str = f"{DEFAULT_NAMESPACE}-registry",
     image: str = "registry:2",
     port: int = 5000,
     ready: Callable[[], bool] | None = None,

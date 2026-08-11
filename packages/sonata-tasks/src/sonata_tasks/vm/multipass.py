@@ -7,6 +7,7 @@ from typing import cast
 from multipass import MultipassClient, MultipassCommandError, VmNotFoundError, find_ssh_public_key
 from shellcraft.backend import ShellBackend, ShellExecutionResult, SubprocessShell
 
+from sonata_tasks.deployment import DEFAULT_NAMESPACE
 from sonata_tasks.vm.models import VmRequest, vm_remote_home
 
 
@@ -24,7 +25,7 @@ _SSH_CREDENTIALS_UNRESOLVED = object()
 
 
 def _vm_name_default(request: VmRequest) -> str:
-    return request.name or "nanofaas-e2e"
+    return request.name or DEFAULT_NAMESPACE
 
 
 def _ok(command: list[str], *, stdout: str = "") -> ShellExecutionResult:

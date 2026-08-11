@@ -11,6 +11,7 @@ from sonata_tasks.components.bootstrap import retarget_bootstrap_operation
 from sonata_tasks.components.context import ScenarioExecutionContext
 from sonata_tasks.components.operations import RemoteCommandOperation
 from sonata_tasks.components.operations import ScenarioOperation
+from sonata_tasks.deployment import LOCAL_REGISTRY
 from sonata_tasks.shell import SubprocessShell
 from sonata_tasks.tasks.executors import HostCommandRunner, HostCommandTaskExecutor
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
@@ -30,7 +31,7 @@ def scenario_context(
         scenario_name="provision",
         runtime="java",
         namespace=None,
-        local_registry="localhost:5000",
+        local_registry=LOCAL_REGISTRY,
         resolved_scenario=None,
         vm_request=request,
         cleanup_vm=False,

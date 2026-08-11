@@ -18,6 +18,7 @@ from sonata_tasks.cli_function import (
     CliFunctionInvokeTask,
 )
 from sonata_tasks.command import CommandTask
+from sonata_tasks.deployment import DEFAULT_NAMESPACE
 from sonata_tasks.docker import DockerPushTask
 from sonata_tasks.function import function_resource
 from sonata_tasks.gradle import GradleTask
@@ -44,7 +45,7 @@ class CliWorkflowRequest:
     functions: tuple[CliFunction, ...]
     cli_role: ExecutionRole = "host"
     build_role: ExecutionRole = "host"
-    namespace: str = "nanofaas-e2e"
+    namespace: str = DEFAULT_NAMESPACE
     endpoint: str = "http://127.0.0.1:8080"
     binary: str = "clients/cli/build/install/nanofaas-cli/bin/nanofaas-cli"
     push_function_images: bool = False

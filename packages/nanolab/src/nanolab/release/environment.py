@@ -16,6 +16,7 @@ import tempfile
 from nanolab.config import EnvironmentConfig
 from nanolab.config.environment import ExecutionRole
 from nanolab.release.versioning import normalize_version, verify_version_consistency
+from sonata_tasks.deployment import CONTROL_PLANE_NODE_PORT, PROMETHEUS_NODE_PORT
 from sonata_tasks.vm.models import VmRequest
 
 
@@ -189,7 +190,10 @@ def secure_release_endpoints(
         )
     provider.restrict_inbound_sources(  # type: ignore[attr-defined]
         stack_request,
-        ports=(30080, 30081, 30090),
+        ports=(CONTROL_PLANE_NODE_PORT, 30081, PROMETHEUS_NODE_PORT),
         source_cidrs=sources,
     )
-    return f"http://{stack_host}:30080", f"http://{stack_host}:30090"
+    return (
+        f"http://{stack_host}:{CONTROL_PLANE_NODE_PORT}",
+        f"http://{stack_host}:{PROMETHEUS_NODE_PORT}",
+    )

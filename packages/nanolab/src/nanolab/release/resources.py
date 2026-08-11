@@ -19,6 +19,7 @@ from sonata_tasks.components.bootstrap import (
     plan_vm_provision_base,
 )
 from sonata_tasks.vm.models import VmInfo, VmRequest
+from sonata_tasks.deployment import CONTROL_PLANE_NODE_PORT, PROMETHEUS_NODE_PORT
 
 from sonata_tasks.provisioning import (
     remote_operations,
@@ -285,8 +286,8 @@ def build_release_resources(
         stack_info = inputs.resource(stack)
         _ = inputs.resource(loadgen)
         return ReleaseEndpoints(
-            control_plane=f"http://{stack_info.host}:30080",
-            prometheus=f"http://{stack_info.host}:30090",
+            control_plane=f"http://{stack_info.host}:{CONTROL_PLANE_NODE_PORT}",
+            prometheus=f"http://{stack_info.host}:{PROMETHEUS_NODE_PORT}",
         )
 
     endpoints = Resource(

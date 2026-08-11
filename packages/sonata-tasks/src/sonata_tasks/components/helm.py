@@ -6,6 +6,7 @@ from types import MappingProxyType
 from sonata_tasks.components.context import ScenarioExecutionContext
 from sonata_tasks.components.operations import RemoteCommandOperation
 from sonata_tasks.components.images import control_image
+from sonata_tasks.deployment import DEFAULT_NAMESPACE
 from sonata_tasks.loadtest.two_vm import (
     LOADTEST_SCENARIOS,
     TWO_VM_CONTROL_PLANE_ACTUATOR_NODE_PORT,
@@ -83,7 +84,7 @@ def _effective_namespace(context: ScenarioExecutionContext) -> str:
         return context.namespace
     if context.resolved_scenario is not None and context.resolved_scenario.namespace:
         return context.resolved_scenario.namespace
-    return "nanofaas-e2e"
+    return DEFAULT_NAMESPACE
 
 
 def _kubeconfig_path(context: ScenarioExecutionContext) -> str:

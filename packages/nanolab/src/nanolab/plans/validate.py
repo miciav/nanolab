@@ -3,6 +3,7 @@ from pathlib import Path
 
 from sonata_engine import Workflow
 from sonata_tasks.compose import DockerComposeProject, docker_compose_resource
+from sonata_tasks.deployment import LOCAL_REGISTRY
 from sonata_tasks.registry import docker_registry_resource
 from sonata_tasks.validate import ValidateFunction as SonataFunction
 from sonata_tasks.validate import ValidateWorkflowRequest, build_validate_workflow
@@ -61,10 +62,10 @@ def build_validate_plan(
             request,
             queue_probe=SonataFunction(
                 name="k8s-sync-queue",
-                image="localhost:5000/nanofaas/java-warm-echo:e2e",
+                image=f"{LOCAL_REGISTRY}/nanofaas/java-warm-echo:e2e",
                 payload='{"input":{"message":"warmup"}}',
                 build_argv=("./gradlew", ":services:java:warm-echo:bootJar", "--quiet"),
-                image_build_argv=("docker", "build", "-t", "localhost:5000/nanofaas/java-warm-echo:e2e", "-f", "services/java/warm-echo/Dockerfile", "services/java/warm-echo"),
+                image_build_argv=("docker", "build", "-t", f"{LOCAL_REGISTRY}/nanofaas/java-warm-echo:e2e", "-f", "services/java/warm-echo/Dockerfile", "services/java/warm-echo"),
                 concurrency=1,
             ),
             extended_k8s_checks=True,

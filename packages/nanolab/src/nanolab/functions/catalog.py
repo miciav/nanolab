@@ -6,6 +6,8 @@ from typing import cast
 
 import yaml
 
+from sonata_tasks.deployment import LOCAL_REGISTRY
+
 from nanolab.core.models import FunctionRuntimeKind
 from nanolab.workspace.paths import default_tool_paths
 
@@ -119,7 +121,7 @@ def _image_runtime_prefix(runtime_dir: str, runtime: FunctionRuntimeKind) -> str
 
 def _default_image(runtime_dir: str, runtime: FunctionRuntimeKind, family: str) -> str:
     prefix = _image_runtime_prefix(runtime_dir, runtime)
-    return f"localhost:5000/nanofaas/{prefix}-{family}:e2e"
+    return f"{LOCAL_REGISTRY}/nanofaas/{prefix}-{family}:e2e"
 
 
 def _default_payload(payloads_root: Path, family: str) -> str | None:

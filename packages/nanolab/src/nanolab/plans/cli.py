@@ -8,6 +8,7 @@ from multipass import find_ssh_public_key
 from sonata_engine import Resource, TaskInputs, Workflow
 from sonata_tasks.cli import CliFunction, CliWorkflowRequest, build_cli_workflow
 from sonata_tasks.command import CommandTask
+from sonata_tasks.deployment import CONTROL_PLANE_NODE_PORT, DEFAULT_NAMESPACE, LOCAL_REGISTRY
 from sonata_tasks.helm import HelmReleaseSpec, helm_release_resource
 from sonata_tasks.process import managed_process_resource
 from sonata_tasks.registry import docker_registry_resource
@@ -49,14 +50,14 @@ LOCAL_CONTROL_PLANE_BUILD_ARGV = (
 # The provisioned k8s path runs the CLI *inside* the VM: the Helm chart exposes
 # the control plane as a NodePort, so the CLI never needs to discover an
 # external URL or fight a cloud provider's firewall.
-PROVISIONED_ENDPOINT = "http://127.0.0.1:30080"
+PROVISIONED_ENDPOINT = f"http://127.0.0.1:{CONTROL_PLANE_NODE_PORT}"
 
 # Nothing in this workflow reads a local registry: images come from GHCR, and the
 # two bootstrap planners that consumed this value are not reused (see
 # `_BOOTSTRAP_STEPS`). It survives only because `ScenarioExecutionContext` requires
 # the field, and because `control_image()` is the canonical source of the image's
 # name — `_published_image` keeps the name and discards this prefix.
-_LOCAL_REGISTRY = "localhost:5000"
+_LOCAL_REGISTRY = LOCAL_REGISTRY
 _HELM_CHART = "deploy/helm/nanofaas"
 _HELM_RELEASE = "control-plane"
 _FUNCTION_READINESS_TIMEOUT_SECONDS = 120
@@ -310,7 +311,7 @@ def build_cli_plan(
     *,
     cli_role: ExecutionRole = "host",
     endpoint: str | None = None,
-    namespace: str = "nanofaas-e2e",
+    namespace: str = DEFAULT_NAMESPACE,
     repo_root: Path | None = None,
     environment: EnvironmentConfig | None = None,
     orchestrator_factory: Callable[[Path], Any] | None = None,

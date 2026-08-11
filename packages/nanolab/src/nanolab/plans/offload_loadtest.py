@@ -9,6 +9,7 @@ import urllib.request
 from multipass import MultipassClient
 from sonata_engine import Steps, Workflow
 from sonata_tasks.command import CommandTask
+from sonata_tasks.deployment import CONTROL_PLANE_NODE_PORT
 from sonata_tasks.loadtest import FetchResultsTask, RunK6Task
 from sonata_tasks.offload_loadtest import (
     EvaluateConservationTask,
@@ -33,7 +34,7 @@ from nanolab.workspace.provenance import source_fingerprint
 from nanolab.plans.functions import resolve_function, sonata_function
 
 _ACTUATOR_PORT = 30081
-_CONTROL_PLANE_PORT = 30080
+_CONTROL_PLANE_PORT = CONTROL_PLANE_NODE_PORT
 # The edge has a one-slot queue in this scenario, so this rate reliably creates
 # pressure while the cloud's larger function budget absorbs the overflow.
 _OFFLOADABLE_RATE = "100"

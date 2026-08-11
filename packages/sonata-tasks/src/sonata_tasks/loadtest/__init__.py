@@ -22,6 +22,7 @@ from sonata_tasks.loadtest.tasks import (
 )
 
 from sonata_tasks.command import CommandTask
+from sonata_tasks.deployment import LOCAL_CONTROL_PLANE_API_PORT
 from sonata_tasks.platform import PlatformRequest, add_platform
 
 # Sonata steps over the load-test implementations in the sibling submodules
@@ -247,7 +248,7 @@ def build_loadtest_workflow(
     workflow_id: str = "loadtest",
     cwd: Path | None = None,
     requires: tuple[Resource[Any], ...] = (),
-    local_endpoint: str = "http://127.0.0.1:18080",
+    local_endpoint: str = f"http://127.0.0.1:{LOCAL_CONTROL_PLANE_API_PORT}",
 ) -> Workflow:
     """Deploy the platform, register the functions, then put them under load.
 
