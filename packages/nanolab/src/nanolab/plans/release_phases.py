@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from sonata_tasks.release_composites import command_specs_composite
+from sonata_tasks.release_composites import command_specs_composite, registry_push_composite
 from sonata_tasks.execution.bindings import RoleBoundCommandTaskExecutor
 
 from nanolab.images.plan import ImagePlan
@@ -24,6 +24,7 @@ from nanolab.release.resources import (
 from nanolab.release.tasks import (
     ReleasePhaseTask,
     amd64_build_task,
+    registry_push_task,
     run_image_steps,
     run_source_steps,
     source_test_task,
@@ -130,3 +131,36 @@ def build_amd64_phase(
         ),
     )
     return release_images, amd64_build
+
+
+def build_registry_push_phase(
+    *,
+    identity: ReleaseIdentity,
+    run_dir: Path,
+    image_plan: ImagePlan,
+    release_images: tuple[str, ...],
+    executor: RoleBoundCommandTaskExecutor,
+    source_tests: ReleasePhaseTask,
+    amd64_build: ReleasePhaseTask,
+) -> ReleasePhaseTask:
+    """Push the built AMD64 images into the registry on the stack VM."""
+    registry_steps = registry_push_composite(
+        image_plan,
+        executor=executor,
+        role="stack",
+        tls_verify=False,
+    )
+    return registry_push_task(
+        identity=identity,
+        run_dir=run_dir,
+        phase_inputs={"images": release_images, "tlsVerify": False},
+        prerequisites=(source_tests.receipt, amd64_build.receipt),
+        expected_images=release_images,
+        work=lambda inputs: run_image_steps(
+            registry_steps,
+            inputs,
+            executor,
+            release_images,
+            registry=True,
+        ),
+    )

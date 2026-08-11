@@ -21,7 +21,6 @@ from sonata_tasks.command import CommandTask
 from sonata_tasks.cosign import CosignTask
 from sonata_tasks.release_composites import (
     attest_composite,
-    registry_push_composite,
 )
 from sonata_tasks.transfer import FileTransferTask
 from sonata_tasks.provisioning.providers import provider_for
@@ -30,7 +29,11 @@ from sonata_tasks.registry_tunnel import registry_tunnel_resource
 from sonata_tasks.execution.bindings import RoleBoundCommandTaskExecutor
 
 from nanolab.cli.execution import build_role_bindings
-from nanolab.plans.release_phases import build_amd64_phase, build_source_test_phase
+from nanolab.plans.release_phases import (
+    build_amd64_phase,
+    build_registry_push_phase,
+    build_source_test_phase,
+)
 from nanolab.cli.vm_provider import vm_request_for_role
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
@@ -73,9 +76,7 @@ from nanolab.release.tasks import (
     arm64_build_task,
     arm64_smoke_task,
     benchmark_task,
-    registry_push_task,
     regression_gate_task,
-    run_image_steps,
     run_steps,
     registry_artifacts_from_receipt,
     registry_evidence,
@@ -339,25 +340,14 @@ def build_release_workflow(
     )
 
     # --- Phase 3: Registry Push ---
-    registry_steps = registry_push_composite(
-        request.image_plan,
-        executor=executor,
-        role="stack",
-        tls_verify=False,
-    )
-    registry_push = registry_push_task(
+    registry_push = build_registry_push_phase(
         identity=identity,
         run_dir=request.run_dir,
-        phase_inputs={"images": release_images, "tlsVerify": False},
-        prerequisites=(source_tests.receipt, amd64_build.receipt),
-        expected_images=release_images,
-        work=lambda inputs: run_image_steps(
-            registry_steps,
-            inputs,
-            executor,
-            release_images,
-            registry=True,
-        ),
+        image_plan=request.image_plan,
+        release_images=release_images,
+        executor=executor,
+        source_tests=source_tests,
+        amd64_build=amd64_build,
     )
 
     # --- Phases 4-6: Benchmarks ---
