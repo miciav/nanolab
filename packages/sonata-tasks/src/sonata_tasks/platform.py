@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+import hashlib
 from pathlib import Path
 from typing import Any, Literal, cast
 
@@ -91,6 +92,12 @@ class PlatformRequest:
     build_control_plane: bool = True
     push_function_images: bool = False
     control_plane_image: str | None = None
+    # What the source being built looks like. Callers that can fingerprint their
+    # checkout pass it here and the built image is named after it, so a rebuilt
+    # control plane arrives under a name the cluster has never seen and Helm
+    # rolls the pod. A fixed tag leaves the manifest identical, and the old pod
+    # keeps running while every task reports success.
+    source_fingerprint: str | None = None
     helm_release: str = "nanofaas"
     helm_chart: str = "deploy/helm/nanofaas"
     helm_values: tuple[str, ...] = ()
@@ -122,8 +129,29 @@ class PlatformRequest:
             return self.execution_role
         return "stack" if self.backend == "k8s" else "host"
 
+    def control_plane_modules(self) -> tuple[str, ...]:
+        return (_MODULES[self.backend], *self.additional_modules)
+
+    def control_plane_image_tag(self) -> str:
+        """The tag the built control plane is published under.
+
+        The modules go into the hash because they are a build input: the same
+        checkout compiled with and without the autoscaler yields two different
+        binaries, and two scenarios that differ only there would otherwise push
+        both under one name — the second one silently never reaching the cluster.
+        """
+        if self.source_fingerprint is None:
+            return "e2e"
+        digest = hashlib.sha256(
+            "\0".join((self.source_fingerprint, *self.control_plane_modules())).encode("utf-8")
+        ).hexdigest()
+        return f"e2e-{digest[:12]}"
+
     def control_plane_image_reference(self) -> str:
-        return self.control_plane_image or f"{self.registry}/nanofaas/control-plane:e2e"
+        return (
+            self.control_plane_image
+            or f"{self.registry}/nanofaas/control-plane:{self.control_plane_image_tag()}"
+        )
 
 
 def _control_plane_build(
@@ -132,7 +160,7 @@ def _control_plane_build(
     cwd: Path | None,
 ) -> GradleTask:
     target = ":control-plane:bootJar"
-    modules = (_MODULES[request.backend], *request.additional_modules)
+    modules = request.control_plane_modules()
     return GradleTask(
         target,
         title=request.titled("Build control plane"),
@@ -255,6 +283,10 @@ def add_platform(
             )
         if request.backend == "k8s":
             image = request.control_plane_image_reference()
+            # Titled by repository, not by the full reference: the tag now
+            # carries a source fingerprint, and a task id that changes with
+            # every edit would churn the journal and every run's task list.
+            repository = image.rsplit(":", 1)[0] if ":" in image.rsplit("/", 1)[-1] else image
             workflow.add(
                 DockerBuildTask(
                     image=image,
@@ -262,7 +294,7 @@ def add_platform(
                     context="platform/control-plane",
                     executor=executor,
                     role=request.role,
-                    title=request.titled(f"Build image {image}"),
+                    title=request.titled(f"Build image {repository}"),
                     cwd=cwd,
                 ),
                 requires=requires,
@@ -272,7 +304,7 @@ def add_platform(
                     image=image,
                     executor=executor,
                     role=request.role,
-                    title=request.titled(f"Push image {image}"),
+                    title=request.titled(f"Push image {repository}"),
                     cwd=cwd,
                 ),
                 requires=requires,

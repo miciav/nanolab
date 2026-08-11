@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 from contextlib import ExitStack, nullcontext
 from datetime import UTC, datetime
@@ -53,6 +52,7 @@ from nanolab.release.environment import (
 )
 from nanolab.plans.validate import build_validate_plan
 from nanolab.workspace.paths import default_tool_paths, discover_tool_root
+from nanolab.workspace.provenance import git_provenance
 
 
 def _read(path: Path) -> dict[str, object]:
@@ -291,62 +291,6 @@ def _render_compiled(compiled: CompiledWorkflow) -> None:
         typer.echo(f"{compiled_task.task_id}  {compiled_task.task.title}")
 
 
-def _git_commit(repo_root: Path) -> str | None:
-    try:
-        result = subprocess.run(
-            ("git", "rev-parse", "HEAD"),
-            cwd=repo_root,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    except OSError:
-        return None
-    return result.stdout.strip() if result.returncode == 0 else None
-
-
-def _git_provenance(repo_root: Path) -> dict[str, object]:
-    commit = _git_commit(repo_root)
-    try:
-        status = subprocess.run(
-            ("git", "status", "--porcelain=v1"),
-            cwd=repo_root,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        diff = subprocess.run(
-            ("git", "diff", "--binary", "HEAD"),
-            cwd=repo_root,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        untracked = subprocess.run(
-            ("git", "ls-files", "--others", "--exclude-standard", "-z"),
-            cwd=repo_root,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    except OSError:
-        return {"git_commit": commit, "git_dirty": None, "git_diff_sha256": None, "git_status": []}
-    if status.returncode != 0 or diff.returncode != 0 or untracked.returncode != 0:
-        return {"git_commit": commit, "git_dirty": None, "git_diff_sha256": None, "git_status": []}
-    digest = hashlib.sha256((status.stdout + "\0" + diff.stdout).encode("utf-8"))
-    for relative_path in filter(None, untracked.stdout.split("\0")):
-        digest.update(b"\0untracked\0")
-        digest.update(relative_path.encode("utf-8"))
-        try:
-            digest.update((repo_root / relative_path).read_bytes())
-        except OSError:
-            digest.update(b"\0unavailable")
-    return {
-        "git_commit": commit,
-        "git_dirty": bool(status.stdout.strip()),
-        "git_diff_sha256": digest.hexdigest(),
-        "git_status": status.stdout.splitlines(),
-    }
 
 
 def _write_run_metadata(
@@ -500,7 +444,7 @@ def install_product_commands(app: typer.Typer) -> None:
                         typer.echo(f"previous release run moved aside: {superseded}")
             sink = ConsoleProgressSink()
             started_at = datetime.now(UTC)
-            provenance = _git_provenance(paths.nanofaas_root)
+            provenance = git_provenance(paths.nanofaas_root)
         except ReleaseRunInProgressError as error:
             lifetime.close()
             raise typer.BadParameter(str(error)) from None

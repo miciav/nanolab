@@ -15,6 +15,7 @@ from nanolab.config.scenario import ScenarioConfig
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.functions.catalog import FunctionDefinition, resolve_function_definition
 from nanolab.workspace.paths import discover_tool_root
+from nanolab.workspace.provenance import source_fingerprint
 
 
 @dataclass(frozen=True, slots=True)
@@ -167,6 +168,7 @@ def build_validate_plan(
             for key in config.functions
         ),
         additional_modules=("async-queue", "sync-queue") if kubernetes else (),
+        source_fingerprint=source_fingerprint(root),
         build_control_plane=kubernetes,
         push_function_images=not kubernetes,
     )

@@ -65,8 +65,8 @@ CONTAINER_SCENARIO = ScenarioConfig(
 DEFAULT_TASK_IDS = [
     "001.check-kubectl-is-usable",
     "002.build-control-plane",
-    "003.build-image-localhost-5000-nanofaas-control-plane-e2e",
-    "004.push-image-localhost-5000-nanofaas-control-plane-e2e",
+    "003.build-image-localhost-5000-nanofaas-control-plane",
+    "004.push-image-localhost-5000-nanofaas-control-plane",
     "005.build-application-artifact-word-stats-java",
     "006.build-image-word-stats-java",
     "007.push-image-localhost-5000-nanofaas-java-word-stats-e2e",

@@ -29,6 +29,7 @@ from sonata_tasks.vm.multipass import resolve_connection_host
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.workspace.paths import discover_tool_root
+from nanolab.workspace.provenance import source_fingerprint
 from nanolab.plans.validate import _resolve_function, _set_args, _sonata_function
 
 _ACTUATOR_PORT = 30081
@@ -156,6 +157,7 @@ def _platform(
     label: str,
     role: Literal["stack", "cloud"],
     build: str,
+    repo_root: Path,
     offload_target: str | None = None,
 ) -> PlatformRequest:
     request = PlatformRequest(
@@ -163,6 +165,7 @@ def _platform(
         build=build,  # pyright: ignore[reportArgumentType]
         functions=functions,
         additional_modules=("offload", "async-queue", "sync-queue"),
+        source_fingerprint=source_fingerprint(repo_root),
         execution_role=role,
         label=label,
     )
@@ -236,12 +239,14 @@ def build_offload_loadtest_plan(
             label="cloud",
             role="cloud",
             build=config.build,
+            repo_root=root,
         ),
         edge=_platform(
             (offloadable, control),
             label="edge",
             role="stack",
             build=config.build,
+            repo_root=root,
             offload_target=cloud_url,
         ),
     )

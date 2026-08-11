@@ -46,8 +46,10 @@ from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.plans.validate import _resolve_function, _set_args, _sonata_function
 from nanolab.workspace.paths import discover_tool_root
+from nanolab.workspace.provenance import source_fingerprint
 
 _REMOTE_DIR = "."
+_HPA_METRIC_WAIT_SECONDS = 180
 
 
 def _default_prometheus_queries(function_name: str) -> tuple[PrometheusQuery, ...]:
@@ -251,6 +253,7 @@ def build_loadtest_plan(
         build_control_plane=backend == "k8s",
         push_function_images=backend == "container" and not prebuilt,
         control_plane_image=prebuilt_control_plane_image,
+        source_fingerprint=source_fingerprint(root),
         helm_chart=(
             str(remote_repo_root / "deploy/helm/nanofaas")
             if remote_repo_root is not None
@@ -439,11 +442,20 @@ def build_loadtest_plan(
                     argv=(
                         "bash",
                         "-lc",
-                        f"set -eu; sudo kubectl get hpa fn-{target.name} -n {request.namespace}; "
-                        "for _ in $(seq 1 30); do "
-                        f"sudo kubectl get --raw {hpa_metric_path!r} >/dev/null && exit 0; "
+                        # The metric only becomes servable once Prometheus is up,
+                        # has scraped the control plane (5s), and the adapter has
+                        # relisted (10s) — a live run had it appear 50s after the
+                        # HPA was created. Wait on a clock, not on an attempt
+                        # count, and keep the loop out of `set -e`'s reach.
+                        f"deadline=$((SECONDS + {_HPA_METRIC_WAIT_SECONDS})); "
+                        "while [ $SECONDS -lt $deadline ]; do "
+                        f"sudo kubectl get --raw {hpa_metric_path!r} >/dev/null 2>&1 && exit 0; "
                         "sleep 2; done; "
-                        "echo 'HPA external metric diagnostics:'; "
+                        f"echo 'HPA external metric unavailable after {_HPA_METRIC_WAIT_SECONDS}s:'; "
+                        f"sudo kubectl get hpa fn-{target.name} -n {request.namespace} || true; "
+                        f"sudo kubectl -n {request.namespace} logs "
+                        "deploy/nanofaas-hpa-metrics-adapter --tail=200 2>&1 "
+                        "| grep -v healthz | tail -10 || true; "
                         f"sudo kubectl get --raw {control_plane_metrics_path!r} "
                         "| grep '^function_' || true; "
                         f"sudo kubectl -n {request.namespace} exec deploy/nanofaas-prometheus -- "
@@ -453,6 +465,36 @@ def build_loadtest_plan(
                     ),
                     executor=executor,
                     role="stack",
+                ),
+                *(
+                    (
+                        CommandTask(
+                            title="Wait for the HPA to park the function at zero",
+                            argv=(
+                                "bash",
+                                "-lc",
+                                # The function is created with one replica: only the
+                                # HPA scaling it down to zero earns the ScaledToZero
+                                # condition that lets it scale back up later. The run
+                                # also asserts it starts at its replica floor.
+                                f"deadline=$((SECONDS + {_HPA_METRIC_WAIT_SECONDS})); "
+                                "while [ $SECONDS -lt $deadline ]; do "
+                                f"[ \"$(sudo kubectl -n {request.namespace} get "
+                                f"deploy/fn-{target.name} -o jsonpath='{{.spec.replicas}}' "
+                                "2>/dev/null)\" = 0 ] && exit 0; "
+                                "sleep 5; done; "
+                                "echo 'function never parked at zero:'; "
+                                f"sudo kubectl -n {request.namespace} get "
+                                f"deploy/fn-{target.name} || true; "
+                                f"sudo kubectl -n {request.namespace} describe "
+                                f"hpa fn-{target.name} || true; exit 1",
+                            ),
+                            executor=executor,
+                            role="stack",
+                        ),
+                    )
+                    if hpa_scale_to_zero
+                    else ()
                 ),
                 preflight,
             ),

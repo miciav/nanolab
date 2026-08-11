@@ -21,7 +21,7 @@ def _run_from_project_root(monkeypatch):
     monkeypatch.chdir(_PROJECT_ROOT)
 
 from nanolab.app.main import app
-from nanolab.cli.product import _git_provenance
+from nanolab.workspace.provenance import git_provenance
 import nanolab.cli.product as product_module
 
 
@@ -390,7 +390,7 @@ def test_run_provisions_before_executing_workflow(monkeypatch, tmp_path: Path) -
     # around it, not what it runs.
     monkeypatch.setattr(workflow, "run", lambda **_kwargs: actions.append("run"))
     monkeypatch.setattr(
-        "nanolab.cli.product._git_provenance",
+        "nanolab.cli.product.git_provenance",
         lambda *args: actions.append("provenance")
         or {
             "git_commit": "abc",
@@ -444,14 +444,14 @@ def test_git_provenance_fingerprints_tracked_and_untracked_content(tmp_path: Pat
     subprocess.run(("git", "add", "tracked.txt"), cwd=repo, check=True)
     subprocess.run(("git", "commit", "-qm", "base"), cwd=repo, check=True)
 
-    clean = _git_provenance(repo)
+    clean = git_provenance(repo)
     tracked.write_text("changed", encoding="utf-8")
-    tracked_change = _git_provenance(repo)
+    tracked_change = git_provenance(repo)
     untracked = repo / "untracked.txt"
     untracked.write_text("one", encoding="utf-8")
-    untracked_one = _git_provenance(repo)
+    untracked_one = git_provenance(repo)
     untracked.write_text("two", encoding="utf-8")
-    untracked_two = _git_provenance(repo)
+    untracked_two = git_provenance(repo)
 
     assert clean["git_dirty"] is False
     assert tracked_change["git_diff_sha256"] != clean["git_diff_sha256"]

@@ -327,8 +327,8 @@ def test_loadtest_reuses_the_platform_validate_deploys() -> None:
     assert [task.task_id for task in workflow.compile().tasks] == [
         "001.check-kubectl-is-usable",
         "002.build-control-plane",
-        "003.build-image-localhost-5000-nanofaas-control-plane-e2e",
-        "004.push-image-localhost-5000-nanofaas-control-plane-e2e",
+        "003.build-image-localhost-5000-nanofaas-control-plane",
+        "004.push-image-localhost-5000-nanofaas-control-plane",
         "005.build-image-word-stats-java",
         "006.push-image-localhost-5000-nanofaas-java-word-stats-e2e",
         "007.acquire-helm-release-nanofaas",
