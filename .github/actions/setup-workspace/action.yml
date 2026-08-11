@@ -48,6 +48,22 @@ runs:
         java-version: '25'
         cache: 'gradle'
 
+    - name: Verify the JDK matches the pinned nanoFaaS source
+      if: ${{ inputs.nanofaas-token != '' }}
+      shell: bash -euo pipefail {0}
+      run: |
+        # The runtime java must not be older than what the source compiles to,
+        # or the container smoke test dies with UnsupportedClassVersionError
+        # after everything else has gone green.
+        expected="$(grep -E '^javaVersion=' .nanofaas-source/gradle.properties | cut -d= -f2 | tr -d '[:space:]')"
+        actual="$(java -version 2>&1 | head -1 | grep -oE '[0-9]+' | head -1)"
+        if [ "$expected" != "$actual" ]; then
+          echo "JDK mismatch: workflow installs $actual, pinned nanoFaaS compiles to $expected" >&2
+          echo "Update java-version in .github/actions/setup-workspace/action.yml" >&2
+          exit 1
+        fi
+        echo "JDK $actual matches the pinned nanoFaaS source"
+
     - name: Install uv
       uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
       with:
