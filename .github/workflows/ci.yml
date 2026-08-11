@@ -26,46 +26,11 @@ jobs:
       - name: Check out nanolab
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - name: Check out pinned nanoFaaS source
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          repository: miciav/nanofaas
-          # nanofaas feat/spring-boot-4.1 at "Refresh GitNexus index metadata",
-          # the checkout release work is developed against: Java 25 / GraalVM
-          # 25.2.4, unified Java native builds, and the java-figlet,
-          # python-mlimage and java-lite targets the image matrix now expands.
-          # Tests read the version and the matrix from this checkout rather than
-          # assuming them, so moving the pin needs no test edits.
-          ref: f18f1be61491011224ed660eec142418ac9e3e26
-          path: .nanofaas-source
-          token: ${{ secrets.NANOFAAS_CHECKOUT_TOKEN }}
-
-      - name: Install JDK
-        uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
-        with:
-          distribution: 'temurin'
-          # Must track `javaVersion` in the pinned nanoFaaS gradle.properties.
-          # The Gradle toolchain compiles to that release, but the cli-container
-          # smoke test launches the control-plane jar with the ambient `java`
-          # (plans/_local_control_plane.argv), so a lower runtime here builds
-          # green and then dies with UnsupportedClassVersionError in one second.
-          java-version: '25'
-          cache: 'gradle'
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
-        with:
-          version: "0.11.32"
-          enable-cache: true
-
-      - name: Install Python
-        run: uv python install 3.12
-
-      - name: Verify lock and sync workspace
+      - name: Set up the workspace
         id: sync
-        run: |
-          uv lock --check
-          uv sync --locked --all-packages --all-groups
+        uses: ./.github/actions/setup-workspace
+        with:
+          nanofaas-token: ${{ secrets.NANOFAAS_CHECKOUT_TOKEN }}
 
       # One step per check, and each runs even when an earlier one failed
       # — !cancelled() rather than always(), so cancelling the job still stops.
