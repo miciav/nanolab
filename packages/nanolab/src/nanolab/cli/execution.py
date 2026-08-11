@@ -201,10 +201,6 @@ def prometheus_over_ssh(
                 _ = process.wait(timeout=5)
 
 
-def _home(target: RoleTarget) -> str:
-    return target.home or ("/root" if target.user == "root" else f"/home/{target.user}")
-
-
 def _command(argv: tuple[str, ...], env: dict[str, str], cwd: str) -> str:
     command = f"cd {shlex.quote(cwd)} && "
     if env:
@@ -230,7 +226,7 @@ class _RemoteRunner:
         command = _command(
             argv,
             {**self._default_env, **env},
-            remote_dir or f"{_home(self._target)}/nanofaas",
+            remote_dir or f"{self._target.remote_home}/nanofaas",
         )
         if self._provider == "multipass":
             if not self._target.name:
@@ -373,7 +369,7 @@ def build_role_bindings(
     def remote(role: str):
         target = environment.target(role)  # type: ignore[arg-type]
         default_env = (
-            {"KUBECONFIG": target.kubeconfig or f"{_home(target)}/.kube/config"}
+            {"KUBECONFIG": target.kubeconfig or f"{target.remote_home}/.kube/config"}
             if role in ("stack", "cloud")
             else None
         )

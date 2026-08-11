@@ -100,12 +100,6 @@ def _default_prometheus_queries(function_name: str) -> tuple[PrometheusQuery, ..
     )
 
 
-def _home(user: str, explicit: str | None) -> str:
-    if explicit:
-        return explicit
-    return "/root" if user == "root" else f"/home/{user}"
-
-
 class _RoleRunner:
     """The VM-command shape the legacy replica probe expects, bound to a role."""
 
@@ -211,7 +205,7 @@ def build_loadtest_plan(
     script_name = "autoscaling.js" if config.autoscaling else "two-vm-function-invoke.js"
     if remote:
         role_target = environment.target("loadgen" if dedicated else "stack")
-        home = _home(role_target.user, role_target.home)
+        home = role_target.remote_home
         script_path = Path(home) / f"nanolab-assets/k6/{script_name}"
         output_dir = remote_run_dir or Path(home) / "nanofaas-loadtest"
         if remote_run_dir is not None:
