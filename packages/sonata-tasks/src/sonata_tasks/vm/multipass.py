@@ -140,6 +140,10 @@ class MultipassVmProvider:
         return vm_remote_home(request)
 
     def _shell_run(self, command: list[str], *, dry_run: bool = False) -> ShellExecutionResult:
+        # cwd here is the *local* working directory of the ssh/scp process, which
+        # is not where the caller stands. Any local path in `command` must
+        # therefore already be absolute — see _local_path — or it silently
+        # resolves against the workspace instead of against the caller.
         return self.shell.run(command, cwd=self.workspace_root, dry_run=dry_run)
 
     def _ssh_options(self) -> list[str]:
@@ -259,6 +263,18 @@ class MultipassVmProvider:
             dry_run=dry_run,
         )
 
+    @staticmethod
+    def _local_path(path: Path) -> str:
+        """A local path the scp process will read the same way its caller meant.
+
+        scp runs from the workspace, not from wherever the caller stands, so a
+        relative path would quietly mean a different file. It cost a silent bug:
+        load-test results "transferred" successfully into the checkout under
+        test, named after the run directory, while the run directory stayed
+        empty.
+        """
+        return str(Path(path).resolve())
+
     def transfer_to(
         self,
         request: VmRequest,
@@ -268,7 +284,12 @@ class MultipassVmProvider:
         dry_run: bool = False,
     ) -> ShellExecutionResult:
         return self._shell_run(
-            ["scp", *self._ssh_options(), str(source), f"{self._ssh_target(request, dry_run=dry_run)}:{destination}"],
+            [
+                "scp",
+                *self._ssh_options(),
+                self._local_path(source),
+                f"{self._ssh_target(request, dry_run=dry_run)}:{destination}",
+            ],
             dry_run=dry_run,
         )
 
@@ -281,6 +302,11 @@ class MultipassVmProvider:
         dry_run: bool = False,
     ) -> ShellExecutionResult:
         return self._shell_run(
-            ["scp", *self._ssh_options(), f"{self._ssh_target(request, dry_run=dry_run)}:{source}", str(destination)],
+            [
+                "scp",
+                *self._ssh_options(),
+                f"{self._ssh_target(request, dry_run=dry_run)}:{source}",
+                self._local_path(destination),
+            ],
             dry_run=dry_run,
         )

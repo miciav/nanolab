@@ -71,6 +71,31 @@ def test_ensure_running_external_calls_ssh() -> None:
     assert "ssh" in args
 
 
+def test_transfer_from_makes_the_local_path_absolute(monkeypatch) -> None:  # pyright: ignore[reportMissingParameterType]
+    """scp runs from the workspace, not from where the caller stands: a relative
+    destination would land in the checkout instead of the caller's directory,
+    and the transfer would still report success."""
+    provider, shell, _ = _make_provider()
+    monkeypatch.chdir(Path(__file__).parent)
+    req = VmRequest(lifecycle="multipass", name="my-vm")
+
+    _ = provider.transfer_from(req, source="/remote/file.txt", destination=Path("out/results"))
+
+    command = shell.run.call_args.args[0]
+    assert command[-1] == str((Path(__file__).parent / "out/results").resolve())
+
+
+def test_transfer_to_makes_the_local_path_absolute(monkeypatch) -> None:  # pyright: ignore[reportMissingParameterType]
+    provider, shell, _ = _make_provider()
+    monkeypatch.chdir(Path(__file__).parent)
+    req = VmRequest(lifecycle="multipass", name="my-vm")
+
+    _ = provider.transfer_to(req, source=Path("assets/payload"), destination="/remote/payload")
+
+    command = shell.run.call_args.args[0]
+    assert str((Path(__file__).parent / "assets/payload").resolve()) in command
+
+
 def test_transfer_from_dry_run() -> None:
     provider, shell, _ = _make_provider()
     req = VmRequest(lifecycle="multipass", name="my-vm")
