@@ -81,7 +81,7 @@ The current line matches `registry` anywhere in the file. Replace it so it asser
           # The gate is that no registry bootstrap task exists, not that the
           # word never appears: a substring match over the whole plan fails on
           # any future task that merely mentions a registry.
-          if grep -qE '^[0-9]+\.[a-z0-9-]*(acquire|ensure|configure)-[a-z0-9-]*registry' "$provisioned_plan"; then
+          if grep -qE '^[0-9]+\.[a-z0-9-]*registry' "$provisioned_plan"; then
             echo "provisioned plan reuses the legacy registry bootstrap:" >&2
             grep -nE 'registry' "$provisioned_plan" >&2
             exit 1
@@ -96,9 +96,9 @@ export NANOFAAS_ROOT=/Users/micheleciavotta/Downloads/mcFaas
 p=$(mktemp)
 uv run --package nanolab nanolab plan packages/nanolab/scenarios-v2/cli-contract-k8s.yaml \
   --environment packages/nanolab/environments/multipass.yaml >"$p"
-grep -qE '^[0-9]+\.[a-z0-9-]*(acquire|ensure|configure)-[a-z0-9-]*registry' "$p" && echo "FAIL: trovato" || echo "ok: nessun registry"
+grep -qE '^[0-9]+\.[a-z0-9-]*registry' "$p" && echo "FAIL: trovato" || echo "ok: nessun registry"
 printf '001.acquire-local-registry  Acquire local registry\n' > "$p.bad"
-grep -qE '^[0-9]+\.[a-z0-9-]*(acquire|ensure|configure)-[a-z0-9-]*registry' "$p.bad" && echo "ok: rileva il caso pianto" || echo "FAIL: non rileva"
+grep -qE '^[0-9]+\.[a-z0-9-]*registry' "$p.bad" && echo "ok: rileva il caso pianto" || echo "FAIL: non rileva"
 rm -f "$p" "$p.bad"
 ```
 
@@ -465,7 +465,7 @@ jobs:
           # The gate is that no registry bootstrap task exists, not that the
           # word never appears: a substring match over the whole plan fails on
           # any future task that merely mentions a registry.
-          if grep -qE '^[0-9]+\.[a-z0-9-]*(acquire|ensure|configure)-[a-z0-9-]*registry' "$provisioned_plan"; then
+          if grep -qE '^[0-9]+\.[a-z0-9-]*registry' "$provisioned_plan"; then
             echo "provisioned plan reuses the legacy registry bootstrap:" >&2
             grep -nE 'registry' "$provisioned_plan" >&2
             exit 1
