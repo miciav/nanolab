@@ -401,6 +401,7 @@ def test_the_tui_sink_binds_to_sonata_and_reads_its_task_vocabulary() -> None:
     with bind_workflow_sink(sink):
         bound_sink = active_sink()
         assert bound_sink is sink
+        assert bound_sink is not None
         bound_sink.emit(
             SonataEvent(
                 kind="task.started",

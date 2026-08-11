@@ -6,7 +6,7 @@ import pytest
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.plans.offload import build_offload_plan
 from sonata_tasks.execution.bindings import RoleBindings
-from sonata_tasks.tasks.models import TaskResult
+from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 
 NANOFAAS_ROOT = Path(os.environ["NANOFAAS_ROOT"]).resolve()
@@ -14,8 +14,11 @@ NANOLAB_ROOT = Path(__file__).resolve().parents[2]
 
 
 class _RecordingExecutor:
-    def run(self, spec, **kwargs):  # noqa: ANN001, ANN003
-        return TaskResult(return_code=0, stdout="", stderr="")
+    def run(self, task: CommandTaskSpec, *, dry_run: bool = False) -> TaskResult:
+        del dry_run
+        return TaskResult(
+            task_id=task.task_id, status="passed", return_code=0, stdout="", stderr=""
+        )
 
 
 def _bindings() -> RoleBindings:

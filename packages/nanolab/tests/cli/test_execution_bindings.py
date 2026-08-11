@@ -5,6 +5,7 @@ import nanolab.cli.execution as execution
 from nanolab.cli.execution import build_role_bindings, resolve_loadtest_urls
 from nanolab.config.environment import EnvironmentConfig
 from sonata_tasks.tasks.models import CommandTaskSpec
+from sonata_tasks.vm.models import VmRequest
 
 
 @dataclass
@@ -30,11 +31,21 @@ class RecordingVmProvider:
         self.exec_calls = []
         self.fetch_calls = []
 
-    def exec_argv(self, request, argv, *, env, remote_dir, dry_run):
+    def exec_argv(
+        self,
+        request: VmRequest,
+        argv: tuple[str, ...] | list[str],
+        *,
+        env: dict[str, str] | None = None,
+        remote_dir: str | None = None,
+        dry_run: bool = False,
+    ) -> _Result:
         self.exec_calls.append((request, tuple(argv), env, remote_dir, dry_run))
         return _Result()
 
-    def transfer_from(self, request, *, source, destination):
+    def transfer_from(
+        self, request: VmRequest, *, source: str, destination: Path
+    ) -> _Result:
         self.fetch_calls.append((request, source, destination))
         return _Result()
 

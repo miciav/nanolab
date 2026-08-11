@@ -83,6 +83,18 @@ def _run(workflow, executor: RecordingExecutor) -> list[CommandTaskSpec]:  # pyr
     return executor.seen
 
 
+
+class _UnusedFetcher:
+    """The plan requires a fetcher and this test never reaches the fetch.
+
+    A real stub rather than object(): the requirement is meaningful, and it
+    should be met by something that could actually satisfy it.
+    """
+
+    def fetch_from(self, remote: str, local: Path) -> None:
+        raise AssertionError(f"no fetch expected: {remote} -> {local}")
+
+
 def test_rejects_non_offload_loadtest_scenario() -> None:
     with pytest.raises(ValueError, match="offload-loadtest"):
         build_offload_loadtest_plan(
@@ -243,7 +255,7 @@ def test_edge_offload_target_points_at_the_cloud_role(tmp_path: Path) -> None:
         _bindings(executor),
         run_dir=tmp_path,
         repo_root=NANOFAAS_ROOT,
-        fetcher=object(),
+        fetcher=_UnusedFetcher(),
     )
 
     installs = [

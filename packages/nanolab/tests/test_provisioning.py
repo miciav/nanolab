@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -15,7 +16,7 @@ class _Result:
 
 
 class RecordingShell:
-    def __init__(self, events: list[tuple[str, object]]) -> None:
+    def __init__(self, events: list[tuple[str, Any]]) -> None:
         self.events = events
         self.fail_playbook: str | None = None
 
@@ -29,7 +30,9 @@ class RecordingShell:
 
 class RecordingOrchestrator:
     def __init__(self) -> None:
-        self.events: list[tuple[str, object]] = []
+        # Any: the payload shape follows the kind — a command tuple for
+        # "command", the VM name for "ensure" and "teardown".
+        self.events: list[tuple[str, Any]] = []
         self.restrictions: list[tuple[object, tuple[int, ...], tuple[str, ...]]] = []
         self.shell = RecordingShell(self.events)
         self.ensure_result = _Result()

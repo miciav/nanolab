@@ -73,7 +73,7 @@ def _summary(overrides: Mapping[str, Any] | None = None) -> dict[str, Any]:
     return base
 
 
-def _deep_merge(base: dict[str, Any], overrides: dict[str, Any]) -> None:
+def _deep_merge(base: dict[str, Any], overrides: Mapping[str, Any]) -> None:
     for key, value in overrides.items():
         if isinstance(value, dict) and key in base and isinstance(base[key], dict):
             _deep_merge(base[key], value)

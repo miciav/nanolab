@@ -17,18 +17,24 @@ from __future__ import annotations
 from collections.abc import Callable
 import sys
 import time
+from typing import TypeVar
 
 # paramiko's "channel closed without an exit status" sentinel.
 CONNECTION_DEAD = -1
 
+# Generic so a caller keeps the type it passed in: this hands back whatever the
+# operation produced, and returning `object` made every caller and every test
+# reach for a cast to read a return code.
+T = TypeVar("T")
+
 
 def retry_on_connection_death(
-    operation: Callable[[], object],
+    operation: Callable[[], T],
     *,
     describe: str,
     attempts: int = 4,
     sleep: Callable[[float], None] = time.sleep,
-) -> object:
+) -> T:
     """Run *operation*, retrying only when the connection dies."""
     for attempt in range(1, attempts + 1):
         last = attempt == attempts

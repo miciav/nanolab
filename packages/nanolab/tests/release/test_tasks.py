@@ -1,9 +1,10 @@
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
-from sonata_engine import Evidence, JournalConfig, TaskInputs, TaskOutcome, Workflow
-from sonata_tasks.tasks.models import TaskResult
+from sonata_engine import Evidence, JournalConfig, Task, TaskInputs, TaskOutcome, Workflow
+from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 from nanolab.release.evidence import file_digest_verifier, receipt_artifacts
 from nanolab.release import tasks as release_tasks
@@ -722,10 +723,11 @@ def test_arm_receipt_parser_rejects_malformed_schema(payload, tmp_path: Path) ->
 def test_image_steps_capture_every_current_registry_digest() -> None:
     digest = "sha256:" + "d" * 64
 
-    class Steps:
+    class Steps(Task[Any]):
         title = "Push"
 
-        def run(self, _inputs):
+        def run(self, inputs: TaskInputs) -> TaskOutcome[Any]:
+            del inputs
             return TaskOutcome()
 
     class Executor:
@@ -757,24 +759,27 @@ def test_image_steps_capture_every_current_registry_digest() -> None:
     [None, "sha256:" + "A" * 64, "sha256:" + "z" * 64, "sha256:" + "a" * 63],
 )
 def test_image_steps_reject_malformed_digest_output(stdout) -> None:
-    class Steps:
+    class Steps(Task[Any]):
         title = "Build"
 
-        def run(self, _inputs):
+        def run(self, inputs: TaskInputs) -> TaskOutcome[Any]:
+            del inputs
             return TaskOutcome()
 
     class Executor:
-        def run(self, _task, *, dry_run=False):
+        def run(self, task: CommandTaskSpec, *, dry_run: bool = False) -> TaskResult:
+            del task, dry_run
             return TaskResult(task_id="", status="passed", return_code=0, stdout=stdout)
 
     with pytest.raises(RuntimeError, match="invalid image digest"):
         run_image_steps(Steps(), TaskInputs.empty(), Executor(), ("image:v1",), registry=False)
 
 
-class _NoopSteps:
+class _NoopSteps(Task[Any]):
     title = "Steps"
 
-    def run(self, _inputs):
+    def run(self, inputs: TaskInputs) -> TaskOutcome[Any]:
+        del inputs
         return TaskOutcome()
 
 

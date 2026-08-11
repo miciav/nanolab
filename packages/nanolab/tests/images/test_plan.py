@@ -113,7 +113,8 @@ def test_default_candidate_registry_is_stack_local_never_ghcr() -> None:
 def test_all_amd64_cells_precede_all_arm64_cells() -> None:
     architectures = [cell.architecture for cell in _plan().cells]
 
-    assert architectures == sorted(architectures, key={"amd64": 0, "arm64": 1}.get)
+    order = {"amd64": 0, "arm64": 1}
+    assert architectures == sorted(architectures, key=lambda a: order[a])
 
 
 def test_each_discovered_function_dockerfile_maps_to_one_target() -> None:

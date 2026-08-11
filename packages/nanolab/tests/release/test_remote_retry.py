@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from types import SimpleNamespace
 
 import pytest
@@ -10,10 +11,13 @@ from nanolab.release.remote_retry import (
 )
 
 
-def _op(results: list[object]):
+def _op(
+    results: list[SimpleNamespace | Exception],
+) -> tuple[Callable[[], SimpleNamespace], dict[str, int]]:
+    """The operation under retry, and a counter for how often it ran."""
     state = {"i": 0}
 
-    def run() -> object:
+    def run() -> SimpleNamespace:
         outcome = results[state["i"]]
         state["i"] += 1
         if isinstance(outcome, Exception):

@@ -333,5 +333,7 @@ def test_newest_comparable_record_ignores_other_performance_series() -> None:
         record("v0.18.0"),
     )
 
-    assert newest_comparable_record(records, PROFILE)["version"] == "v0.18.0"
+    newest = newest_comparable_record(records, PROFILE)
+    assert newest is not None
+    assert newest["version"] == "v0.18.0"
     assert newest_comparable_record(records, replace(PROFILE, provider="proxmox")) is None

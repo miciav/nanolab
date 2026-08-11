@@ -7,7 +7,6 @@ from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.plans.loadtest import build_loadtest_plan
 from sonata_tasks.execution.bindings import RoleBindings
-from sonata_tasks.loadtest import autoscaling
 from sonata_tasks.loadtest.models import TimeWindow
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
@@ -53,7 +52,7 @@ def _no_real_waiting(monkeypatch: pytest.MonkeyPatch) -> None:
     """The autoscaling verifier polls for real: 90s settle plus 2x24 polls at 5s.
     These tests now run the workflow rather than inspecting it, so without this
     the file takes six and a half minutes to assert on argv."""
-    monkeypatch.setattr(autoscaling.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr("sonata_tasks.loadtest.autoscaling.time.sleep", lambda _seconds: None)
 
 
 SCENARIO = ScenarioConfig(workflow="loadtest", functions=["word-stats-java"])

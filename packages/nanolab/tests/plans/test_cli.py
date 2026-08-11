@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from typing import cast
+
 import pytest
 import yaml
 from sonata_engine import Selection
 from sonata_tasks.components import bootstrap
+from sonata_tasks.command import CommandTask
 from sonata_tasks.execution.bindings import RoleBindings
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 from sonata_tasks.vm import multipass
@@ -99,6 +102,18 @@ def _provisioned_plan(
         environment=_multipass_environment(),
         orchestrator_factory=lambda _root: fake,
     )
+
+
+
+def _argv(task: object) -> tuple[str, ...]:
+    """The argv of a compiled command task.
+
+    CommandTask.argv may also be a callable resolved from upstream; these tasks
+    are built with a literal, and saying so once beats three casts.
+    """
+    argv = cast(CommandTask, task).argv
+    assert not callable(argv)
+    return argv
 
 
 def _scenario(**overrides: object) -> ScenarioConfig:
@@ -242,7 +257,7 @@ def test_container_backend_builds_the_control_plane_with_the_container_module() 
         if task.task_id.endswith(".build-local-control-plane")
     )
 
-    assert build.task.argv == (
+    assert _argv(build.task) == (
         "./gradlew",
         ":control-plane:bootJar",
         "-PcontrolPlaneModules=container-deployment-provider",
@@ -261,7 +276,7 @@ def test_container_backend_targets_the_local_control_plane_port() -> None:
         task for task in plan.compile().tasks if task.task_id.endswith(".invoke-word-stats-java")
     )
 
-    assert "http://127.0.0.1:18080" in " ".join(invoke.task.argv)
+    assert "http://127.0.0.1:18080" in " ".join(_argv(invoke.task))
 
 
 def test_k8s_backend_keeps_the_explicit_endpoint_and_starts_nothing() -> None:
@@ -279,7 +294,7 @@ def test_k8s_backend_keeps_the_explicit_endpoint_and_starts_nothing() -> None:
     assert not any("local-control-plane" in task_id for task_id in task_ids)
     assert not any("build-local-control-plane" in task_id for task_id in task_ids)
     assert not any("build-image" in task_id for task_id in task_ids)
-    assert "http://stack.example:30080" in " ".join(invoke.task.argv)
+    assert "http://stack.example:30080" in " ".join(_argv(invoke.task))
 
 
 def test_k8s_backend_requires_an_explicit_endpoint() -> None:

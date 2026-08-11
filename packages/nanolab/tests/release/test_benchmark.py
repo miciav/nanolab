@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, replace
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -59,7 +60,8 @@ def test_sonata_benchmarks_use_isolated_dirs_and_exact_registry_digests(
 ) -> None:
     plan = _plan(tmp_path, monkeypatch)
     receipt = _registry_receipt(plan)
-    calls: list[dict[str, object]] = []
+    # Any: these are captured kwargs of mixed shape, read back by key.
+    calls: list[dict[str, Any]] = []
 
     class Workflow:
         def __init__(self, run_dir: Path):

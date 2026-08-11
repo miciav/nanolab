@@ -61,8 +61,7 @@ select = ["F", "SLF"]
 [tool.basedpyright]
 include = [
     "src/nanolab",
-    # "tests" once the remaining 52 errors are fixed: sonata-tasks is already
-    # checked this way, and its tests found real looseness in production types.
+    "tests",
 ]
 typeCheckingMode = "basic"
 reportMissingTypeStubs = false

@@ -3,14 +3,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 from sonata_engine import Resource, Task, TaskInputs, TaskOutcome, Workflow
 
 import nanolab.release.resources as release_resources
 from nanolab.config.environment import EnvironmentConfig
+from nanolab.images.plan import ImagePlan
 from nanolab.release.model import ArtifactEvidence
-from nanolab.release.resources import cosign_credentials_resource, ghcr_credentials_resource
+from nanolab.release.resources import (
+    ReleaseResources,
+    cosign_credentials_resource,
+    ghcr_credentials_resource,
+)
 
 
 def _environment() -> EnvironmentConfig:
@@ -136,7 +142,9 @@ class ConsumeEndpoints(Task[None]):
         return TaskOutcome(value=None)
 
 
-def _workflow(provider: FakeProvider, monkeypatch: pytest.MonkeyPatch) -> tuple[Workflow, object]:
+def _workflow(
+    provider: FakeProvider, monkeypatch: pytest.MonkeyPatch
+) -> tuple[Workflow, ReleaseResources]:
     def bootstrap(_provider, _root, role, _request, _info) -> None:
         provider.events.append(f"bootstrap:{role}")
 
@@ -351,7 +359,7 @@ def test_arm_build_inputs_transfer_bake_and_buildkit_and_cleanup_on_failure(
 
     provider = Provider()
     resource = release_resources.build_inputs_resource(
-        image_plan=SimpleNamespace(cells=()),
+        image_plan=cast(ImagePlan, SimpleNamespace(cells=())),
         max_parallelism=3,
         run_dir=tmp_path,
         remote_root="/home/user/nanofaas-release/v1",
@@ -416,7 +424,7 @@ def test_release_source_resources_reject_unsafe_remote_paths(
 def test_arm_inputs_reject_unsafe_remote_root(remote_root: str, tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="release remote"):
         release_resources.build_inputs_resource(
-            image_plan=SimpleNamespace(cells=()),
+            image_plan=cast(ImagePlan, SimpleNamespace(cells=())),
             max_parallelism=1,
             run_dir=tmp_path,
             remote_root=remote_root,
@@ -483,7 +491,7 @@ def test_arm_inputs_normal_release_propagates_cleanup_failure(
 
     provider = Provider()
     resource = release_resources.build_inputs_resource(
-        image_plan=SimpleNamespace(cells=()),
+        image_plan=cast(ImagePlan, SimpleNamespace(cells=())),
         max_parallelism=1,
         run_dir=tmp_path,
         remote_root="/home/user/nanofaas-release/v1",

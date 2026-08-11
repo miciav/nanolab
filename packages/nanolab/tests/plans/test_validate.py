@@ -1,6 +1,8 @@
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import pytest
+
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.plans.validate import (
     _resolve_function,
@@ -140,7 +142,9 @@ def test_container_validation_builds_and_deploys_the_control_plane_with_compose(
     ]
 
 
-def test_container_validation_owns_an_isolated_compose_project(monkeypatch: object) -> None:
+def test_container_validation_owns_an_isolated_compose_project(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(
         "nanolab.plans.validate.docker_registry_resource",
         lambda **kwargs: docker_registry_resource(**kwargs, ready=lambda: True),

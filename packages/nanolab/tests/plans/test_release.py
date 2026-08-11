@@ -7,6 +7,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import asdict, replace
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 import yaml
@@ -20,7 +21,7 @@ import nanolab.release.resources as release_resources
 import nanolab.release.build as release_build
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
-from nanolab.images.plan import DEFAULT_REGISTRY, ImagePlan
+from nanolab.images.plan import DEFAULT_REGISTRY, ImageCell, ImagePlan
 from nanolab.plans.release import ReleaseRequest, build_release_workflow
 from nanolab.release.evidence import signature_evidence_verifier
 from nanolab.release.metrics import PerformanceAggregate, PerformanceProfile
@@ -130,7 +131,9 @@ def test_amd64_build_phase_records_the_commands_it_will_run(
 
 
 def test_release_journal_is_scoped_to_the_versioned_run(tmp_path: Path) -> None:
-    request = type("Request", (), {"run_dir": tmp_path, "version": "v1.2.3"})()
+    # Only run_dir and version are read; the rest of a ReleaseRequest is
+    # irrelevant to where the journal lands.
+    request = cast(ReleaseRequest, SimpleNamespace(run_dir=tmp_path, version="v1.2.3"))
 
     assert release_plan.release_journal_config(request).path == (
         tmp_path / "releases" / "1.2.3" / "sonata.jsonl"
@@ -1085,6 +1088,7 @@ def test_build_release_request_is_offline_and_builds_current_matrix(
         executable=True,
     )
 
+    assert request.identity is not None
     assert request.identity.source_commit == "a" * 40
     assert request.identity.release_config_digest == digest_path(scenario_path)
     assert request.identity.environment_digest == digest_path(environment_path)
@@ -1346,7 +1350,12 @@ def test_build_release_request_plans_from_the_commit_not_the_worktree(
 
     def fake_build_image_plan(root, version, *, registry, architectures):
         planned_roots.append(root)
-        return ImagePlan(version=version, registry=registry, targets=(), cells=("dummy-cell",))
+        return ImagePlan(
+            version=version,
+            registry=registry,
+            targets=(),
+            cells=cast("tuple[ImageCell, ...]", ("dummy-cell",)),
+        )
 
     monkeypatch.setattr(release_plan, "build_image_plan", fake_build_image_plan)
     source_tree = tmp_path / "tree"

@@ -5,8 +5,10 @@ from dataclasses import dataclass
 from pathlib import Path
 import traceback
 
+from typing import Any
+
 import pytest
-from sonata_engine import TaskInputs, TaskOutcome, Workflow
+from sonata_engine import Task, TaskInputs, TaskOutcome, Workflow
 
 from nanolab.release.secrets import validate_secret_file
 from nanolab.release.resources import ghcr_credentials_resource
@@ -135,10 +137,10 @@ def test_credential_resource_cleans_on_failure_interrupt_and_keep(
         token_file=token,
     )
 
-    class Fail:
+    class Fail(Task[Any]):
         title = "Use credentials"
 
-        def run(self, inputs):
+        def run(self, inputs: TaskInputs) -> TaskOutcome[Any]:
             assert inputs.resource(resource).value.docker_config.endswith("/docker")
             raise failure
 
@@ -167,10 +169,10 @@ def test_credential_resource_cleans_on_success_with_keep(tmp_path: Path) -> None
         token_file=token,
     )
 
-    class Pass:
+    class Pass(Task[Any]):
         title = "Use credentials"
 
-        def run(self, inputs):
+        def run(self, inputs: TaskInputs) -> TaskOutcome[Any]:
             assert inputs.resource(resource).value.docker_config.endswith("/docker")
             return TaskOutcome()
 
