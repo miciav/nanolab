@@ -31,6 +31,7 @@ from sonata_tasks.registry_tunnel import registry_tunnel_resource
 from sonata_tasks.execution.bindings import RoleBoundCommandTaskExecutor
 
 from nanolab.cli.execution import build_role_bindings
+from nanolab.plans.release_phases import build_source_test_phase
 from nanolab.cli.vm_provider import vm_request_for_role
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
@@ -55,12 +56,10 @@ from nanolab.release.metrics import build_release_record
 from nanolab.release.resources import (
     build_inputs_resource,
     build_release_resources,
-    build_release_source_resources,
     cosign_credentials_resource,
     ghcr_credentials_resource,
     release_execution_guard,
 )
-from nanolab.release.build import source_test_commands
 from nanolab.release.model import (
     Amd64ReleasePlan,
     BuilderConfiguration,
@@ -79,11 +78,9 @@ from nanolab.release.tasks import (
     registry_push_task,
     regression_gate_task,
     run_image_steps,
-    run_source_steps,
     run_steps,
     registry_artifacts_from_receipt,
     registry_evidence,
-    source_test_task,
     publish_architectures_task,
     publish_manifests_task,
     publish_aliases_task,
@@ -296,40 +293,19 @@ def build_release_workflow(
     wf = Workflow(workflow_id=f"release-{request.version}")
 
     # --- Phase 1: Source Tests ---
-    sources = build_release_source_resources(
-        repo_root=nanofaas,
-        commit=source_commit,
-        run_dir=release_dir,
-        remote_source_dir=source_dir,
-        remote_archive=f"{remote_root}/source.tar",
+    sources, source_tests = build_source_test_phase(
+        identity=identity,
+        run_dir=request.run_dir,
+        release_dir=release_dir,
+        nanofaas=nanofaas,
+        source_commit=source_commit,
+        remote_root=remote_root,
+        source_dir=source_dir,
         provider=provider,
         stack_request=stack_req,
         arm_request=arm_req,
-        stack_requires=(infrastructure.stack,),
-        arm_requires=(infrastructure.arm_builder,),
-    )
-    source_commands = source_test_commands(Path(source_dir))
-    source_steps = command_specs_composite(
-        source_commands, executor=executor, title="Run source tests"
-    )
-    source_tests = source_test_task(
-        identity=identity,
-        run_dir=request.run_dir,
-        phase_inputs={
-            "commands": tuple(
-                (
-                    command.argv,
-                    tuple(sorted(command.env.items())),
-                    str(command.remote_dir),
-                    str(command.cwd),
-                    command.timeout_seconds,
-                )
-                for command in source_commands
-            )
-        },
-        work=lambda inputs: run_source_steps(
-            source_steps, inputs, source_archive=release_dir / "source.tar"
-        ),
+        infrastructure=infrastructure,
+        executor=executor,
     )
 
     # --- Phase 2: AMD64 Build ---
