@@ -16,7 +16,7 @@ from sonata_tasks.offload_loadtest import (
     build_offload_loadtest_workflow,
 )
 from sonata_tasks.platform import PlatformFunction, PlatformRequest
-from sonata_tasks.components.helm import control_plane_helm_values
+from sonata_tasks.components.helm import control_plane_helm_values, helm_set_args
 from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
 from sonata_tasks.k6 import K6Task
 from sonata_tasks.loadtest.models import K6Config
@@ -30,7 +30,7 @@ from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.workspace.paths import discover_tool_root
 from nanolab.workspace.provenance import source_fingerprint
-from nanolab.plans.validate import _resolve_function, _set_args, _sonata_function
+from nanolab.plans.validate import _resolve_function, _sonata_function
 
 _ACTUATOR_PORT = 30081
 _CONTROL_PLANE_PORT = 30080
@@ -178,7 +178,7 @@ def _platform(
     )
     if offload_target is not None:
         values = _offload_target(values, offload_target)
-    return replace(request, helm_values=_set_args(values))
+    return replace(request, helm_values=helm_set_args(values))
 
 
 def build_offload_loadtest_plan(

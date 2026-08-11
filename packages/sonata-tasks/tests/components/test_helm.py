@@ -95,3 +95,14 @@ def test_helm_values_can_enable_sync_queue_admission_for_validation() -> None:
     )
 
     assert _extra_env(values, "SYNC_QUEUE_ADMISSION_ENABLED") == "true"
+
+
+def test_helm_set_args_pairs_every_value_with_its_flag() -> None:
+    assert helm_mod.helm_set_args({"a": "1", "b": "2"}) == (
+        "--set", "a=1", "--set", "b=2",
+    )
+
+
+def test_helm_set_args_keeps_insertion_order() -> None:
+    """Helm applies later --set values over earlier ones, so order is meaning."""
+    assert helm_mod.helm_set_args({"z": "1", "a": "2"})[1::2] == ("z=1", "a=2")

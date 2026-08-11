@@ -96,7 +96,12 @@ def _kubeconfig_path(context: ScenarioExecutionContext) -> str:
     return f"/home/{vm_request.user}/.kube/config"
 
 
-def _set_args(values: Mapping[str, str]) -> tuple[str, ...]:
+def helm_set_args(values: Mapping[str, str]) -> tuple[str, ...]:
+    """Turn a value map into Helm's `--set key=value` arguments.
+
+    Public and shared: four plan builders need it, and the private copies they
+    each kept had to be corrected in three places at once.
+    """
     args: list[str] = []
     for key, value in values.items():
         args.extend(["--set", f"{key}={value}"])
@@ -127,7 +132,7 @@ def plan_deploy_control_plane(context: ScenarioExecutionContext) -> tuple[Remote
                 "--wait",
                 "--timeout",
                 "5m",
-                *_set_args(values),
+                *helm_set_args(values),
             ),
             env=_frozen_env({"KUBECONFIG": _kubeconfig_path(context)}),
             execution_target="vm",

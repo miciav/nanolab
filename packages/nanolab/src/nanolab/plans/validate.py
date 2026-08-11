@@ -8,7 +8,7 @@ from sonata_tasks.compose import DockerComposeProject, docker_compose_resource
 from sonata_tasks.registry import docker_registry_resource
 from sonata_tasks.validate import ValidateFunction as SonataFunction
 from sonata_tasks.validate import ValidateWorkflowRequest, build_validate_workflow
-from sonata_tasks.components.helm import control_plane_helm_values
+from sonata_tasks.components.helm import control_plane_helm_values, helm_set_args
 from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
 
 from nanolab.config.scenario import ScenarioConfig
@@ -132,13 +132,6 @@ def _sonata_function(resolved: _ResolvedFunction) -> SonataFunction:
     )
 
 
-def _set_args(values: dict[str, str]) -> tuple[str, ...]:
-    args: list[str] = []
-    for key, value in values.items():
-        args.extend(["--set", f"{key}={value}"])
-    return tuple(args)
-
-
 def build_validate_plan(
     config: ScenarioConfig,
     bindings: RoleBindings,
@@ -199,7 +192,7 @@ def build_validate_plan(
         # never name different things.
         request = replace(
             request,
-            helm_values=_set_args(
+            helm_values=helm_set_args(
                 control_plane_helm_values(
                     namespace=request.namespace,
                     control_plane_image=request.control_plane_image_reference(),

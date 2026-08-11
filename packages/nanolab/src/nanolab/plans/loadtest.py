@@ -20,7 +20,7 @@ from sonata_tasks.loadtest import (
     loadtest_composite,
 )
 from sonata_tasks.platform import PlatformRequest
-from sonata_tasks.components.helm import control_plane_helm_values
+from sonata_tasks.components.helm import control_plane_helm_values, helm_set_args
 from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
 from sonata_tasks.execution.roles import ExecutionRole
 from sonata_tasks.k6 import K6Task
@@ -44,7 +44,7 @@ from sonata_tasks.tasks.models import CommandTaskSpec
 
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
-from nanolab.plans.validate import _resolve_function, _set_args, _sonata_function
+from nanolab.plans.validate import _resolve_function, _sonata_function
 from nanolab.workspace.paths import discover_tool_root
 from nanolab.workspace.provenance import source_fingerprint
 
@@ -274,7 +274,7 @@ def build_loadtest_plan(
             helm_values["hpa-metrics-adapter.metricsRelistInterval"] = "10s"
         request = replace(
             request,
-            helm_values=_set_args(helm_values),
+            helm_values=helm_set_args(helm_values),
         )
 
     load_role: ExecutionRole = "loadgen" if dedicated else "stack"

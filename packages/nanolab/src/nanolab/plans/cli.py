@@ -19,7 +19,7 @@ from sonata_tasks.components.bootstrap import (
     retarget_bootstrap_operation,
 )
 from sonata_tasks.components.context import ScenarioExecutionContext
-from sonata_tasks.components.helm import control_plane_helm_values
+from sonata_tasks.components.helm import control_plane_helm_values, helm_set_args
 from sonata_tasks.components.images import control_image
 from sonata_tasks.components.operations import RemoteCommandOperation, ScenarioOperation
 from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
@@ -177,13 +177,6 @@ def _bootstrap_tasks(
     return tuple(tasks)
 
 
-def _set_args(values: dict[str, str]) -> tuple[str, ...]:
-    args: list[str] = []
-    for key, value in values.items():
-        args.extend(["--set", f"{key}={value}"])
-    return tuple(args)
-
-
 def _published_image(image: str, version_tag: str) -> str:
     target = image.rsplit("/", 1)[-1].split(":", 1)[0]
     return f"{GHCR_REPOSITORY}/{target}:{version_tag}"
@@ -212,7 +205,7 @@ def _control_plane_helm_resource(
         release=_HELM_RELEASE,
         chart=_HELM_CHART,
         namespace=namespace,
-        values=_set_args(values),
+        values=helm_set_args(values),
     )
     resource = helm_release_resource(spec, executor=executor, requires=(vm,))
     # Retitled so the compiled id reads "acquire-control-plane-helm-release":
