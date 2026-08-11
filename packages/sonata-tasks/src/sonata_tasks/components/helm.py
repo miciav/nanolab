@@ -4,7 +4,6 @@ from collections.abc import Mapping
 from types import MappingProxyType
 
 from sonata_tasks.components.context import ScenarioExecutionContext
-from sonata_tasks.components.models import ScenarioComponentDefinition
 from sonata_tasks.components.operations import RemoteCommandOperation, ScenarioOperation
 from sonata_tasks.components.images import control_image
 from sonata_tasks.loadtest.two_vm import (
@@ -134,10 +133,3 @@ def plan_deploy_control_plane(context: ScenarioExecutionContext) -> tuple[Scenar
             execution_target="vm",
         ),
     )
-
-
-HELM_DEPLOY_CONTROL_PLANE = ScenarioComponentDefinition(
-    component_id="helm.deploy_control_plane",
-    summary="Deploy control plane with Helm",
-    planner=plan_deploy_control_plane,
-)

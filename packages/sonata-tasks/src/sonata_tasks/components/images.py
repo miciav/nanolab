@@ -4,7 +4,6 @@ from collections.abc import Mapping
 from types import MappingProxyType
 
 from sonata_tasks.components.context import ScenarioExecutionContext
-from sonata_tasks.components.models import ScenarioComponentDefinition
 from sonata_tasks.components.operations import RemoteCommandOperation, ScenarioOperation
 
 
@@ -123,10 +122,3 @@ def plan_build_core(context: ScenarioExecutionContext) -> tuple[ScenarioOperatio
         ]
     )
     return tuple(operations)
-
-
-BUILD_CORE = ScenarioComponentDefinition(
-    component_id="images.build_core",
-    summary="Build core images",
-    planner=plan_build_core,
-)

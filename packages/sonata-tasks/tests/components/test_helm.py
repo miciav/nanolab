@@ -28,33 +28,29 @@ def _ctx(scenario_name: str) -> ScenarioExecutionContext:
     )
 
 
-def test_helm_component_definitions_present() -> None:
-    assert helm_mod.HELM_DEPLOY_CONTROL_PLANE.component_id == "helm.deploy_control_plane"
-
-
 def test_control_plane_planner_runs_for_loadtest_scenario() -> None:
     scenario = next(iter(LOADTEST_SCENARIOS))
-    ops = helm_mod.HELM_DEPLOY_CONTROL_PLANE.planner(_ctx(scenario))
+    ops = helm_mod.plan_deploy_control_plane(_ctx(scenario))
     assert len(ops) >= 1
     assert any("NANOFAAS_METRICS_PROFILE" in argument for argument in ops[0].argv)
     assert any("advanced" in argument for argument in ops[0].argv)
 
 
 def test_control_plane_planner_runs_for_plain_scenario() -> None:
-    ops = helm_mod.HELM_DEPLOY_CONTROL_PLANE.planner(_ctx("k3s-junit-curl"))
+    ops = helm_mod.plan_deploy_control_plane(_ctx("k3s-junit-curl"))
     assert len(ops) >= 1
 
 
 def test_loadtest_scenario_exposes_node_port() -> None:
     scenario = next(iter(LOADTEST_SCENARIOS))
-    ops = helm_mod.HELM_DEPLOY_CONTROL_PLANE.planner(_ctx(scenario))
+    ops = helm_mod.plan_deploy_control_plane(_ctx(scenario))
     # The RemoteCommandOperation argv should contain NodePort-related --set args
     argv = ops[0].argv
     assert any("NodePort" in arg for arg in argv)
 
 
 def test_plain_scenario_no_node_port() -> None:
-    ops = helm_mod.HELM_DEPLOY_CONTROL_PLANE.planner(_ctx("k3s-junit-curl"))
+    ops = helm_mod.plan_deploy_control_plane(_ctx("k3s-junit-curl"))
     argv = ops[0].argv
     assert not any("NodePort" in arg for arg in argv)
 

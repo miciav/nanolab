@@ -5,7 +5,6 @@ from pathlib import Path
 
 from sonata_tasks.components.context import ScenarioExecutionContext
 from sonata_tasks.components.images import (
-    BUILD_CORE,
     control_image,
     function_image_specs,
     plan_build_core,
@@ -94,7 +93,3 @@ def test_plan_build_core_rust_skips_boot_jars() -> None:
     ids = [op.operation_id for op in plan_build_core(_ctx(runtime="rust"))]
     assert "images.build_core.boot_jars" not in ids
     assert "images.build_core.control_image" in ids
-
-
-def test_component_definitions_wire_planners() -> None:
-    assert BUILD_CORE.planner is plan_build_core

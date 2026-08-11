@@ -36,7 +36,6 @@ def test_shell_does_not_import_nanolab() -> None:
 
 def test_components_subpackage_does_not_import_nanolab() -> None:
     _fresh_import("sonata_tasks.components.operations")
-    _fresh_import("sonata_tasks.components.models")
 
 
 def test_infra_subpackage_does_not_import_nanolab() -> None:

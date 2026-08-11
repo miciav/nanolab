@@ -16,7 +16,6 @@ from sonata_tasks.vm.multipass import (
 
 from sonata_tasks.vm.models import VmRequest
 from sonata_tasks.components.context import ScenarioExecutionContext
-from sonata_tasks.components.models import ScenarioComponentDefinition
 from sonata_tasks.components.operations import RemoteCommandOperation, ScenarioOperation
 
 
@@ -334,46 +333,3 @@ def plan_loadtest_install_k6(context: ScenarioExecutionContext) -> tuple[Scenari
             extra_vars={},
         ),
     )
-
-
-VM_ENSURE_RUNNING = ScenarioComponentDefinition(
-    component_id="vm.ensure_running",
-    summary="Ensure VM is running",
-    planner=plan_vm_ensure_running,
-)
-
-VM_PROVISION_BASE = ScenarioComponentDefinition(
-    component_id="vm.provision_base",
-    summary="Provision base VM dependencies",
-    planner=plan_vm_provision_base,
-)
-
-REPO_SYNC_TO_VM = ScenarioComponentDefinition(
-    component_id="repo.sync_to_vm",
-    summary="Sync repository into VM",
-    planner=plan_repo_sync_to_vm,
-)
-
-REGISTRY_ENSURE_CONTAINER = ScenarioComponentDefinition(
-    component_id="registry.ensure_container",
-    summary="Ensure local registry container is running",
-    planner=plan_registry_ensure_container,
-)
-
-K3S_INSTALL = ScenarioComponentDefinition(
-    component_id="k3s.install",
-    summary="Install k3s",
-    planner=plan_k3s_install,
-)
-
-K3S_CONFIGURE_REGISTRY = ScenarioComponentDefinition(
-    component_id="k3s.configure_registry",
-    summary="Configure k3s registry access",
-    planner=plan_k3s_configure_registry,
-)
-
-LOADTEST_INSTALL_K6 = ScenarioComponentDefinition(
-    component_id="loadtest.install_k6",
-    summary="Install k6 for load testing",
-    planner=plan_loadtest_install_k6,
-)

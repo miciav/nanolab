@@ -67,11 +67,6 @@ def test_k3s_install_passes_the_scale_to_zero_feature_gate() -> None:
     assert "hpa_scale_to_zero=true" in operation.argv
 
 
-def test_component_definitions_present() -> None:
-    assert bs.VM_ENSURE_RUNNING.component_id == "vm.ensure_running"
-    assert bs.VM_PROVISION_BASE.component_id == "vm.provision_base"
-
-
 def test_retarget_bootstrap_ansible_uses_endpoint_port_and_key() -> None:
     context = _ctx(lifecycle="proxmox", host=None)
     operation = _remote(bs.plan_vm_provision_base(context)[0])
