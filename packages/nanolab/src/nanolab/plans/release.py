@@ -32,6 +32,7 @@ from nanolab.plans.release_phases import (
     build_amd64_phase,
     build_arm64_phase,
     build_benchmark_phase,
+    build_publication_phase,
     build_regression_phase,
     build_registry_push_phase,
     build_source_test_phase,
@@ -55,8 +56,6 @@ from nanolab.release.metrics import build_release_record
 from nanolab.release.resources import (
     build_inputs_resource,
     build_release_resources,
-    cosign_credentials_resource,
-    ghcr_credentials_resource,
     release_execution_guard,
 )
 from nanolab.release.model import (
@@ -68,14 +67,9 @@ from nanolab.release.model import (
 )
 from nanolab.release.tasks import (
     run_steps,
-    publish_architectures_task,
-    publish_manifests_task,
-    publish_aliases_task,
     attest_task,
     finalize_task,
-    exact_receipt_artifacts,
     verified_file_receipt,
-    require_release_barriers,
     require_attestation_predicate,
     versioned_release_run_dir,
 )
@@ -420,156 +414,30 @@ def build_release_workflow(
         request.version,
         local_registry=request.image_plan.registry,
     )
-    credentials = request.credentials
-    ghcr = (
-        ghcr_credentials_resource(
-            provider=provider,
-            request=stack_req,
-            username=release_publish.ghcr_username(pub_plan.repository),
-            token_file=credentials.ghcr_token,
-            requires=(infrastructure.stack,),
-        )
-        if credentials is not None
-        else None
-    )
-    cosign = (
-        cosign_credentials_resource(
-            provider=provider,
-            request=stack_req,
-            key_file=credentials.cosign_key,
-            password_file=credentials.cosign_password,
-            requires=(infrastructure.stack,),
-        )
-        if credentials is not None and credentials.cosign_password is not None
-        else None
-    )
-
-    def docker_credentials(inputs: Any):
-        if ghcr is None:
-            raise ValueError("release credential config is required for publication")
-        return inputs.resource(ghcr).value
-
-    architecture_references = tuple(f"docker://{copy.destination}" for copy in pub_plan.copies)
-    manifest_references = tuple(f"docker://{item.reference}" for item in pub_plan.manifests)
-    alias_references = tuple(f"docker://{item.reference}" for item in pub_plan.aliases)
-
-    def published(
-        receipt: Path, phase: str, references: tuple[str, ...]
-    ) -> dict[str, str]:
-        return {
-            artifact.reference.removeprefix("docker://"): artifact.digest
-            for artifact in exact_receipt_artifacts(
-                receipt, phase, "ghcr-digest", references
-            )
-        }
-
-    def all_published() -> dict[str, str]:
-        return {
-            **published(
-                publish_architectures.receipt,
-                "publish-architectures",
-                architecture_references,
-            ),
-            **published(
-                publish_manifests.receipt,
-                "publish-manifests",
-                manifest_references,
-            ),
-            **published(
-                publish_aliases.receipt, "publish-aliases", alias_references
-            ),
-        }
-
-    def ghcr_evidence(artifacts: tuple[Any, ...]) -> tuple[Evidence, ...]:
-        return tuple(
-            Evidence("ghcr-digest", artifact.reference, artifact.digest)
-            for artifact in artifacts
-        )
-
-    def publication_sources():
-        arm_build_evidence = require_release_barriers(
-            gate_receipt=reg_gate.receipt,
-            gate_file=release_dir / "regression-decision.json",
-            smoke_receipt=arm64_smoke.receipt,
-            smoke_file=arm_runtime_plan.run_dir / "arm64-smoke.json",
-            arm_build_receipt=arm64_build.receipt,
-            arm_images=arm_images,
-        )
-
-        amd64_evidence = exact_receipt_artifacts(
-            registry_push.receipt,
-            "local-registry-push",
-            "local-registry-digest",
-            tuple(f"docker://{image}" for image in release_images),
-        )
-        return release_publish.require_publication_evidence(
-            pub_plan, amd64_evidence + arm_build_evidence
-        )
-
-    publish_architectures = publish_architectures_task(
+    publication = build_publication_phase(
+        request=request,
         identity=identity,
-        run_dir=request.run_dir,
-        phase_inputs={"plan": pub_plan},
-        prerequisites=(
-            reg_gate.receipt,
-            arm64_smoke.receipt,
-            registry_push.receipt,
-            arm64_build.receipt,
-        ),
-        work=lambda inputs: ghcr_evidence(
-            release_publish.publish_architecture_images(
-                provider,
-                stack_req,
-                pub_plan,
-                publication_sources(),
-                authfile=f"{docker_credentials(inputs).docker_config}/config.json",
-            )
-        ),
+        release_dir=release_dir,
+        provider=provider,
+        stack_request=stack_req,
+        infrastructure=infrastructure,
+        release_images=release_images,
+        registry_push=registry_push,
+        reg_gate=reg_gate,
+        arm64_build=arm64_build,
+        arm64_smoke=arm64_smoke,
+        arm_images=arm_images,
+        arm_runtime_plan=arm_runtime_plan,
+        pub_plan=pub_plan,
     )
-    publish_manifests = publish_manifests_task(
-        identity=identity,
-        run_dir=request.run_dir,
-        phase_inputs={"manifests": pub_plan.manifests},
-        prerequisites=(publish_architectures.receipt,),
-        work=lambda inputs: ghcr_evidence(
-            release_publish.publish_manifests(
-                provider,
-                stack_req,
-                pub_plan,
-                published(
-                    publish_architectures.receipt,
-                    "publish-architectures",
-                    architecture_references,
-                ),
-                docker_config=docker_credentials(inputs).docker_config,
-            )
-        ),
-    )
-    publish_aliases = publish_aliases_task(
-        identity=identity,
-        run_dir=request.run_dir,
-        phase_inputs={"aliases": pub_plan.aliases},
-        prerequisites=(publish_manifests.receipt,),
-        work=lambda inputs: ghcr_evidence(
-            release_publish.publish_aliases(
-                provider,
-                stack_req,
-                pub_plan,
-                published(
-                    publish_manifests.receipt,
-                    "publish-manifests",
-                    manifest_references,
-                ),
-                docker_config=docker_credentials(inputs).docker_config,
-            )
-        ),
-    )
-
-    publication_receipts = (
-        (publish_architectures.receipt, "publish-architectures"),
-        (publish_manifests.receipt, "publish-manifests"),
-        (publish_aliases.receipt, "publish-aliases"),
-    )
+    ghcr = publication.ghcr
+    cosign = publication.cosign
+    publish_architectures = publication.publish_architectures
+    publish_manifests = publication.publish_manifests
+    publish_aliases = publication.publish_aliases
+    publication_receipts = publication.publication_receipts
+    all_published = publication.all_published
+    docker_credentials = publication.docker_credentials
 
     def release_record() -> dict[str, Any]:
         aggregate_file = release_dir / "aggregate.json"

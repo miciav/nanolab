@@ -7,11 +7,12 @@ re-read. The phases were already there in the comments; this gives them names.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import asdict
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
-from sonata_engine import Evidence
+from sonata_engine import Evidence, Resource
 from sonata_tasks.release_composites import command_specs_composite, registry_push_composite
 from sonata_tasks.execution.bindings import RoleBoundCommandTaskExecutor
 
@@ -27,12 +28,15 @@ from nanolab.release.benchmark import (
 from nanolab.release.model import digest_path
 from nanolab.release.build import amd64_build_commands, source_test_commands
 from nanolab.release import build as release_build
+from nanolab.release import publish as release_publish
 from nanolab.release.model import Amd64ReleasePlan, BuilderConfiguration, ReleaseIdentity
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle guard
     from nanolab.plans.release import ReleaseRequest
 from nanolab.release.resources import (
     ReleaseResources,
+    cosign_credentials_resource,
+    ghcr_credentials_resource,
     ReleaseSourceResources,
     build_release_source_resources,
 )
@@ -44,8 +48,13 @@ from nanolab.release.tasks import (
     arm64_smoke_task,
     benchmark_task,
     regression_gate_task,
+    exact_receipt_artifacts,
+    publish_aliases_task,
+    publish_architectures_task,
+    publish_manifests_task,
     registry_artifacts_from_receipt,
     registry_evidence,
+    require_release_barriers,
     registry_push_task,
     run_image_steps,
     run_source_steps,
@@ -343,3 +352,202 @@ def build_arm64_phase(
         ),
     )
     return arm_runtime_plan, arm_images, arm64_build, arm64_smoke
+
+
+class PublicationPhase(NamedTuple):
+    """What the publication phase hands to the DAG and to attestation."""
+
+    ghcr: Resource[Any] | None
+    cosign: Resource[Any] | None
+    publish_architectures: ReleasePhaseTask
+    publish_manifests: ReleasePhaseTask
+    publish_aliases: ReleasePhaseTask
+    publication_receipts: tuple[tuple[Path, str], ...]
+    all_published: Callable[[], dict[str, str]]
+    docker_credentials: Callable[[Any], Any]
+
+
+def build_publication_phase(
+    *,
+    request: ReleaseRequest,
+    identity: ReleaseIdentity,
+    release_dir: Path,
+    provider: Any,
+    stack_request: Any,
+    infrastructure: ReleaseResources,
+    release_images: tuple[str, ...],
+    registry_push: ReleasePhaseTask,
+    reg_gate: ReleasePhaseTask,
+    arm64_build: ReleasePhaseTask,
+    arm64_smoke: ReleasePhaseTask,
+    arm_images: tuple[str, ...],
+    arm_runtime_plan: Amd64ReleasePlan,
+    pub_plan: Any,
+) -> PublicationPhase:
+    """Publish the verified images, their manifests and their aliases to GHCR."""
+    credentials = request.credentials
+    ghcr = (
+        ghcr_credentials_resource(
+            provider=provider,
+            request=stack_request,
+            username=release_publish.ghcr_username(pub_plan.repository),
+            token_file=credentials.ghcr_token,
+            requires=(infrastructure.stack,),
+        )
+        if credentials is not None
+        else None
+    )
+    cosign = (
+        cosign_credentials_resource(
+            provider=provider,
+            request=stack_request,
+            key_file=credentials.cosign_key,
+            password_file=credentials.cosign_password,
+            requires=(infrastructure.stack,),
+        )
+        if credentials is not None and credentials.cosign_password is not None
+        else None
+    )
+
+    def docker_credentials(inputs: Any):
+        if ghcr is None:
+            raise ValueError("release credential config is required for publication")
+        return inputs.resource(ghcr).value
+
+    architecture_references = tuple(f"docker://{copy.destination}" for copy in pub_plan.copies)
+    manifest_references = tuple(f"docker://{item.reference}" for item in pub_plan.manifests)
+    alias_references = tuple(f"docker://{item.reference}" for item in pub_plan.aliases)
+
+    def published(
+        receipt: Path, phase: str, references: tuple[str, ...]
+    ) -> dict[str, str]:
+        return {
+            artifact.reference.removeprefix("docker://"): artifact.digest
+            for artifact in exact_receipt_artifacts(
+                receipt, phase, "ghcr-digest", references
+            )
+        }
+
+    def all_published() -> dict[str, str]:
+        return {
+            **published(
+                publish_architectures.receipt,
+                "publish-architectures",
+                architecture_references,
+            ),
+            **published(
+                publish_manifests.receipt,
+                "publish-manifests",
+                manifest_references,
+            ),
+            **published(
+                publish_aliases.receipt, "publish-aliases", alias_references
+            ),
+        }
+
+    def ghcr_evidence(artifacts: tuple[Any, ...]) -> tuple[Evidence, ...]:
+        return tuple(
+            Evidence("ghcr-digest", artifact.reference, artifact.digest)
+            for artifact in artifacts
+        )
+
+    def publication_sources():
+        arm_build_evidence = require_release_barriers(
+            gate_receipt=reg_gate.receipt,
+            gate_file=release_dir / "regression-decision.json",
+            smoke_receipt=arm64_smoke.receipt,
+            smoke_file=arm_runtime_plan.run_dir / "arm64-smoke.json",
+            arm_build_receipt=arm64_build.receipt,
+            arm_images=arm_images,
+        )
+
+        amd64_evidence = exact_receipt_artifacts(
+            registry_push.receipt,
+            "local-registry-push",
+            "local-registry-digest",
+            tuple(f"docker://{image}" for image in release_images),
+        )
+        return release_publish.require_publication_evidence(
+            pub_plan, amd64_evidence + arm_build_evidence
+        )
+
+    publish_architectures = publish_architectures_task(
+        identity=identity,
+        run_dir=request.run_dir,
+        phase_inputs={"plan": pub_plan},
+        prerequisites=(
+            reg_gate.receipt,
+            arm64_smoke.receipt,
+            registry_push.receipt,
+            arm64_build.receipt,
+        ),
+        work=lambda inputs: ghcr_evidence(
+            release_publish.publish_architecture_images(
+                provider,
+                stack_request,
+                pub_plan,
+                publication_sources(),
+                authfile=f"{docker_credentials(inputs).docker_config}/config.json",
+            )
+        ),
+    )
+    publish_manifests = publish_manifests_task(
+        identity=identity,
+        run_dir=request.run_dir,
+        phase_inputs={"manifests": pub_plan.manifests},
+        prerequisites=(publish_architectures.receipt,),
+        work=lambda inputs: ghcr_evidence(
+            release_publish.publish_manifests(
+                provider,
+                stack_request,
+                pub_plan,
+                published(
+                    publish_architectures.receipt,
+                    "publish-architectures",
+                    architecture_references,
+                ),
+                docker_config=docker_credentials(inputs).docker_config,
+            )
+        ),
+    )
+    publish_aliases = publish_aliases_task(
+        identity=identity,
+        run_dir=request.run_dir,
+        phase_inputs={"aliases": pub_plan.aliases},
+        prerequisites=(publish_manifests.receipt,),
+        work=lambda inputs: ghcr_evidence(
+            release_publish.publish_aliases(
+                provider,
+                stack_request,
+                pub_plan,
+                published(
+                    publish_manifests.receipt,
+                    "publish-manifests",
+                    manifest_references,
+                ),
+                docker_config=docker_credentials(inputs).docker_config,
+            )
+        ),
+    )
+
+    publication_receipts = (
+        (publish_architectures.receipt, "publish-architectures"),
+        (publish_manifests.receipt, "publish-manifests"),
+        (publish_aliases.receipt, "publish-aliases"),
+    )
+
+    publication_receipts = (
+        (publish_architectures.receipt, "publish-architectures"),
+        (publish_manifests.receipt, "publish-manifests"),
+        (publish_aliases.receipt, "publish-aliases"),
+    )
+    return PublicationPhase(
+        ghcr=ghcr,
+        cosign=cosign,
+        publish_architectures=publish_architectures,
+        publish_manifests=publish_manifests,
+        publish_aliases=publish_aliases,
+        publication_receipts=publication_receipts,
+        all_published=all_published,
+        docker_credentials=docker_credentials,
+    )
