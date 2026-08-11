@@ -97,6 +97,30 @@ def test_multipass_stack_uses_provider_ssh_execution(monkeypatch) -> None:
     assert runner.calls == []
 
 
+def test_a_role_without_defaults_sends_no_environment(monkeypatch) -> None:
+    """Roles that carry no defaults hand the provider None, not an empty map:
+    the providers treat the two the same, and only one of them says 'nothing to
+    export' to a reader."""
+    runner = RecordingRunner()
+    provider = RecordingVmProvider()
+    monkeypatch.setattr(execution, "VmOrchestrator", lambda *_args, **_kwargs: provider, raising=False)
+    environment = EnvironmentConfig.model_validate(
+        {
+            "provider": "multipass",
+            "roles": {"stack": {"name": "nanofaas-stack"}, "loadgen": {"name": "nanofaas-load"}},
+        }
+    )
+
+    bindings, _ = build_role_bindings(environment, runner=runner)
+    assert bindings.loadgen is not None
+    bindings.loadgen.run(
+        CommandTaskSpec(task_id="k6", summary="k6", argv=("k6", "version"), role="loadgen")
+    )
+
+    _, _, env, _, _ = provider.exec_calls[0]
+    assert env is None
+
+
 def test_remote_stack_exports_its_kubeconfig() -> None:
     runner = RecordingRunner()
     environment = EnvironmentConfig.model_validate(

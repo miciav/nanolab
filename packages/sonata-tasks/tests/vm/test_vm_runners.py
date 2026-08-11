@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from sonata_tasks.vm.runners import OrchestratorVmRunner, VmFileFetcher
+from sonata_tasks.vm.runners import VmFileFetcher
 
 
 @dataclass
@@ -15,28 +15,6 @@ class _FakeResult:
     return_code: int = 0
     stderr: str = ""
     stdout: str = ""
-
-
-def test_orchestrator_vm_runner_calls_exec_argv() -> None:
-    orch = MagicMock()
-    orch.exec_argv.return_value = _FakeResult(return_code=0)
-    request = MagicMock()
-
-    runner = OrchestratorVmRunner(orch, request)
-    runner.run_vm_command(("echo", "hi"), env={"A": "B"}, remote_dir="/home", dry_run=False)
-
-    orch.exec_argv.assert_called_once_with(
-        request, ("echo", "hi"), env={"A": "B"}, cwd="/home", dry_run=False
-    )
-
-
-def test_orchestrator_vm_runner_passes_empty_env_as_none() -> None:
-    orch = MagicMock()
-    orch.exec_argv.return_value = _FakeResult()
-    runner = OrchestratorVmRunner(orch, MagicMock())
-    runner.run_vm_command(("ls",), env={}, remote_dir=None, dry_run=True)
-    _, kwargs = orch.exec_argv.call_args
-    assert kwargs["env"] is None
 
 
 def test_vm_file_fetcher_calls_transfer_from(tmp_path: Path) -> None:

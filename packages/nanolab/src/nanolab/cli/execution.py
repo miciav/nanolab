@@ -18,7 +18,7 @@ from sonata_tasks.shell import SubprocessShell
 from sonata_tasks.vm.models import VmRequest, vm_remote_home
 from sonata_tasks.vm.multipass import resolve_connection_host
 from sonata_tasks.vm.orchestrator import VmOrchestrator
-from sonata_tasks.vm.runners import OrchestratorVmRunner, VmFileFetcher
+from sonata_tasks.vm.runners import VmFileFetcher
 
 from nanolab.cli.vm_provider import vm_request_for_role
 from nanolab.config.environment import EnvironmentConfig, RoleTarget
@@ -164,14 +164,23 @@ class _RemoteFetcher:
 
 
 class _ProviderRunner:
+    """A VM provider as a VmCommandRunner, carrying the role's defaults.
+
+    Calls the provider directly: the adapter that used to sit in between did
+    nothing but rename a keyword, one layer below the one that supplies the
+    defaults.
+    """
+
     def __init__(
         self,
-        runner: OrchestratorVmRunner,
+        provider: object,
+        request: object,
         *,
         default_env: dict[str, str],
         default_dir: str,
     ) -> None:
-        self._runner = runner
+        self._provider = provider
+        self._request = request
         self._default_env = default_env
         self._default_dir = default_dir
 
@@ -183,12 +192,14 @@ class _ProviderRunner:
         remote_dir: str | None,
         dry_run: bool,
     ) -> VmCommandResult:
+        merged = {**self._default_env, **env}
         return cast(
             VmCommandResult,
-            self._runner.run_vm_command(
+            self._provider.exec_argv(  # type: ignore[attr-defined]
+                self._request,
                 argv,
-                env={**self._default_env, **env},
-                remote_dir=remote_dir or self._default_dir,
+                env=merged or None,
+                cwd=remote_dir or self._default_dir,
                 dry_run=dry_run,
             ),
         )
@@ -230,7 +241,8 @@ def build_role_bindings(
             )
             executor = VmCommandTaskExecutor(
                 _ProviderRunner(
-                    OrchestratorVmRunner(provider, request),
+                    provider,
+                    request,
                     default_env=default_env,
                     default_dir=(
                         f"{vm_remote_home(request)}/nanofaas"
