@@ -2,16 +2,19 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from sonata_tasks.vm.models import VmRequest
+from sonata_tasks.vm.ports import VmCommandProvider
+
 
 class VmFileFetcher:
-    """Implements RemoteFileFetcher using any orchestrator's transfer_from()."""
+    """Implements RemoteFileFetcher using any provider's transfer_from()."""
 
-    def __init__(self, vm: object, request: object) -> None:
+    def __init__(self, vm: VmCommandProvider, request: VmRequest) -> None:
         self._vm = vm
         self._request = request
 
     def fetch_from(self, remote: str, local: Path) -> None:
-        result = self._vm.transfer_from(self._request, source=remote, destination=local)  # type: ignore[attr-defined]
+        result = self._vm.transfer_from(self._request, source=remote, destination=local)
         return_code = getattr(result, "return_code", 0)
         if return_code != 0:
             stderr = getattr(result, "stderr", "") or ""
