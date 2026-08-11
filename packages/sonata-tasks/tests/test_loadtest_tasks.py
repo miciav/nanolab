@@ -139,6 +139,30 @@ def test_fetch_vm_results_calls_fetcher(tmp_path: Path) -> None:
     assert returned == tmp_path / "results"
 
 
+def test_fetch_vm_results_hands_the_fetcher_an_absolute_destination(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The fetchers shell out with their own working directory, so a relative
+    destination lands somewhere else entirely — and the transfer still reports
+    success, leaving the run directory empty."""
+    monkeypatch.chdir(tmp_path)
+    fetcher = _RecordingFetcher()
+    task = FetchVmResults(
+        task_id="loadgen.fetch_results",
+        title="Fetch results",
+        fetcher=fetcher,
+        remote_source="/remote/results",
+        local_dest=Path("relative/results"),
+    )
+
+    returned = task.run()
+
+    ((_, destination),) = fetcher.calls
+    assert destination.is_absolute()
+    assert destination == (tmp_path / "relative/results").resolve()
+    assert returned == destination
+
+
 def test_fetch_vm_results_creates_local_dest(tmp_path: Path) -> None:
     fetcher = _RecordingFetcher()
     dest = tmp_path / "deep" / "nested" / "results"

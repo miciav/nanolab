@@ -24,9 +24,16 @@ class FetchVmResults:
     local_dest: Path
 
     def run(self) -> Path:
-        self.local_dest.mkdir(parents=True, exist_ok=True)
-        self.fetcher.fetch_from(self.remote_source, self.local_dest)
-        return self.local_dest
+        # Absolute on purpose: the fetchers shell out to scp/multipass with their
+        # own working directory, so a relative destination lands wherever that
+        # happens to point — for the VM providers, inside the nanoFaaS checkout.
+        # The transfer then "succeeds", the run dir stays empty, and the report
+        # step is the first thing to notice. mkdir here resolves against this
+        # process, the transfer against another: they have to be the same path.
+        destination = self.local_dest.resolve()
+        destination.mkdir(parents=True, exist_ok=True)
+        self.fetcher.fetch_from(self.remote_source, destination)
+        return destination
 
 
 @dataclass
