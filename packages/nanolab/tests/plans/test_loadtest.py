@@ -8,6 +8,7 @@ from nanolab.config.scenario import ScenarioConfig
 from nanolab.plans.loadtest import build_loadtest_plan
 from sonata_tasks.execution.bindings import RoleBindings
 from sonata_tasks.loadtest import autoscaling
+from sonata_tasks.loadtest.models import TimeWindow
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 
@@ -29,7 +30,10 @@ class NoopPrometheus:
     """One point per query: the snapshot treats a required query with no data as
     a failure, which is right in production and useless in a unit test."""
 
-    def query_range(self, *args, **kwargs):
+    def query_range(
+        self, expr: str, window: TimeWindow, step_seconds: int = 5
+    ) -> list[dict[str, float | str]]:
+        del expr, window, step_seconds
         return [{"timestamp": 0.0, "value": 1.0}]
 
 

@@ -19,10 +19,10 @@ class RecordingShell:
         self.events = events
         self.fail_playbook: str | None = None
 
-    def run(self, argv, *, cwd=None, env=None, dry_run=False):
-        command = tuple(argv)
-        self.events.append(("command", command))
-        if self.fail_playbook and command[-1].endswith(self.fail_playbook):
+    def run(self, command, /, *, cwd=None, env=None, dry_run=False):
+        argv = tuple(command)
+        self.events.append(("command", argv))
+        if self.fail_playbook and argv[-1].endswith(self.fail_playbook):
             return _Result(return_code=1, stderr=f"{self.fail_playbook} failed")
         return _Result()
 

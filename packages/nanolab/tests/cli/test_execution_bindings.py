@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from pathlib import Path
 
 import nanolab.cli.execution as execution
@@ -6,13 +7,22 @@ from nanolab.config.environment import EnvironmentConfig
 from sonata_tasks.tasks.models import CommandTaskSpec
 
 
+@dataclass
+class _Result:
+    """A real type, so the checker can see what the runner hands back."""
+
+    return_code: int = 0
+    stdout: str = ""
+    stderr: str = ""
+
+
 class RecordingRunner:
     def __init__(self) -> None:
         self.calls: list[tuple[list[str], Path | None, dict[str, str], bool]] = []
 
-    def run(self, argv, *, cwd, env, dry_run):
-        self.calls.append((argv, cwd, env, dry_run))
-        return type("Result", (), {"return_code": 0, "stdout": "", "stderr": ""})()
+    def run(self, command, /, *, cwd, env, dry_run):
+        self.calls.append((command, cwd, env, dry_run))
+        return _Result()
 
 
 class RecordingVmProvider:
@@ -22,11 +32,11 @@ class RecordingVmProvider:
 
     def exec_argv(self, request, argv, *, env, remote_dir, dry_run):
         self.exec_calls.append((request, tuple(argv), env, remote_dir, dry_run))
-        return type("Result", (), {"return_code": 0, "stdout": "", "stderr": ""})()
+        return _Result()
 
     def transfer_from(self, request, *, source, destination):
         self.fetch_calls.append((request, source, destination))
-        return type("Result", (), {"return_code": 0, "stdout": "", "stderr": ""})()
+        return _Result()
 
     def connection_host(self, request):
         return "20.30.40.50"
