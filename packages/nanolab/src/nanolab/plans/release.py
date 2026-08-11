@@ -8,21 +8,13 @@ selectable.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass, replace
-import json
 from pathlib import Path
 from typing import Any
 
 import yaml
-from sonata_engine import Evidence, JournalConfig, Steps, Verifier, Workflow
+from sonata_engine import JournalConfig, Verifier, Workflow
 from sonata_tasks.buildx import buildx_builder_resource
-from sonata_tasks.command import CommandTask
-from sonata_tasks.cosign import CosignTask
-from sonata_tasks.release_composites import (
-    attest_composite,
-)
-from sonata_tasks.transfer import FileTransferTask
 from sonata_tasks.provisioning.providers import provider_for
 from sonata_tasks.registry_tunnel import registry_tunnel_resource
 from sonata_tasks.execution.bindings import RoleBoundCommandTaskExecutor
@@ -31,6 +23,7 @@ from nanolab.cli.execution import build_role_bindings
 from nanolab.plans.release_phases import (
     build_amd64_phase,
     build_arm64_phase,
+    build_attestation_phase,
     build_benchmark_phase,
     build_publication_phase,
     build_regression_phase,
@@ -46,13 +39,7 @@ from nanolab.release import arm as release_arm
 from nanolab.release.build import extract_commit_tree
 from nanolab.release.environment import validate_release_environment
 from nanolab.release.evidence import release_evidence_verifiers
-from nanolab.release.benchmark import (
-    _aggregate_from_payload,
-    regression_policy,
-)
-from nanolab.release import attest as release_attest
 from nanolab.release import publish as release_publish
-from nanolab.release.metrics import build_release_record
 from nanolab.release.resources import (
     build_inputs_resource,
     build_release_resources,
@@ -66,11 +53,6 @@ from nanolab.release.model import (
     git_state,
 )
 from nanolab.release.tasks import (
-    run_steps,
-    attest_task,
-    finalize_task,
-    verified_file_receipt,
-    require_attestation_predicate,
     versioned_release_run_dir,
 )
 from nanolab.release.versioning import normalize_version, verify_version_consistency
@@ -439,173 +421,21 @@ def build_release_workflow(
     all_published = publication.all_published
     docker_credentials = publication.docker_credentials
 
-    def release_record() -> dict[str, Any]:
-        aggregate_file = release_dir / "aggregate.json"
-        verified_file_receipt(aggregate.receipt, "aggregate", aggregate_file)
-        return build_release_record(
-            version=request.version,
-            source_commit=identity.source_commit,
-            image_digests=all_published(),
-            aggregate=_aggregate_from_payload(json.loads(aggregate_file.read_text(encoding="utf-8"))),
-            policy=regression_policy(benchmark_plan),
-        )
-
-    predicate_file = release_dir / "predicate.json"
-    remote_predicate = f"{remote_root}/predicate.json"
-    remote_sboms = f"{remote_root}/sboms"
-    remote_public_key = f"{remote_sboms}/cosign.pub"
-
-    def _pinned(images: Mapping[str, str]) -> tuple[str, ...]:
-        """Collapse tags and aliases onto the unique set of pinned digests.
-
-        Aliases point at the same digest as their native manifest, so signing
-        by reference would sign the same artifact several times.
-        """
-        pinned: dict[str, None] = {}
-        for reference, digest in sorted(images.items()):
-            pinned.setdefault(f"{reference.rsplit(':', 1)[0]}@{digest}", None)
-        return tuple(pinned)
-
-    def attest_images(inputs: Any) -> tuple[Evidence, ...]:
-        if cosign is None:
-            raise ValueError("release Cosign credentials are required for attestation")
-        images = all_published()
-        aggregate_evidence = verified_file_receipt(
-            aggregate.receipt, "aggregate", release_dir / "aggregate.json"
-        )
-        predicate_file.write_text(
-            release_attest.render_predicate(
-                release_attest.build_release_predicate(
-                    version=request.version,
-                    source_commit=identity.source_commit,
-                    azure_profile=request.settings.profile,
-                    benchmark_record_digest=aggregate_evidence.digest,
-                    image_digests=images,
-                )
-            ),
-            encoding="utf-8",
-        )
-        credentials = inputs.resource(cosign).value
-        if credentials.password_file is None:
-            raise ValueError("cosign attestation requires a staged password file")
-        docker_config = docker_credentials(inputs).docker_config
-
-        # One-shot setup: the SBOM directory (whose parent is the release root
-        # the predicate lands in), the predicate itself, and the public half of
-        # the signing key -- `cosign verify` rejects the encrypted private key.
-        # None of it is per-image, so none of it belongs in the composite.
-        # ponytail: re-runs on resume; four cheap calls against six per digest.
-        prelude = (
-            CommandTask(
-                title="Create remote SBOM directory",
-                argv=("mkdir", "-p", remote_sboms),
-                executor=executor,
-                role="stack",
-            ),
-            FileTransferTask(
-                provider=provider,
-                request=stack_req,
-                source=predicate_file,
-                destination=remote_predicate,
-                title="Transfer release predicate",
-            ),
-            CosignTask(
-                operation="public-key",
-                image="",
-                key_file=credentials.key_file,
-                password_file=str(credentials.password_file),
-                docker_config=docker_config,
-                output_file=remote_public_key,
-                executor=executor,
-                role="stack",
-            ),
-            # cosign public-key redirects to a file, so a failure that
-            # still exits 0 leaves an empty key that makes every later
-            # `verify` fail for the wrong reason. Check what landed.
-            CommandTask(
-                title="Verify derived cosign public key",
-                argv=("grep", "-q", "PUBLIC KEY", remote_public_key),
-                executor=executor,
-                role="stack",
-            ),
-        )
-        for step in prelude:
-            # All four overwrite rather than append, so re-entering one is safe
-            # -- and a `failed` record on a non-idempotent step makes the next
-            # `--resume` raise instead of retrying it. The grep guard exists
-            # because `cosign public-key` can fail while exiting 0, so this is
-            # a path with a known failure mode, not a theoretical one.
-            step.idempotent = True
-        run_steps(Steps(title="Stage attestation inputs", steps=prelude), inputs)
-
-        pinned = _pinned(images)
-        signed: list[Evidence] = []
-        run_steps(
-            attest_composite(
-                pinned,
-                signed=signed,
-                predicate_remote=remote_predicate,
-                sbom_dir_remote=remote_sboms,
-                public_key_remote=remote_public_key,
-                cosign_key=credentials.key_file,
-                password_file=str(credentials.password_file),
-                docker_config=docker_config,
-                executor=executor,
-                role="stack",
-            ),
-            inputs,
-        )
-
-        # One entry per digest this run signed, emitted by the group that did
-        # the signing -- not synthesized from `pinned`, which is a list of work
-        # to do rather than work that happened.
-        # ponytail: a group the journal skipped appends nothing, so a resumed
-        # phase's receipt claims only what it re-signed. That under-claims and
-        # never over-claims; carrying a skipped group's evidence forward would
-        # need the engine to hand a composite the evidence behind a skip, and
-        # `Steps.run` only ever sees `TaskExecution.outcome`, which is None.
-        return (
-            Evidence("file-digest", str(predicate_file), digest_path(predicate_file)),
-            *signed,
-        )
-
-    attest = attest_task(
+    attest, finalize = build_attestation_phase(
+        request=request,
         identity=identity,
-        run_dir=request.run_dir,
-        phase_inputs={"images": tuple(sorted(published_image.destination for published_image in pub_plan.copies))},
-        prerequisites=tuple(receipt for receipt, _phase in publication_receipts)
-        + (aggregate.receipt,),
-        work=attest_images,
-    )
-
-    def finalize_documentation(_inputs: Any) -> tuple[Evidence, ...]:
-        aggregate_evidence = verified_file_receipt(
-            aggregate.receipt, "aggregate", release_dir / "aggregate.json"
-        )
-        expected_predicate = release_attest.build_release_predicate(
-            version=request.version,
-            source_commit=identity.source_commit,
-            azure_profile=request.settings.profile,
-            benchmark_record_digest=aggregate_evidence.digest,
-            image_digests=all_published(),
-        )
-        require_attestation_predicate(attest.receipt, predicate_file, expected_predicate)
-        artifacts = release_attest.finalize_release(
-            record=release_record(),
-            performance_root=request.performance_root,
-        )
-        return tuple(
-            Evidence("file-digest", artifact.reference, artifact.digest) for artifact in artifacts
-        )
-
-    finalize = finalize_task(
-        identity=identity,
-        run_dir=request.run_dir,
-        phase_inputs={"performanceRoot": request.performance_root},
-        prerequisites=(attest.receipt,) + tuple(
-            receipt for receipt, _phase in publication_receipts
-        ) + (aggregate.receipt,),
-        work=finalize_documentation,
+        release_dir=release_dir,
+        remote_root=remote_root,
+        provider=provider,
+        stack_request=stack_req,
+        executor=executor,
+        benchmark_plan=benchmark_plan,
+        aggregate=aggregate,
+        cosign=cosign,
+        pub_plan=pub_plan,
+        publication_receipts=publication_receipts,
+        all_published=all_published,
+        docker_credentials=docker_credentials,
     )
 
     # --- Wire the DAG ---
