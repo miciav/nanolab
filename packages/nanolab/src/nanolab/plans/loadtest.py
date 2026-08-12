@@ -55,6 +55,9 @@ _HPA_METRIC_WAIT_SECONDS = 180
 def _default_prometheus_queries(function_name: str) -> tuple[PrometheusQuery, ...]:
     function = f"{{function={json.dumps(function_name)}}}"
     control_plane = '{app="nanofaas-control-plane"}'
+    # kube-state-metrics labels by object name, not by the `function` label the
+    # control plane's own series carry; the HPA is named after the deployment.
+    hpa = f"{{horizontalpodautoscaler={json.dumps(f'fn-{function_name}')}}}"
     return (
         PrometheusQuery("function_dispatch_total", f"function_dispatch_total{function}", True),
         PrometheusQuery("function_success_total", f"function_success_total{function}", True),
@@ -96,6 +99,34 @@ def _default_prometheus_queries(function_name: str) -> tuple[PrometheusQuery, ..
             "jvm_heap_used_bytes",
             'jvm_memory_used_bytes{app="nanofaas-control-plane",area="heap"}',
             True,
+        ),
+        # The HPA controller's own view, published by kube-state-metrics. Not
+        # required: only autoscaling runs enable it, and a run without an HPA
+        # should record its absence rather than fail on it.
+        PrometheusQuery(
+            "hpa_desired_replicas",
+            f"kube_horizontalpodautoscaler_status_desired_replicas{hpa}",
+        ),
+        PrometheusQuery(
+            "hpa_current_replicas",
+            f"kube_horizontalpodautoscaler_status_current_replicas{hpa}",
+        ),
+        # Was the controller able to read its metric at all — the condition that
+        # would have named an unservable external metric outright, instead of
+        # leaving the preflight to time out against it.
+        PrometheusQuery(
+            "hpa_scaling_active",
+            "kube_horizontalpodautoscaler_status_condition"
+            f'{{horizontalpodautoscaler="fn-{function_name}",'
+            'condition="ScalingActive",status="true"}',
+        ),
+        # Was the replica count it wanted clamped by minReplicas/maxReplicas.
+        # This is what tells a saturated metric apart from a capped decision.
+        PrometheusQuery(
+            "hpa_scaling_limited",
+            "kube_horizontalpodautoscaler_status_condition"
+            f'{{horizontalpodautoscaler="fn-{function_name}",'
+            'condition="ScalingLimited",status="true"}',
         ),
     )
 
@@ -279,6 +310,11 @@ def build_loadtest_plan(
         if hpa:
             helm_values["hpa-metrics-adapter.enabled"] = "true"
             helm_values["hpa-metrics-adapter.metricsRelistInterval"] = "10s"
+            # The adapter says what the HPA is told; this says what the HPA did
+            # with it. Without it a run records the replica counts and the metric
+            # value but not the controller's own verdict, so a plateau at
+            # maxReplicas cannot be told apart from a metric that stopped rising.
+            helm_values["kube-state-metrics.enabled"] = "true"
         request = replace(
             request,
             helm_values=helm_set_args(helm_values),
