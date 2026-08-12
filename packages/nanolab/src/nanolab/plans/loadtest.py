@@ -171,9 +171,16 @@ def build_loadtest_plan(
             # rps, not in_flight: in-flight concurrency is throughput x service
             # time, which for this function sits below 1 at any rate the load
             # test produces, and is capped at the queue's concurrency limit
-            # anyway. The HPA reads `ceil(value / target)`, so 100 asks for one
-            # replica per 100 req/s — about four at the load this test applies,
-            # inside the maxReplicas of 5 below.
+            # anyway. This target type is `Value` (KubernetesMetricsTranslator),
+            # not `AverageValue`, so the recommendation is
+            # ceil(currentReplicas * value / target) — it multiplies by the
+            # current replica count, not divides. The metric is also a
+            # control-plane-wide sum rather than per-pod, so any target below
+            # the offered rate drives the recommendation straight to
+            # maxReplicas. 100 is therefore an upper-bound trigger, not a
+            # proportional setpoint; switching the translator to
+            # `AverageValue` is the open follow-up that would make it
+            # proportional.
             "metrics": [{"type": "rps", "target": "100"}],
         }
     resolved = tuple(

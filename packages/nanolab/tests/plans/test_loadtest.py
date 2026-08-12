@@ -556,6 +556,8 @@ def test_hpa_autoscaling_loadtest_enables_adapter_and_keeps_one_replica(tmp_path
     assert "hpa-metrics-adapter.metricsRelistInterval=10s" in install
     assert '"strategy":"HPA"' in register
     assert '"minReplicas":1' in register
+    assert '"type":"rps"' in register
+    assert '"target":"100"' in register
     assert any("get hpa fn-word-stats-java" in command for command in commands)
     assert any(
         "external.metrics.k8s.io" in command and "nanofaas_rps" in command
