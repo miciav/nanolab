@@ -168,7 +168,20 @@ def build_loadtest_plan(
             "strategy": config.autoscaling_strategy,
             "minReplicas": replica_floor,
             "maxReplicas": 5,
-            "metrics": [{"type": "in_flight", "target": "2"}],
+            # rps, not in_flight: in-flight concurrency is throughput x service
+            # time, which for this function sits below 1 at any rate the load
+            # test produces, and is capped at the queue's concurrency limit
+            # anyway. This target type is `Value` (KubernetesMetricsTranslator),
+            # not `AverageValue`, so the recommendation is
+            # ceil(currentReplicas * value / target) — it multiplies by the
+            # current replica count, not divides. The metric is also a
+            # control-plane-wide sum rather than per-pod, so any target below
+            # the offered rate drives the recommendation straight to
+            # maxReplicas. 100 is therefore an upper-bound trigger, not a
+            # proportional setpoint; switching the translator to
+            # `AverageValue` is the open follow-up that would make it
+            # proportional.
+            "metrics": [{"type": "rps", "target": "100"}],
         }
     resolved = tuple(
         resolve_function(config, key, tool_root=tool_root) for key in config.functions
@@ -426,7 +439,7 @@ def build_loadtest_plan(
         )
         hpa_metric_path = (
             f"/apis/external.metrics.k8s.io/v1beta1/namespaces/{request.namespace}/"
-            f"nanofaas_in_flight?labelSelector=function%3D{target.name}"
+            f"nanofaas_rps?labelSelector=function%3D{target.name}"
         )
         preflight = Steps(
             title="Check HPA prerequisites",
@@ -453,7 +466,7 @@ def build_loadtest_plan(
                         f"sudo kubectl get --raw {control_plane_metrics_path!r} "
                         "| grep '^function_' || true; "
                         f"sudo kubectl -n {request.namespace} exec deploy/nanofaas-prometheus -- "
-                        "wget -qO- 'http://localhost:9090/api/v1/query?query=function_inFlight' "
+                        "wget -qO- 'http://localhost:9090/api/v1/query?query=function_dispatch_total' "
                         "|| true; "
                         f"sudo kubectl get --raw {hpa_metric_path!r} || true; exit 1",
                     ),
