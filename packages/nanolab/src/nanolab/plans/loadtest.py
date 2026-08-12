@@ -128,6 +128,21 @@ def _default_prometheus_queries(function_name: str) -> tuple[PrometheusQuery, ..
             f'{{horizontalpodautoscaler="fn-{function_name}",'
             'condition="ScalingLimited",status="true"}',
         ),
+        # The same four questions for the INTERNAL strategy, which owns no HPA
+        # object and so appears in none of the series above. Published by the
+        # control plane's own autoscaler, and one of them is better than what
+        # Kubernetes offers: `recommended` is the count the ratio asked for
+        # BEFORE the clamp, which the HPA never exposes.
+        PrometheusQuery(
+            "internal_scaling_recommended_replicas",
+            f"function_scaling_recommended_replicas{function}",
+        ),
+        PrometheusQuery(
+            "internal_scaling_desired_replicas",
+            f"function_scaling_desired_replicas{function}",
+        ),
+        PrometheusQuery("internal_scaling_limited", f"function_scaling_limited{function}"),
+        PrometheusQuery("internal_scaling_ratio_milli", f"function_scaling_ratio_milli{function}"),
     )
 
 
@@ -468,6 +483,41 @@ def build_loadtest_plan(
         executor=executor,
         role=load_role,
     )
+    # Parking at zero is not an HPA speciality: the INTERNAL strategy is given the
+    # same replica floor of 0 and scales down to it too. Waiting for it here is what
+    # makes `rises_from_zero == 1` an assertion rather than a 0 that means "it never
+    # tried". Without the wait the load starts against a function that was never at
+    # zero, and the wake path — the interesting half — goes unexercised.
+    parks_at_zero = replica_floor == 0
+    park_at_zero = CommandTask(
+        title="Wait for the autoscaler to park the function at zero",
+        argv=(
+            "bash",
+            "-lc",
+            # The function is created with one replica. Under HPA only the
+            # autoscaler taking it to zero earns the ScaledToZero condition that
+            # lets it come back up; under INTERNAL the wake path is the control
+            # plane's own. Either way the run asserts it starts at its floor.
+            f"deadline=$((SECONDS + {_HPA_METRIC_WAIT_SECONDS})); "
+            "while [ $SECONDS -lt $deadline ]; do "
+            f"[ \"$(sudo kubectl -n {request.namespace} get "
+            f"deploy/fn-{target.name} -o jsonpath='{{.spec.replicas}}' "
+            "2>/dev/null)\" = 0 ] && exit 0; "
+            "sleep 5; done; "
+            "echo 'function never parked at zero:'; "
+            f"sudo kubectl -n {request.namespace} get "
+            f"deploy/fn-{target.name} || true; "
+            + (
+                f"sudo kubectl -n {request.namespace} describe hpa fn-{target.name} || true; "
+                if hpa
+                else f"sudo kubectl -n {request.namespace} logs "
+                "deploy/nanofaas-control-plane --tail=100 2>&1 | grep -i scal || true; "
+            )
+            + "exit 1",
+        ),
+        executor=executor,
+        role="stack",
+    )
     if hpa:
         control_plane_metrics_path = (
             f"/api/v1/namespaces/{request.namespace}/services/"
@@ -509,38 +559,16 @@ def build_loadtest_plan(
                     executor=executor,
                     role="stack",
                 ),
-                *(
-                    (
-                        CommandTask(
-                            title="Wait for the HPA to park the function at zero",
-                            argv=(
-                                "bash",
-                                "-lc",
-                                # The function is created with one replica: only the
-                                # HPA scaling it down to zero earns the ScaledToZero
-                                # condition that lets it scale back up later. The run
-                                # also asserts it starts at its replica floor.
-                                f"deadline=$((SECONDS + {_HPA_METRIC_WAIT_SECONDS})); "
-                                "while [ $SECONDS -lt $deadline ]; do "
-                                f"[ \"$(sudo kubectl -n {request.namespace} get "
-                                f"deploy/fn-{target.name} -o jsonpath='{{.spec.replicas}}' "
-                                "2>/dev/null)\" = 0 ] && exit 0; "
-                                "sleep 5; done; "
-                                "echo 'function never parked at zero:'; "
-                                f"sudo kubectl -n {request.namespace} get "
-                                f"deploy/fn-{target.name} || true; "
-                                f"sudo kubectl -n {request.namespace} describe "
-                                f"hpa fn-{target.name} || true; exit 1",
-                            ),
-                            executor=executor,
-                            role="stack",
-                        ),
-                    )
-                    if hpa_scale_to_zero
-                    else ()
-                ),
+                *((park_at_zero,) if parks_at_zero else ()),
                 preflight,
             ),
+        )
+    elif parks_at_zero:
+        # INTERNAL with the same replica floor of zero: no external metric to wait
+        # on, but the same park to wait for.
+        preflight = Steps(
+            title="Check autoscaling prerequisites",
+            steps=(park_at_zero, preflight),
         )
 
     return build_loadtest_workflow(
