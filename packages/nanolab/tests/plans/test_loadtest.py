@@ -562,7 +562,7 @@ def test_hpa_autoscaling_loadtest_enables_adapter_and_keeps_one_replica(tmp_path
         for command in commands
     )
     assert any(
-        "actuator/prometheus" in command and "api/v1/query?query=function_inFlight" in command
+        "actuator/prometheus" in command and "api/v1/query?query=function_dispatch_total" in command
         for command in commands
     )
 
