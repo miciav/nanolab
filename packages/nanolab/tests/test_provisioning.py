@@ -102,7 +102,11 @@ def test_external_provisioning_without_factory_falls_back_to_orchestrator(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     orchestrator = RecordingOrchestrator()
-    monkeypatch.setattr("nanolab.cli.provisioning.VmOrchestrator", lambda _repo_root: orchestrator)
+    # Patched where the fallback now lives: choosing the orchestrator for an
+    # `external` lifecycle is sonata's decision, not nanolab's translation.
+    monkeypatch.setattr(
+        "sonata_tasks.provisioning.providers.VmOrchestrator", lambda _repo_root: orchestrator
+    )
 
     with provision_environment(
         ScenarioConfig(workflow="cli", backend="k8s", functions=["word-stats-java"]),

@@ -21,17 +21,15 @@ from sonata_tasks.components.context import ScenarioExecutionContext
 from sonata_tasks.components.operations import RemoteCommandOperation, ScenarioOperation
 from sonata_tasks.provisioning import (
     ProvisionedRole,
-    provider_for,
     provision_roles,
     remote_operations,
     scenario_context,
 )
 from sonata_tasks.vm.azure import AzureVmProvider
 from sonata_tasks.vm.models import VmRequest
-from sonata_tasks.vm.orchestrator import VmOrchestrator
 from sonata_tasks.vm.proxmox import ProxmoxVmProvider
 
-from nanolab.cli.vm_provider import vm_request_for_role
+from nanolab.cli.vm_provider import provider_for_environment, vm_request_for_role
 from nanolab.config import EnvironmentConfig, ScenarioConfig
 from nanolab.config.environment import ExecutionRole
 from nanolab.release.environment import secure_release_endpoints
@@ -211,13 +209,9 @@ def provision_environment(
 ) -> Generator[None, None, None]:
     if environment.provider == "local":
         raise ValueError("a non-local environment is required")
-    if orchestrator_factory is not None:
-        provider = orchestrator_factory(repo_root)
-    elif environment.provider in {"azure", "proxmox"}:
-        provider = provider_for(vm_request_for_role(environment, "stack"), repo_root)
-    else:
-        # Multipass and external providers share the orchestrator implementation.
-        provider = VmOrchestrator(repo_root)
+    provider = provider_for_environment(
+        environment, repo_root, orchestrator_factory=orchestrator_factory
+    )
 
     roles: list[ProvisionedRole] = []
     for role, request, operations in _role_requests_and_operations(
