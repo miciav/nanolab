@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
 
 from sonata_tasks.deployment import CONTROL_PLANE_NODE_PORT, PROMETHEUS_NODE_PORT
+from sonata_tasks.provisioning.providers import command_provider_for
 from sonata_tasks.vm.models import VmRequest
 
 from nanolab.config.environment import EnvironmentConfig, ExecutionRole
@@ -84,3 +88,25 @@ def vm_request_for_role(
             proxmox_ssh_key_path=proxmox.ssh_key_path,
         )
     return VmRequest(**common)
+
+
+def provider_for_environment(
+    environment: EnvironmentConfig,
+    repo_root: Path,
+    *,
+    orchestrator_factory: Callable[[Path], Any] | None = None,
+) -> Any:
+    """The VM provider an environment's stack role is driven through.
+
+    Config translation only: which provider serves which lifecycle is sonata's
+    to decide, in `command_provider_for`. What belongs here is turning an
+    `EnvironmentConfig` into the request that question is asked about, and
+    honouring the test seam that swaps the whole provider out.
+
+    Returns `Any` rather than `VmCommandProvider` because `orchestrator_factory`
+    is a caller-supplied stand-in of unknown type, and because the cloud paths
+    reach past that protocol for `ssh_endpoint` and friends.
+    """
+    if orchestrator_factory is not None:
+        return orchestrator_factory(repo_root)
+    return command_provider_for(vm_request_for_role(environment, "stack"), repo_root)
