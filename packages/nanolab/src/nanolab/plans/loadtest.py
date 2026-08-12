@@ -168,7 +168,13 @@ def build_loadtest_plan(
             "strategy": config.autoscaling_strategy,
             "minReplicas": replica_floor,
             "maxReplicas": 5,
-            "metrics": [{"type": "in_flight", "target": "2"}],
+            # rps, not in_flight: in-flight concurrency is throughput x service
+            # time, which for this function sits below 1 at any rate the load
+            # test produces, and is capped at the queue's concurrency limit
+            # anyway. The HPA reads `ceil(value / target)`, so 100 asks for one
+            # replica per 100 req/s — about four at the load this test applies,
+            # inside the maxReplicas of 5 below.
+            "metrics": [{"type": "rps", "target": "100"}],
         }
     resolved = tuple(
         resolve_function(config, key, tool_root=tool_root) for key in config.functions
@@ -426,7 +432,7 @@ def build_loadtest_plan(
         )
         hpa_metric_path = (
             f"/apis/external.metrics.k8s.io/v1beta1/namespaces/{request.namespace}/"
-            f"nanofaas_in_flight?labelSelector=function%3D{target.name}"
+            f"nanofaas_rps?labelSelector=function%3D{target.name}"
         )
         preflight = Steps(
             title="Check HPA prerequisites",

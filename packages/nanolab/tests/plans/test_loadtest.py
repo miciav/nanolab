@@ -558,7 +558,7 @@ def test_hpa_autoscaling_loadtest_enables_adapter_and_keeps_one_replica(tmp_path
     assert '"minReplicas":1' in register
     assert any("get hpa fn-word-stats-java" in command for command in commands)
     assert any(
-        "external.metrics.k8s.io" in command and "nanofaas_in_flight" in command
+        "external.metrics.k8s.io" in command and "nanofaas_rps" in command
         for command in commands
     )
     assert any(
