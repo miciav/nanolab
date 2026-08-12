@@ -190,10 +190,12 @@ class WriteSummaryTask(Task[LoadtestOutcome]):
 
 
 class EvaluateGateTask(Task[LoadtestOutcome]):
-    """Fail the run when k6 breached its thresholds.
+    """Fail the run when k6 breached its thresholds or the autoscaler oscillated.
 
     Last on purpose: k6 exits 99 on a breach having still written its summary,
-    so the report and the snapshot are produced before this decides.
+    so the report and the snapshot are produced before this decides. The
+    autoscaling verdict is made here for the same reason — raising it inside the
+    verifier would destroy the trajectory that explains it.
     """
 
     def __init__(self, *, title: str = "Evaluate the thresholds") -> None:
@@ -202,6 +204,18 @@ class EvaluateGateTask(Task[LoadtestOutcome]):
     @override
     def run(self, inputs: TaskInputs) -> TaskOutcome[LoadtestOutcome]:
         outcome = load_outcome(inputs, self.title)
+        autoscaling = outcome.autoscaling
+        if autoscaling is not None and autoscaling.rises_from_zero > 1:
+            # Client-side thresholds cannot see this: the platform retries the
+            # requests that were in flight when the replicas went away, so k6
+            # reports success while the function was dropped and re-fetched
+            # mid-load.
+            raise RuntimeError(
+                f"{autoscaling.deployment_name} came up from zero "
+                f"{autoscaling.rises_from_zero} times during the load; the "
+                "autoscaler released it while traffic was still flowing. See "
+                "replica_samples in summary.json"
+            )
         if not outcome.k6.passed:
             raise RuntimeError("k6 thresholds failed; see report.html")
         return TaskOutcome(value=outcome)
