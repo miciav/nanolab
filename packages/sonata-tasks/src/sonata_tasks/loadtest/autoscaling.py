@@ -81,6 +81,12 @@ def rises_from_zero(samples: Sequence[ReplicaSample]) -> int:
     of the function while traffic was still flowing and had to fetch it back —
     which a peak replica count cannot express, because both runs peak the same.
 
+    Zero rises does not mean the function never parked. Where the wake is
+    synchronous with the dispatch that triggers it, the deployment is already
+    off zero before any external sampler sees it; only the autoscaler's own
+    series records that start. Read this as "no oscillation observed", not as
+    "it never scaled from zero".
+
     Counted on `desired` rather than `ready`: desired is what the autoscaler
     decided, and a pod that is merely slow to become ready is not the autoscaler
     changing its mind.
@@ -245,6 +251,19 @@ class ReplicaWatcher:
             raise RuntimeError("ReplicaWatcher already started")
         self._stop.clear()
         self._started_at = time.monotonic()
+        # Taken here rather than left to the thread's first turn, so the series
+        # opens on the state the load started from instead of on whatever the
+        # scheduler allowed.
+        #
+        # It does NOT make `rises_from_zero` observable on every path, and it was
+        # added believing it would. A control plane that wakes a parked function
+        # as part of dispatching to it has already moved it off zero before any
+        # sampler can run: a live INTERNAL run parked at zero, passed its park
+        # check, and still opened at 1 with one dispatch already counted. On that
+        # path the rise is only visible in the autoscaler's own decision series
+        # (`function_scaling_desired_replicas`), which starts at 0 because the
+        # decider records itself. A faster poll cannot close that gap.
+        self._sample()
         self._thread = threading.Thread(target=self._loop, name="replica-watcher", daemon=True)
         self._thread.start()
 
@@ -255,25 +274,30 @@ class ReplicaWatcher:
         self._thread.join()
         self._thread = None
 
+    def _sample(self) -> None:
+        try:
+            ready = self._probe.ready_replicas()
+            desired = self._probe.desired_replicas()
+            self._samples.append(
+                ReplicaSample(
+                    elapsed_seconds=round(
+                        time.monotonic() - (self._started_at or time.monotonic()), 3
+                    ),
+                    desired=desired,
+                    ready=ready,
+                )
+            )
+        except RuntimeError as exc:
+            # A transient probe failure must not kill the watcher mid-load;
+            # errors are kept for diagnostics.
+            self.errors.append(str(exc))
+
     def _loop(self) -> None:
         while not self._stop.is_set():
-            try:
-                ready = self._probe.ready_replicas()
-                desired = self._probe.desired_replicas()
-                self._samples.append(
-                    ReplicaSample(
-                        elapsed_seconds=round(
-                            time.monotonic() - (self._started_at or time.monotonic()), 3
-                        ),
-                        desired=desired,
-                        ready=ready,
-                    )
-                )
-            except RuntimeError as exc:
-                # A transient probe failure must not kill the watcher mid-load;
-                # errors are kept for diagnostics.
-                self.errors.append(str(exc))
             self._stop.wait(self._poll_interval)
+            if self._stop.is_set():
+                return
+            self._sample()
 
 
 @dataclass(frozen=True)

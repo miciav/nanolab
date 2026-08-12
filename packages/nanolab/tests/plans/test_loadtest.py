@@ -634,3 +634,48 @@ def test_autoscaling_loadtest_rejects_nonzero_initial_replicas_before_k6(
     commands = _run(workflow, executor)
 
     assert not any(command.startswith("k6 run") for command in commands)
+
+
+def test_internal_autoscaling_waits_for_the_park_at_zero_it_configures(tmp_path: Path) -> None:
+    """The INTERNAL strategy gets a replica floor of 0 and must wait for it.
+
+    Without the wait the load starts against a function that was never parked,
+    so the wake-from-zero path goes unexercised and `rises_from_zero` comes back
+    as 0 — indistinguishable from an autoscaler that never moved.
+    """
+    executor = RecordingExecutor()
+    config = ScenarioConfig.model_validate(
+        {
+            "workflow": "loadtest",
+            "backend": "k8s",
+            "functions": ["word-stats-java"],
+            "autoscaling": True,
+        }
+    )
+
+    workflow = build_loadtest_plan(
+        config,
+        EnvironmentConfig.model_validate(
+            {"provider": "multipass", "roles": {"stack": {"name": "stack"}}}
+        ),
+        RoleBindings(host=executor, stack=executor),
+        control_plane_url="http://stack:30080",
+        prometheus_client=NoopPrometheus(),
+        run_dir=tmp_path,
+        fetcher=FakeFetcher(),
+    )
+
+    commands = _run(workflow, executor)
+    register = next(command for command in commands if "/v1/functions" in command)
+
+    assert '"strategy":"INTERNAL"' in register
+    assert '"minReplicas":0' in register
+    # This exact string lives only in the park step; `spec.replicas` alone also
+    # matches the replica probe that runs during verification, so asserting on it
+    # would pass with the wait removed.
+    assert any("function never parked at zero" in command for command in commands), (
+        "the INTERNAL run must wait for the function to park at zero"
+    )
+    # No HPA object exists on this path, so nothing may wait on its external metric.
+    assert not any("external.metrics.k8s.io" in command for command in commands)
+    assert not any("describe hpa" in command for command in commands)
