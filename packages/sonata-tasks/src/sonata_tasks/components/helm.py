@@ -6,6 +6,7 @@ from types import MappingProxyType
 from sonata_tasks.components.context import ScenarioExecutionContext
 from sonata_tasks.components.operations import RemoteCommandOperation
 from sonata_tasks.components.images import control_image
+from sonata_tasks.deployment import DEFAULT_NAMESPACE
 from sonata_tasks.loadtest.two_vm import (
     LOADTEST_SCENARIOS,
     TWO_VM_CONTROL_PLANE_ACTUATOR_NODE_PORT,
@@ -83,7 +84,7 @@ def _effective_namespace(context: ScenarioExecutionContext) -> str:
         return context.namespace
     if context.resolved_scenario is not None and context.resolved_scenario.namespace:
         return context.resolved_scenario.namespace
-    return "nanofaas-e2e"
+    return DEFAULT_NAMESPACE
 
 
 def _kubeconfig_path(context: ScenarioExecutionContext) -> str:
@@ -96,7 +97,12 @@ def _kubeconfig_path(context: ScenarioExecutionContext) -> str:
     return f"/home/{vm_request.user}/.kube/config"
 
 
-def _set_args(values: Mapping[str, str]) -> tuple[str, ...]:
+def helm_set_args(values: Mapping[str, str]) -> tuple[str, ...]:
+    """Turn a value map into Helm's `--set key=value` arguments.
+
+    Public and shared: four plan builders need it, and the private copies they
+    each kept had to be corrected in three places at once.
+    """
     args: list[str] = []
     for key, value in values.items():
         args.extend(["--set", f"{key}={value}"])
@@ -127,7 +133,7 @@ def plan_deploy_control_plane(context: ScenarioExecutionContext) -> tuple[Remote
                 "--wait",
                 "--timeout",
                 "5m",
-                *_set_args(values),
+                *helm_set_args(values),
             ),
             env=_frozen_env({"KUBECONFIG": _kubeconfig_path(context)}),
             execution_target="vm",

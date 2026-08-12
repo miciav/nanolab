@@ -9,6 +9,7 @@ import urllib.request
 from multipass import MultipassClient
 from sonata_engine import Steps, Workflow
 from sonata_tasks.command import CommandTask
+from sonata_tasks.deployment import CONTROL_PLANE_NODE_PORT
 from sonata_tasks.loadtest import FetchResultsTask, RunK6Task
 from sonata_tasks.offload_loadtest import (
     EvaluateConservationTask,
@@ -16,7 +17,7 @@ from sonata_tasks.offload_loadtest import (
     build_offload_loadtest_workflow,
 )
 from sonata_tasks.platform import PlatformFunction, PlatformRequest
-from sonata_tasks.components.helm import control_plane_helm_values
+from sonata_tasks.components.helm import control_plane_helm_values, helm_set_args
 from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
 from sonata_tasks.k6 import K6Task
 from sonata_tasks.loadtest.models import K6Config
@@ -30,10 +31,10 @@ from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.workspace.paths import discover_tool_root
 from nanolab.workspace.provenance import source_fingerprint
-from nanolab.plans.validate import _resolve_function, _set_args, _sonata_function
+from nanolab.plans.functions import resolve_function, sonata_function
 
 _ACTUATOR_PORT = 30081
-_CONTROL_PLANE_PORT = 30080
+_CONTROL_PLANE_PORT = CONTROL_PLANE_NODE_PORT
 # The edge has a one-slot queue in this scenario, so this rate reliably creates
 # pressure while the cloud's larger function budget absorbs the overflow.
 _OFFLOADABLE_RATE = "100"
@@ -178,7 +179,7 @@ def _platform(
     )
     if offload_target is not None:
         values = _offload_target(values, offload_target)
-    return replace(request, helm_values=_set_args(values))
+    return replace(request, helm_values=helm_set_args(values))
 
 
 def build_offload_loadtest_plan(
@@ -210,13 +211,13 @@ def build_offload_loadtest_plan(
     # locally once it elapses) — the default 5s is too tight for a cross-VM hop
     # to a function pod that may still be warming up under real load.
     offloadable = replace(
-        _sonata_function(_resolve_function(config, offloadable_key, tool_root=tool_root)),
+        sonata_function(resolve_function(config, offloadable_key, tool_root=tool_root)),
         concurrency=2,
         queue_size=8,
         timeout_ms=15000,
     )
     control = replace(
-        _sonata_function(_resolve_function(config, control_key, tool_root=tool_root)),
+        sonata_function(resolve_function(config, control_key, tool_root=tool_root)),
         concurrency=2,
         queue_size=8,
         # The control must never be offloaded: if it were, the conservation
@@ -256,9 +257,7 @@ def build_offload_loadtest_plan(
     remote = dedicated_loadgen and environment.provider != "local"
     if remote:
         role_target = environment.target("loadgen")
-        home = role_target.home or (
-            "/root" if role_target.user == "root" else f"/home/{role_target.user}"
-        )
+        home = role_target.remote_home
         script_path = Path(home) / "nanolab-assets/k6/offload-mixed.js"
         summary_path = Path(home) / "nanofaas-loadtest/k6-summary.json"
     else:

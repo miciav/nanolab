@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 
+from sonata_tasks.deployment import CONTROL_PLANE_NODE_PORT, PROMETHEUS_NODE_PORT
 from sonata_tasks.vm.models import VmRequest
 
 from nanolab.config.environment import EnvironmentConfig, ExecutionRole
@@ -65,7 +66,7 @@ def vm_request_for_role(
             # load generator. Opening the ports at VM creation would publish them
             # to 0.0.0.0/0 first, so it must not happen here.
             azure_open_ports=(
-                (30080, 30081, 30090)
+                (CONTROL_PLANE_NODE_PORT, 30081, PROMETHEUS_NODE_PORT)
                 if loadtest and role == "stack" and azure.operator_source_cidr is None
                 else None
             ),

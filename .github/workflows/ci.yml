@@ -9,110 +9,86 @@ on:
 permissions:
   contents: read
 
+defaults:
+  run:
+    # GitHub's default is `bash -e`, without pipefail: a failure inside a pipe
+    # passes unnoticed. Setting it once beats repeating `set -euo pipefail` in
+    # each block and forgetting it in half of them.
+    shell: bash -euo pipefail {0}
+
+concurrency:
+  # One run per branch: pushes in quick succession supersede each other rather
+  # than queueing, and the superseded one stops burning a runner.
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  gate:
+  # Per package, in parallel: the three packages' tests, type checks and import
+  # contracts differ only by a name, and a matrix says that once.
+  checks:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [nanolab, sonata-tasks, tui-toolkit]
     env:
       NANOFAAS_ROOT: ${{ github.workspace }}/.nanofaas-source
-
     steps:
       - name: Check out nanolab
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - name: Check out pinned nanoFaaS source
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          repository: miciav/nanofaas
-          # nanofaas feat/spring-boot-4.1 at "Refresh GitNexus index metadata",
-          # the checkout release work is developed against: Java 25 / GraalVM
-          # 25.2.4, unified Java native builds, and the java-figlet,
-          # python-mlimage and java-lite targets the image matrix now expands.
-          # Tests read the version and the matrix from this checkout rather than
-          # assuming them, so moving the pin needs no test edits.
-          ref: f18f1be61491011224ed660eec142418ac9e3e26
-          path: .nanofaas-source
-          token: ${{ secrets.NANOFAAS_CHECKOUT_TOKEN }}
-
-      - name: Install JDK
-        uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
-        with:
-          distribution: 'temurin'
-          # Must track `javaVersion` in the pinned nanoFaaS gradle.properties.
-          # The Gradle toolchain compiles to that release, but the cli-container
-          # smoke test launches the control-plane jar with the ambient `java`
-          # (plans/_local_control_plane.argv), so a lower runtime here builds
-          # green and then dies with UnsupportedClassVersionError in one second.
-          java-version: '25'
-          cache: 'gradle'
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
-        with:
-          version: "0.11.32"
-          enable-cache: true
-
-      - name: Install Python
-        run: uv python install 3.12
-
-      - name: Verify lock and sync workspace
+      - name: Set up the workspace
         id: sync
-        run: |
-          uv lock --check
-          uv sync --locked --all-packages --all-groups
+        uses: ./.github/actions/setup-workspace
+        with:
+          nanofaas-token: ${{ secrets.NANOFAAS_CHECKOUT_TOKEN }}
 
-      # One step per check, and each runs even when an earlier one failed
-      # — !cancelled() rather than always(), so cancelling the job still stops.
-      # Bundled in a single step they hid each other: ruff failed on an unused
-      # import, so the type check behind it never ran and accumulated fifteen
-      # errors unseen, and behind those sat a stale wheel pin and two stale
-      # paths. Every red should be visible in one push, not one per push.
-      #
-      # `steps.sync.outcome` is the exception: with no workspace there is
-      # nothing to check, and reporting fifteen failures for one cause is its
-      # own kind of hiding.
-      - name: Run nanolab tests
-        if: ${{ !cancelled() && steps.sync.outcome == 'success' }}
-        run: uv run --locked --all-packages --all-groups pytest -c packages/nanolab/pyproject.toml packages/nanolab/tests
+      # Only nanolab's tests read the pinned nanoFaaS checkout; sonata-tasks
+      # and tui-toolkit pass with NANOFAAS_ROOT unset, so a fork pull request
+      # still gets those two. The type check and the import contracts never
+      # need the checkout either.
+      - name: Run ${{ matrix.package }} tests
+        if: ${{ !cancelled() && steps.sync.outcome == 'success' && (matrix.package != 'nanolab' || steps.sync.outputs.nanofaas == 'true') }}
+        run: uv run --locked --all-packages --all-groups pytest -c packages/${{ matrix.package }}/pyproject.toml packages/${{ matrix.package }}/tests
 
-      - name: Run sonata-tasks tests
+      - name: Type-check ${{ matrix.package }}
         if: ${{ !cancelled() && steps.sync.outcome == 'success' }}
-        run: uv run --locked --all-packages --all-groups pytest -c packages/sonata-tasks/pyproject.toml packages/sonata-tasks/tests
+        run: uv run --locked --all-packages --all-groups basedpyright --project packages/${{ matrix.package }}
 
-      - name: Run tui-toolkit tests
+      - name: Check ${{ matrix.package }} import contracts
         if: ${{ !cancelled() && steps.sync.outcome == 'success' }}
-        run: uv run --locked --all-packages --all-groups pytest -c packages/tui-toolkit/pyproject.toml packages/tui-toolkit/tests
+        run: uv run --locked --all-packages --all-groups lint-imports --config packages/${{ matrix.package }}/.importlinter --no-cache
+
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out nanolab
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up the workspace
+        uses: ./.github/actions/setup-workspace
+        with:
+          nanofaas-token: ${{ secrets.NANOFAAS_CHECKOUT_TOKEN }}
 
       - name: Lint
-        if: ${{ !cancelled() && steps.sync.outcome == 'success' }}
         run: uv run --locked --all-packages --all-groups ruff check packages
 
-      - name: Type-check nanolab
-        if: ${{ !cancelled() && steps.sync.outcome == 'success' }}
-        run: uv run --locked --all-packages --all-groups basedpyright --project packages/nanolab
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out nanolab
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - name: Type-check sonata-tasks
-        if: ${{ !cancelled() && steps.sync.outcome == 'success' }}
-        run: uv run --locked --all-packages --all-groups basedpyright --project packages/sonata-tasks
-
-      - name: Type-check tui-toolkit
-        if: ${{ !cancelled() && steps.sync.outcome == 'success' }}
-        run: uv run --locked --all-packages --all-groups basedpyright --project packages/tui-toolkit
-
-      - name: Check nanolab import contracts
-        if: ${{ !cancelled() && steps.sync.outcome == 'success' }}
-        run: uv run --locked --all-packages --all-groups lint-imports --config packages/nanolab/.importlinter --no-cache
-
-      - name: Check sonata-tasks import contracts
-        if: ${{ !cancelled() && steps.sync.outcome == 'success' }}
-        run: uv run --locked --all-packages --all-groups lint-imports --config packages/sonata-tasks/.importlinter --no-cache
-
-      - name: Check tui-toolkit import contracts
-        if: ${{ !cancelled() && steps.sync.outcome == 'success' }}
-        run: uv run --locked --all-packages --all-groups lint-imports --config packages/tui-toolkit/.importlinter --no-cache
+      - name: Set up the workspace
+        uses: ./.github/actions/setup-workspace
+        with:
+          nanofaas-token: ${{ secrets.NANOFAAS_CHECKOUT_TOKEN }}
 
       - name: Build distributions
         id: build
-        if: ${{ !cancelled() && steps.sync.outcome == 'success' }}
         # No --clear: the runner checks out fresh, so there is nothing to clear,
         # and clearing races with the .gitignore uv keeps in the output directory
         # while four packages build into it. That race failed one run of PR #3
@@ -120,31 +96,45 @@ jobs:
         # already built successfully.
         run: uv build --all-packages --out-dir dist
 
-      # Depends on the wheels rather than on the workspace: without a build
-      # there is nothing to install.
       - name: Smoke-test installed wheels
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: |
           uv venv .wheel-smoke
-          uv pip install dist/nanolab-0.1.0-py3-none-any.whl dist/sonata_tasks-0.1.0-py3-none-any.whl dist/tui_toolkit-0.1.0-py3-none-any.whl --python .wheel-smoke/bin/python
+          # Glob, not names: the filenames carry the package version, and
+          # repeating it here means a version bump breaks CI for no reason.
+          uv pip install dist/*.whl --python .wheel-smoke/bin/python
           .wheel-smoke/bin/python -c "import nanolab, sonata_tasks, tui_toolkit"
           .wheel-smoke/bin/nanolab --help
 
+  plans:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      NANOFAAS_ROOT: ${{ github.workspace }}/.nanofaas-source
+    steps:
+      - name: Check out nanolab
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up the workspace
+        id: sync
+        uses: ./.github/actions/setup-workspace
+        with:
+          nanofaas-token: ${{ secrets.NANOFAAS_CHECKOUT_TOKEN }}
+
       - name: Generate representative plans
-        if: ${{ !cancelled() && steps.sync.outcome == 'success' }}
+        if: ${{ steps.sync.outputs.nanofaas == 'true' }}
         run: |
-          set -euo pipefail
-          uv run --package nanolab nanolab plan packages/nanolab/scenarios-v2/deployment-lifecycle-container.yaml --environment packages/nanolab/environments/local.yaml
-          uv run --package nanolab nanolab plan packages/nanolab/scenarios-v2/deployment-lifecycle-k8s.yaml --environment packages/nanolab/environments/multipass.yaml
-          uv run --package nanolab nanolab plan packages/nanolab/scenarios-v2/cli-contract-k8s.yaml --control-plane-url http://control-plane.example:30080
+          uv run --locked --package nanolab nanolab plan packages/nanolab/scenarios-v2/deployment-lifecycle-container.yaml --environment packages/nanolab/environments/local.yaml
+          uv run --locked --package nanolab nanolab plan packages/nanolab/scenarios-v2/deployment-lifecycle-k8s.yaml --environment packages/nanolab/environments/multipass.yaml
+          uv run --locked --package nanolab nanolab plan packages/nanolab/scenarios-v2/cli-contract-k8s.yaml --control-plane-url http://control-plane.example:30080
           # Without the ordinal: the gate is that the plan releases the control
           # plane, not that it does so tenth. Pinning the number made this stale
           # the moment the plan grew a registry, and the failure stayed hidden
           # behind an earlier red step for days.
-          uv run --package nanolab nanolab plan packages/nanolab/scenarios-v2/cli-contract-container.yaml | grep -q 'release-local-control-plane'
+          uv run --locked --package nanolab nanolab plan packages/nanolab/scenarios-v2/cli-contract-container.yaml | grep -q 'release-local-control-plane'
           provisioned_plan="$(mktemp)"
           trap 'rm -f "$provisioned_plan"' EXIT
-          uv run --package nanolab nanolab plan packages/nanolab/scenarios-v2/cli-contract-k8s.yaml \
+          uv run --locked --package nanolab nanolab plan packages/nanolab/scenarios-v2/cli-contract-k8s.yaml \
             --environment packages/nanolab/environments/multipass.yaml >"$provisioned_plan"
           # By position in the plan, not by ordinal: what matters is that the VM
           # is acquired before the chart needs it and released after, in reverse
@@ -166,15 +156,33 @@ jobs:
           done
           test "$vm_acquired" -lt "$helm_acquired"
           test "$helm_released" -lt "$vm_released"
-          # Images come from GHCR; a registry step here means the legacy bootstrap
-          # sequence was reused wholesale again.
-          ! grep -Fq 'registry' "$provisioned_plan"
+          # The gate is that no registry bootstrap task exists, not that the
+          # word never appears: a substring match over the whole plan fails on
+          # any future task that merely mentions a registry.
+          if grep -qE '^[0-9]+\.[a-z0-9-]*registry' "$provisioned_plan"; then
+            echo "provisioned plan reuses the legacy registry bootstrap:" >&2
+            grep -nE 'registry' "$provisioned_plan" >&2
+            exit 1
+          fi
+
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      NANOFAAS_ROOT: ${{ github.workspace }}/.nanofaas-source
+    steps:
+      - name: Check out nanolab
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up the workspace
+        id: sync
+        uses: ./.github/actions/setup-workspace
+        with:
+          nanofaas-token: ${{ secrets.NANOFAAS_CHECKOUT_TOKEN }}
 
       - name: Run cli-container smoke test
-        if: ${{ !cancelled() && steps.sync.outcome == 'success' }}
-        timeout-minutes: 15
+        if: ${{ steps.sync.outputs.nanofaas == 'true' }}
         run: |
-          set -euo pipefail
           if curl -sS -m 2 http://127.0.0.1:18080/v1/functions >/dev/null 2>&1; then
             echo "API port 18080 is already in use" >&2
             exit 1

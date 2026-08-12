@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 from multipass import MultipassCommandError
 
 from shellcraft.backend import ShellExecutionResult
+from sonata_tasks.deployment import LOCAL_REGISTRY, REGISTRY_CONTAINER_NAME
 from sonata_tasks.vm.multipass import MultipassVmProvider, _ok, _sdk_error, repo_rsync_command, repo_sync_ssh_rsh
 from sonata_tasks.vm.models import VmRequest
 
@@ -146,8 +147,8 @@ class VmOrchestrator(MultipassVmProvider):
         self,
         request: VmRequest,
         *,
-        registry: str = "localhost:5000",
-        container_name: str = "nanofaas-e2e-registry",
+        registry: str = LOCAL_REGISTRY,
+        container_name: str = REGISTRY_CONTAINER_NAME,
         dry_run: bool = False,
     ) -> ShellExecutionResult:
         ensure_result = self.ensure_registry_container(
@@ -168,8 +169,8 @@ class VmOrchestrator(MultipassVmProvider):
         self,
         request: VmRequest,
         *,
-        registry: str = "localhost:5000",
-        container_name: str = "nanofaas-e2e-registry",
+        registry: str = LOCAL_REGISTRY,
+        container_name: str = REGISTRY_CONTAINER_NAME,
         dry_run: bool = False,
     ) -> ShellExecutionResult:
         return self.ansible.ensure_registry_container(
@@ -183,7 +184,7 @@ class VmOrchestrator(MultipassVmProvider):
         self,
         request: VmRequest,
         *,
-        registry: str = "localhost:5000",
+        registry: str = LOCAL_REGISTRY,
         dry_run: bool = False,
     ) -> ShellExecutionResult:
         return self.ansible.configure_k3s_registry(

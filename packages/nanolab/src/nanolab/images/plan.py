@@ -7,13 +7,14 @@ from typing import Literal
 
 from nanolab.functions.catalog import FunctionDefinition, list_functions
 from nanolab.release.versioning import normalize_version
+from sonata_tasks.deployment import LOCAL_REGISTRY
 
 
 ImageArchitecture = Literal["amd64", "arm64"]
 ImageFlavor = Literal["jvm", "native", "default"]
 
 DEFAULT_ARCHITECTURES: tuple[ImageArchitecture, ...] = ("amd64", "arm64")
-DEFAULT_REGISTRY = "localhost:5000/nanofaas"
+DEFAULT_REGISTRY = f"{LOCAL_REGISTRY}/nanofaas"
 
 NATIVE_JAVA_DOCKERFILE = Path("deploy/native-java/Dockerfile")
 

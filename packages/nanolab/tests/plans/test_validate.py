@@ -4,11 +4,8 @@ from pathlib import Path
 import pytest
 
 from nanolab.config.scenario import ScenarioConfig
-from nanolab.plans.validate import (
-    _resolve_function,
-    _sonata_function,
-    build_validate_plan,
-)
+from nanolab.plans.functions import resolve_function, sonata_function
+from nanolab.plans.validate import build_validate_plan
 from sonata_engine import Workflow
 from sonata_tasks.execution.bindings import RoleBindings
 from sonata_tasks.registry import docker_registry_resource
@@ -196,7 +193,7 @@ def test_validate_plan_propagates_resource_requests_and_limits() -> None:
         }
     )
 
-    body = _sonata_function(_resolve_function(config, "word-stats-java")).manifest().json()
+    body = sonata_function(resolve_function(config, "word-stats-java")).manifest().json()
 
     assert '"memoryMiB":128' in body
     assert '"memoryMiB":512' in body

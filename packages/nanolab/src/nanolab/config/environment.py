@@ -21,6 +21,16 @@ class RoleTarget(BaseModel):
     disk: str = "30G"
     hpa_scale_to_zero: bool = Field(default=False, alias="hpaScaleToZero")
 
+    @property
+    def remote_home(self) -> str:
+        """Where this role's user lives on its machine.
+
+        On the model rather than in a helper: two modules had grown their own
+        copy of the rule with different signatures, and neither could be found
+        from the other.
+        """
+        return self.home or ("/root" if self.user == "root" else f"/home/{self.user}")
+
 
 class AzureEnvironment(BaseModel):
     model_config = ConfigDict(extra="forbid")

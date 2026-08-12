@@ -20,7 +20,7 @@ from sonata_tasks.loadtest import (
     loadtest_composite,
 )
 from sonata_tasks.platform import PlatformRequest
-from sonata_tasks.components.helm import control_plane_helm_values
+from sonata_tasks.components.helm import control_plane_helm_values, helm_set_args
 from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
 from sonata_tasks.execution.roles import ExecutionRole
 from sonata_tasks.k6 import K6Task
@@ -44,7 +44,7 @@ from sonata_tasks.tasks.models import CommandTaskSpec
 
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
-from nanolab.plans.validate import _resolve_function, _set_args, _sonata_function
+from nanolab.plans.functions import resolve_function, sonata_function
 from nanolab.workspace.paths import discover_tool_root
 from nanolab.workspace.provenance import source_fingerprint
 
@@ -98,12 +98,6 @@ def _default_prometheus_queries(function_name: str) -> tuple[PrometheusQuery, ..
             True,
         ),
     )
-
-
-def _home(user: str, explicit: str | None) -> str:
-    if explicit:
-        return explicit
-    return "/root" if user == "root" else f"/home/{user}"
 
 
 class _RoleRunner:
@@ -177,7 +171,7 @@ def build_loadtest_plan(
             "metrics": [{"type": "in_flight", "target": "2"}],
         }
     resolved = tuple(
-        _resolve_function(config, key, tool_root=tool_root) for key in config.functions
+        resolve_function(config, key, tool_root=tool_root) for key in config.functions
     )
     prebuilt = prebuilt_control_plane_image is not None or prebuilt_function_images is not None
     if prebuilt:
@@ -192,7 +186,7 @@ def build_loadtest_plan(
             replace(function, image=prebuilt_function_images[function.key])
             for function in resolved
         )
-    functions = tuple(_sonata_function(function) for function in resolved)
+    functions = tuple(sonata_function(function) for function in resolved)
     if scaling_config is not None:
         functions = tuple(
             replace(
@@ -211,21 +205,21 @@ def build_loadtest_plan(
     script_name = "autoscaling.js" if config.autoscaling else "two-vm-function-invoke.js"
     if remote:
         role_target = environment.target("loadgen" if dedicated else "stack")
-        home = _home(role_target.user, role_target.home)
+        home = role_target.remote_home
         script_path = Path(home) / f"nanolab-assets/k6/{script_name}"
         output_dir = remote_run_dir or Path(home) / "nanofaas-loadtest"
         if remote_run_dir is not None:
-            remote = PurePosixPath(str(remote_run_dir))
+            requested = PurePosixPath(str(remote_run_dir))
             selected_home = PurePosixPath(home)
             try:
-                relative = remote.relative_to(selected_home)
+                relative = requested.relative_to(selected_home)
             except ValueError:
                 relative = PurePosixPath()
             parts = relative.parts
-            run_number = remote.name.removeprefix("run-")
+            run_number = requested.name.removeprefix("run-")
             if (
-                not remote.is_absolute()
-                or ".." in remote.parts
+                not requested.is_absolute()
+                or ".." in requested.parts
                 or len(parts) != 4
                 or parts[0] != "nanofaas-release"
                 or not parts[1]
@@ -274,7 +268,7 @@ def build_loadtest_plan(
             helm_values["hpa-metrics-adapter.metricsRelistInterval"] = "10s"
         request = replace(
             request,
-            helm_values=_set_args(helm_values),
+            helm_values=helm_set_args(helm_values),
         )
 
     load_role: ExecutionRole = "loadgen" if dedicated else "stack"

@@ -18,8 +18,13 @@ from __future__ import annotations
 import urllib.request
 from pathlib import Path
 
-API_PORT = 18080
-MANAGEMENT_PORT = 18081
+from sonata_tasks.deployment import (
+    LOCAL_CONTROL_PLANE_API_PORT,
+    LOCAL_CONTROL_PLANE_MANAGEMENT_PORT,
+)
+
+API_PORT = LOCAL_CONTROL_PLANE_API_PORT
+MANAGEMENT_PORT = LOCAL_CONTROL_PLANE_MANAGEMENT_PORT
 ENDPOINT = f"http://127.0.0.1:{API_PORT}"
 HEALTH_URL = f"http://127.0.0.1:{MANAGEMENT_PORT}/actuator/health"
 

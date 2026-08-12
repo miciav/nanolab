@@ -14,6 +14,11 @@ from sonata_tasks.execution.roles import ExecutionRole
 
 from sonata_tasks.command import CommandTask
 from sonata_tasks.compensation import compensated_resource
+from sonata_tasks.deployment import (
+    DEFAULT_NAMESPACE,
+    LOCAL_CONTROL_PLANE_API_PORT,
+    LOCAL_REGISTRY,
+)
 from sonata_tasks.docker import DockerBuildTask, DockerPushTask
 from sonata_tasks.function import function_resource
 from sonata_tasks.gradle import GradleTask
@@ -85,8 +90,8 @@ class PlatformRequest:
     backend: Backend
     functions: tuple[PlatformFunction, ...]
     build: Build = "docker"
-    namespace: str = "nanofaas-e2e"
-    registry: str = "localhost:5000"
+    namespace: str = DEFAULT_NAMESPACE
+    registry: str = LOCAL_REGISTRY
     additional_modules: tuple[str, ...] = ()
     build_images: bool = True
     build_control_plane: bool = True
@@ -251,7 +256,7 @@ def add_platform(
     executor: CommandTaskExecutor,
     cwd: Path | None = None,
     control_plane_process: Callable[[], Resource[Any]] | None = None,
-    local_endpoint: str = "http://127.0.0.1:18080",
+    local_endpoint: str = f"http://127.0.0.1:{LOCAL_CONTROL_PLANE_API_PORT}",
     requires: tuple[Resource[Any], ...] = (),
 ) -> Platform:
     """Add everything up to and including registered functions.

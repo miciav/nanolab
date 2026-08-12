@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from nanolab.config.environment import EnvironmentConfig
+from nanolab.config.environment import EnvironmentConfig, RoleTarget
 
 
 def test_local_environment_defaults_stack_to_host() -> None:
@@ -67,3 +67,15 @@ def test_rejects_legacy_prefect_configuration() -> None:
         EnvironmentConfig.model_validate(
             {"provider": "local", "prefect": {"enabled": True}}
         )
+
+
+def test_remote_home_defaults_to_the_users_home() -> None:
+    assert RoleTarget(user="ubuntu").remote_home == "/home/ubuntu"
+
+
+def test_remote_home_is_slash_root_for_root() -> None:
+    assert RoleTarget(user="root").remote_home == "/root"
+
+
+def test_an_explicit_home_wins() -> None:
+    assert RoleTarget(user="ubuntu", home="/srv/nanofaas").remote_home == "/srv/nanofaas"

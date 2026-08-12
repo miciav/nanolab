@@ -8,6 +8,7 @@ from multipass import find_ssh_public_key
 from sonata_engine import Resource, TaskInputs, Workflow
 from sonata_tasks.cli import CliFunction, CliWorkflowRequest, build_cli_workflow
 from sonata_tasks.command import CommandTask
+from sonata_tasks.deployment import CONTROL_PLANE_NODE_PORT, DEFAULT_NAMESPACE, LOCAL_REGISTRY
 from sonata_tasks.helm import HelmReleaseSpec, helm_release_resource
 from sonata_tasks.process import managed_process_resource
 from sonata_tasks.registry import docker_registry_resource
@@ -19,7 +20,7 @@ from sonata_tasks.components.bootstrap import (
     retarget_bootstrap_operation,
 )
 from sonata_tasks.components.context import ScenarioExecutionContext
-from sonata_tasks.components.helm import control_plane_helm_values
+from sonata_tasks.components.helm import control_plane_helm_values, helm_set_args
 from sonata_tasks.components.images import control_image
 from sonata_tasks.components.operations import RemoteCommandOperation, ScenarioOperation
 from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
@@ -33,7 +34,7 @@ from nanolab.cli.vm_provider import vm_request_for_role
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.plans import _local_control_plane
-from nanolab.plans.validate import _resolve_function
+from nanolab.plans.functions import resolve_function
 from nanolab.release.publish import GHCR_REPOSITORY
 from nanolab.release.environment import secure_release_endpoints
 from nanolab.release.versioning import normalize_version, read_project_version
@@ -49,14 +50,14 @@ LOCAL_CONTROL_PLANE_BUILD_ARGV = (
 # The provisioned k8s path runs the CLI *inside* the VM: the Helm chart exposes
 # the control plane as a NodePort, so the CLI never needs to discover an
 # external URL or fight a cloud provider's firewall.
-PROVISIONED_ENDPOINT = "http://127.0.0.1:30080"
+PROVISIONED_ENDPOINT = f"http://127.0.0.1:{CONTROL_PLANE_NODE_PORT}"
 
 # Nothing in this workflow reads a local registry: images come from GHCR, and the
 # two bootstrap planners that consumed this value are not reused (see
 # `_BOOTSTRAP_STEPS`). It survives only because `ScenarioExecutionContext` requires
 # the field, and because `control_image()` is the canonical source of the image's
 # name — `_published_image` keeps the name and discards this prefix.
-_LOCAL_REGISTRY = "localhost:5000"
+_LOCAL_REGISTRY = LOCAL_REGISTRY
 _HELM_CHART = "deploy/helm/nanofaas"
 _HELM_RELEASE = "control-plane"
 _FUNCTION_READINESS_TIMEOUT_SECONDS = 120
@@ -177,13 +178,6 @@ def _bootstrap_tasks(
     return tuple(tasks)
 
 
-def _set_args(values: dict[str, str]) -> tuple[str, ...]:
-    args: list[str] = []
-    for key, value in values.items():
-        args.extend(["--set", f"{key}={value}"])
-    return tuple(args)
-
-
 def _published_image(image: str, version_tag: str) -> str:
     target = image.rsplit("/", 1)[-1].split(":", 1)[0]
     return f"{GHCR_REPOSITORY}/{target}:{version_tag}"
@@ -212,7 +206,7 @@ def _control_plane_helm_resource(
         release=_HELM_RELEASE,
         chart=_HELM_CHART,
         namespace=namespace,
-        values=_set_args(values),
+        values=helm_set_args(values),
     )
     resource = helm_release_resource(spec, executor=executor, requires=(vm,))
     # Retitled so the compiled id reads "acquire-control-plane-helm-release":
@@ -291,7 +285,7 @@ def _build_k8s_plan(
             build_argv=None,
         )
         for key in config.functions
-        for resolved in (_resolve_function(config, key),)
+        for resolved in (resolve_function(config, key),)
     )
     request = CliWorkflowRequest(
         functions=functions,
@@ -317,7 +311,7 @@ def build_cli_plan(
     *,
     cli_role: ExecutionRole = "host",
     endpoint: str | None = None,
-    namespace: str = "nanofaas-e2e",
+    namespace: str = DEFAULT_NAMESPACE,
     repo_root: Path | None = None,
     environment: EnvironmentConfig | None = None,
     orchestrator_factory: Callable[[Path], Any] | None = None,
@@ -351,7 +345,7 @@ def build_cli_plan(
             image_build_argv=resolved.image_build_argv if local else None,
         )
         for key in config.functions
-        for resolved in (_resolve_function(config, key),)
+        for resolved in (resolve_function(config, key),)
     )
     request = CliWorkflowRequest(
         functions=functions,

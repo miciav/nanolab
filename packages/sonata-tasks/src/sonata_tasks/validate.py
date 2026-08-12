@@ -13,6 +13,7 @@ from sonata_tasks.execution.bindings import (
 )
 
 from sonata_tasks.command import CommandTask
+from sonata_tasks.deployment import LOCAL_CONTROL_PLANE_API_PORT
 from sonata_tasks.http_function import HttpExecutionSuccessTask, HttpFunctionEnqueueTask, HttpFunctionInvokeTask
 from sonata_tasks.k6 import K6Task
 from sonata_tasks.loadtest.models import K6Config
@@ -79,7 +80,7 @@ def build_validate_workflow(
     workflow_id: str = "validate",
     cwd: Path | None = None,
     control_plane_process: Callable[[], Resource[Any]] | None = None,
-    local_endpoint: str = "http://127.0.0.1:18080",
+    local_endpoint: str = f"http://127.0.0.1:{LOCAL_CONTROL_PLANE_API_PORT}",
     requires: tuple[Resource[Any], ...] = (),
 ) -> Workflow:
     """Build the validate workflow: build, deploy, register, invoke, inspect.

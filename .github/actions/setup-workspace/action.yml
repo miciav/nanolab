@@ -1,0 +1,92 @@
+name: Set up the nanolab workspace
+description: >
+  Checks out the pinned nanoFaaS source, installs the pinned JDK, uv and
+  Python, and syncs the uv workspace. Every job needs all of it; written once
+  so splitting the gate into parallel jobs costs nothing.
+
+inputs:
+  nanofaas-token:
+    description: >
+      Token for the private nanoFaaS checkout. Empty on pull requests from
+      forks, where secrets are unavailable — the action then skips that
+      checkout and reports it through the `nanofaas` output.
+    required: false
+    default: ""
+
+outputs:
+  nanofaas:
+    description: "'true' when the nanoFaaS source is present, 'false' otherwise"
+    value: ${{ steps.report.outputs.nanofaas }}
+
+runs:
+  using: composite
+  steps:
+    - name: Check out pinned nanoFaaS source
+      if: ${{ inputs.nanofaas-token != '' }}
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      with:
+        repository: miciav/nanofaas
+        # nanofaas feat/spring-boot-4.1 at "Refresh GitNexus index metadata",
+        # the checkout release work is developed against: Java 25 / GraalVM
+        # 25.2.4, unified Java native builds, and the java-figlet,
+        # python-mlimage and java-lite targets the image matrix now expands.
+        # Tests read the version and the matrix from this checkout rather than
+        # assuming them, so moving the pin needs no test edits.
+        ref: f18f1be61491011224ed660eec142418ac9e3e26
+        path: .nanofaas-source
+        token: ${{ inputs.nanofaas-token }}
+
+    - name: Install JDK
+      uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+      with:
+        distribution: 'temurin'
+        # Must track `javaVersion` in the pinned nanoFaaS gradle.properties.
+        # The Gradle toolchain compiles to that release, but the cli-container
+        # smoke test launches the control-plane jar with the ambient `java`
+        # (plans/_local_control_plane.argv), so a lower runtime here builds
+        # green and then dies with UnsupportedClassVersionError in one second.
+        java-version: '25'
+        cache: 'gradle'
+
+    - name: Verify the JDK matches the pinned nanoFaaS source
+      if: ${{ inputs.nanofaas-token != '' }}
+      shell: bash -euo pipefail {0}
+      run: |
+        # The runtime java must not be older than what the source compiles to,
+        # or the container smoke test dies with UnsupportedClassVersionError
+        # after everything else has gone green.
+        expected="$(grep -E '^javaVersion=' .nanofaas-source/gradle.properties | cut -d= -f2 | tr -d '[:space:]')"
+        actual="$(java -version 2>&1 | head -1 | grep -oE '[0-9]+' | head -1)"
+        if [ "$expected" != "$actual" ]; then
+          echo "JDK mismatch: workflow installs $actual, pinned nanoFaaS compiles to $expected" >&2
+          echo "Update java-version in .github/actions/setup-workspace/action.yml" >&2
+          exit 1
+        fi
+        echo "JDK $actual matches the pinned nanoFaaS source"
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+      with:
+        version: "0.11.32"
+        enable-cache: true
+
+    - name: Install Python
+      shell: bash -euo pipefail {0}
+      run: uv python install 3.12
+
+    - name: Verify lock and sync workspace
+      shell: bash -euo pipefail {0}
+      run: |
+        uv lock --check
+        uv sync --locked --all-packages --all-groups
+
+    - name: Report whether the nanoFaaS source is present
+      id: report
+      shell: bash -euo pipefail {0}
+      env:
+        HAS_TOKEN: ${{ inputs.nanofaas-token != '' }}
+      run: |
+        echo "nanofaas=$HAS_TOKEN" >>"$GITHUB_OUTPUT"
+        if [ "$HAS_TOKEN" != "true" ]; then
+          echo "::notice::No nanoFaaS token (fork pull request): steps needing NANOFAAS_ROOT will be skipped."
+        fi

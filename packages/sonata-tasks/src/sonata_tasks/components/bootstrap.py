@@ -8,6 +8,7 @@ from typing import cast
 
 from multipass import find_ssh_public_key
 
+from sonata_tasks.deployment import DEFAULT_NAMESPACE, REGISTRY_CONTAINER_NAME
 from sonata_tasks.vm.multipass import (
     _find_ssh_private_key_path,
     repo_rsync_command,
@@ -44,7 +45,7 @@ def _inventory_target(vm_request: VmRequest) -> str:
         if vm_request.host is None:
             raise ValueError("external VM lifecycle requires a host")
         return f"{vm_request.host},"
-    return f"<multipass-ip:{vm_request.name or 'nanofaas-e2e'}>,"
+    return f"<multipass-ip:{vm_request.name or DEFAULT_NAMESPACE}>,"
 
 
 def _frozen_env(env: Mapping[str, str] | None = None) -> Mapping[str, str]:
@@ -112,7 +113,7 @@ def plan_vm_ensure_running(context: ScenarioExecutionContext) -> tuple[RemoteCom
                 "multipass",
                 "launch",
                 "--name",
-                vm_request.name or "nanofaas-e2e",
+                vm_request.name or DEFAULT_NAMESPACE,
                 "--cpus",
                 str(vm_request.cpus),
                 "--memory",
@@ -161,7 +162,7 @@ def _rsync_operation(
             raise ValueError("external VM lifecycle requires a host")
         host = vm_request.host
     else:
-        host = f"<multipass-ip:{vm_request.name or 'nanofaas-e2e'}>"
+        host = f"<multipass-ip:{vm_request.name or DEFAULT_NAMESPACE}>"
     return RemoteCommandOperation(
         operation_id=operation_id,
         summary=summary,
@@ -272,7 +273,7 @@ def plan_registry_ensure_container(
                 "registry": context.local_registry,
                 "registry_host": registry_host,
                 "registry_port": registry_port,
-                "registry_container_name": "nanofaas-e2e-registry",
+                "registry_container_name": REGISTRY_CONTAINER_NAME,
             },
             discover_private_key=discover_private_key,
         ),
