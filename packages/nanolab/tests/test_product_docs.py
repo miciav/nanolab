@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 
@@ -61,3 +62,19 @@ def test_nanolab_readme_explains_provider_setup_entries() -> None:
         "starts no workflow",
     ):
         assert phrase in setup_block
+
+
+def test_readme_quotes_the_nanofaas_commit_ci_actually_pins() -> None:
+    """The README's CI section and the composite action must name one commit.
+
+    They drifted two commits apart before this test existed: the action is
+    what runs, the README is what a reader believes, and nothing tied them
+    together.
+    """
+    action = (
+        WORKSPACE_ROOT / ".github" / "actions" / "setup-workspace" / "action.yml"
+    ).read_text(encoding="utf-8")
+    pinned = re.search(r"^\s*ref:\s*([0-9a-f]{40})\s*$", action, re.MULTILINE)
+
+    assert pinned is not None, "setup-workspace pins nanoFaaS by full commit sha"
+    assert pinned.group(1) in (WORKSPACE_ROOT / "README.md").read_text(encoding="utf-8")

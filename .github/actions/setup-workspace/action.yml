@@ -26,13 +26,17 @@ runs:
       uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       with:
         repository: miciav/nanofaas
-        # nanofaas feat/spring-boot-4.1 at "Refresh GitNexus index metadata",
-        # the checkout release work is developed against: Java 25 / GraalVM
-        # 25.2.4, unified Java native builds, and the java-figlet,
-        # python-mlimage and java-lite targets the image matrix now expands.
+        # nanofaas main at "fix: serve every registrable scaling metric to the
+        # HPA (#189)". Same Java 25 / GraalVM 25.2.4 and the same java-figlet,
+        # python-mlimage and java-lite image-matrix targets as the previous pin,
+        # plus what the lab's autoscaling scenarios need: the HPA scale-from-zero
+        # fixes, the adapter rules that make nanofaas_rps servable, and the eager
+        # meter registration without which that metric has no Prometheus series
+        # until the function's first request — which is after the preflight that
+        # waits for it.
         # Tests read the version and the matrix from this checkout rather than
         # assuming them, so moving the pin needs no test edits.
-        ref: f18f1be61491011224ed660eec142418ac9e3e26
+        ref: 5a25ce59107189534ee366ef926a0607f5dff9e4
         path: .nanofaas-source
         token: ${{ inputs.nanofaas-token }}
 

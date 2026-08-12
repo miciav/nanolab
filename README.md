@@ -39,8 +39,8 @@ export NANOFAAS_ROOT=/path/to/nanofaas
 
 `.github/workflows/ci.yml` runs on every push and pull request against
 `main`. It checks out this repo, checks out the pinned nanoFaaS source
-snapshot (`miciav/nanofaas` at `4e0aa0751b5f3a5008012994bd4a8843de801316`,
-matching the baseline noted above) into `.nanofaas-source`, points
+snapshot (`miciav/nanofaas` at `5a25ce59107189534ee366ef926a0607f5dff9e4`,
+which has moved on from the initial snapshot above) into `.nanofaas-source`, points
 `NANOFAAS_ROOT` at that checkout, and runs the full gate below.
 `miciav/nanofaas` is private, so the cross-repo checkout authenticates with
 the repository secret `NANOFAAS_CHECKOUT_TOKEN` (a fine-grained PAT scoped to
@@ -93,4 +93,6 @@ NANOFAAS_ROOT=/path/to/newer/nanofaas uv run --package nanolab nanolab plan pack
 ```
 
 Bumping the pin used by CI means updating both the `ref:` in
-`.github/workflows/ci.yml` and the commit noted in this README.
+`.github/actions/setup-workspace/action.yml` and the commit noted in this
+README; `test_readme_quotes_the_nanofaas_commit_ci_actually_pins` fails if you
+change one and forget the other.
