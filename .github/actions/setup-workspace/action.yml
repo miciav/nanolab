@@ -26,8 +26,8 @@ runs:
       uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       with:
         repository: miciav/nanofaas
-        # nanofaas main at "feat: publish the HPA's own decisions as metrics
-        # (#190)". Same Java 25 / GraalVM 25.2.4 and the same java-figlet,
+        # nanofaas main at "feat: publish what the internal autoscaler decided
+        # (#192)". Same Java 25 / GraalVM 25.2.4 and the same java-figlet,
         # python-mlimage and java-lite image-matrix targets as the previous pin,
         # plus what the lab's autoscaling scenarios need: the HPA scale-from-zero
         # fixes, the adapter rules that make nanofaas_rps servable, and the eager
@@ -35,10 +35,11 @@ runs:
         # until the function's first request — which is after the preflight that
         # waits for it. It also carries the kube-state-metrics dependency the
         # load test enables, without which the four hpa_* snapshot queries have
-        # nothing to read.
+        # nothing to read, plus the internal autoscaler's decision gauges that
+        # explain the non-HPA scenario the same way.
         # Tests read the version and the matrix from this checkout rather than
         # assuming them, so moving the pin needs no test edits.
-        ref: b938d6fc2ea8aff3016c16309623661bad2d89ad
+        ref: d44b5f95caf3843709475445cb608567ffb15d6d
         path: .nanofaas-source
         token: ${{ inputs.nanofaas-token }}
 
