@@ -473,3 +473,30 @@ def test_a_slow_pod_is_not_mistaken_for_the_autoscaler_changing_its_mind() -> No
     ]
 
     assert rises_from_zero(samples) == 1
+
+
+def test_the_first_sample_is_taken_before_start_returns() -> None:
+    """The pre-load state must be recorded, not raced against thread scheduling.
+
+    A run verified the function parked at zero and still opened its series at 1,
+    because the load woke it before the sampling thread got its first turn.
+    """
+    from sonata_tasks.loadtest.autoscaling import ReplicaProbe, ReplicaWatcher
+
+    runner = _Runner(["0", "0", "3", "3"])
+    probe = ReplicaProbe(
+        runner=runner,
+        namespace="nanofaas",
+        deployment_name="fn-word-stats-java",
+        remote_dir="/home/ubuntu/mcFaas",
+    )
+    watcher = ReplicaWatcher(probe, poll_interval_seconds=30)
+
+    watcher.start()
+    # No sleep, no thread turn: whatever is here was taken synchronously.
+    observed = watcher.samples
+    watcher.stop()
+
+    assert len(observed) == 1
+    assert observed[0].desired == 0
+    assert watcher.max_observed == 0
