@@ -484,10 +484,10 @@ def build_loadtest_plan(
         role=load_role,
     )
     # Parking at zero is not an HPA speciality: the INTERNAL strategy is given the
-    # same replica floor of 0 and scales down to it too. Waiting for it here is what
-    # makes `rises_from_zero == 1` an assertion rather than a 0 that means "it never
-    # tried". Without the wait the load starts against a function that was never at
-    # zero, and the wake path — the interesting half — goes unexercised.
+    # same replica floor of 0 and scales down to it too. Without this wait the load
+    # starts against a function that was never at zero, so the wake path — the
+    # interesting half of scale-to-zero — goes unexercised and the run proves less
+    # than it appears to.
     parks_at_zero = replica_floor == 0
     park_at_zero = CommandTask(
         title="Wait for the autoscaler to park the function at zero",

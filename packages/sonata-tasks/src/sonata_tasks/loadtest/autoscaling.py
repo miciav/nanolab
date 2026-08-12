@@ -73,31 +73,39 @@ class ReplicaSample:
     ready: int
 
 
-def rises_from_zero(samples: Sequence[ReplicaSample]) -> int:
-    """How many times the deployment came up from zero during the load.
+def releases_under_load(samples: Sequence[ReplicaSample]) -> int:
+    """How many times the autoscaler let go of the function while load was flowing.
 
-    A healthy scale-to-zero run rises exactly once: parked at zero, up when the
-    load arrives, down again after it. Rising twice means the autoscaler let go
-    of the function while traffic was still flowing and had to fetch it back —
-    which a peak replica count cannot express, because both runs peak the same.
+    A release is a drop to zero replicas that had to be undone: the count rises
+    only when the deployment comes back up from zero *after* having already been
+    up. The first rise of a scale-to-zero run is the load arriving, not a fault,
+    so it is not counted.
 
-    Zero rises does not mean the function never parked. Where the wake is
-    synchronous with the dispatch that triggers it, the deployment is already
-    off zero before any external sampler sees it; only the autoscaler's own
-    series records that start. Read this as "no oscillation observed", not as
-    "it never scaled from zero".
+    Zero therefore means the same thing however the run began — never released
+    under load. That is the whole point of counting releases rather than rises:
+    a rise count of 0 was ambiguous, because a control plane that wakes a parked
+    function as part of dispatching to it moves the deployment off zero before
+    any external sampler sees it, and a run that never parked at all looks
+    identical.
 
-    Counted on `desired` rather than `ready`: desired is what the autoscaler
-    decided, and a pod that is merely slow to become ready is not the autoscaler
-    changing its mind.
+    Counting rises also missed a real fault. A run that starts at one replica,
+    collapses to zero under load and recovers has exactly one rise, so a check
+    of "more than one rise" let it through — while it is precisely the failure
+    being looked for.
+
+    Counted on `desired`: that is what the autoscaler decided. A pod that is
+    merely slow to become ready is not the autoscaler letting go.
     """
-    rises = 0
+    releases = 0
+    seen_running = False
     previous = None
     for sample in samples:
-        if previous is not None and previous == 0 and sample.desired > 0:
-            rises += 1
+        if previous is not None and previous == 0 and sample.desired > 0 and seen_running:
+            releases += 1
+        if sample.desired > 0:
+            seen_running = True
         previous = sample.desired
-    return rises
+    return releases
 
 
 @dataclass(frozen=True)
@@ -110,7 +118,7 @@ class AutoscalingSummary:
     # mid-load produces the same peak as one that holds steady, so the defect was
     # invisible until the series itself was kept.
     replica_samples: tuple[ReplicaSample, ...] = ()
-    rises_from_zero: int = 0
+    releases_under_load: int = 0
 
 
 @dataclass(frozen=True)
@@ -255,14 +263,15 @@ class ReplicaWatcher:
         # opens on the state the load started from instead of on whatever the
         # scheduler allowed.
         #
-        # It does NOT make `rises_from_zero` observable on every path, and it was
-        # added believing it would. A control plane that wakes a parked function
-        # as part of dispatching to it has already moved it off zero before any
-        # sampler can run: a live INTERNAL run parked at zero, passed its park
-        # check, and still opened at 1 with one dispatch already counted. On that
-        # path the rise is only visible in the autoscaler's own decision series
-        # (`function_scaling_desired_replicas`), which starts at 0 because the
-        # decider records itself. A faster poll cannot close that gap.
+        # It does not make the parked state observable on every path. A control
+        # plane that wakes a parked function as part of dispatching to it has
+        # already moved it off zero before any sampler can run: a live INTERNAL
+        # run parked at zero, passed its park check, and still opened at 1 with
+        # one dispatch already counted. That start is only in the autoscaler's
+        # own decision series (`function_scaling_desired_replicas`), which begins
+        # at 0 because the decider records itself. `releases_under_load` is
+        # unaffected — it asks whether the function was dropped mid-load, which
+        # does not depend on having seen the start.
         self._sample()
         self._thread = threading.Thread(target=self._loop, name="replica-watcher", daemon=True)
         self._thread.start()
@@ -351,7 +360,7 @@ class VerifyAutoscalingReplicas:
             max_replicas_observed=max_replicas,
             final_desired_replicas=final_desired,
             replica_samples=samples,
-            rises_from_zero=rises_from_zero(samples),
+            releases_under_load=releases_under_load(samples),
         )
         return self._result
 

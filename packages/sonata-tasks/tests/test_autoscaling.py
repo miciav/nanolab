@@ -431,24 +431,24 @@ def test_watcher_keeps_the_whole_trajectory_not_just_its_peak() -> None:
     assert all(sample.elapsed_seconds >= 0 for sample in watcher.samples)
 
 
-def test_a_healthy_scale_to_zero_run_rises_from_zero_exactly_once() -> None:
-    from sonata_tasks.loadtest.autoscaling import ReplicaSample, rises_from_zero
+def test_a_healthy_scale_to_zero_run_releases_nothing() -> None:
+    from sonata_tasks.loadtest.autoscaling import ReplicaSample, releases_under_load
 
     healthy = [
         ReplicaSample(elapsed_seconds=float(index), desired=desired, ready=desired)
         for index, desired in enumerate([0, 0, 2, 2, 2, 2, 0])
     ]
 
-    assert rises_from_zero(healthy) == 1
+    assert releases_under_load(healthy) == 0
 
 
-def test_the_oscillation_observed_on_2026_08_12_counts_as_two_rises() -> None:
+def test_the_oscillation_observed_on_2026_08_12_counts_as_one_release() -> None:
     """The real shape of the HPA run that passed while dropping to zero mid-load.
 
     Its peak was 2 and it ended at 0 — indistinguishable from the healthy run
     above by the two numbers the summary used to carry.
     """
-    from sonata_tasks.loadtest.autoscaling import ReplicaSample, rises_from_zero
+    from sonata_tasks.loadtest.autoscaling import ReplicaSample, releases_under_load
 
     observed = [
         ReplicaSample(elapsed_seconds=float(index), desired=desired, ready=desired)
@@ -457,12 +457,43 @@ def test_the_oscillation_observed_on_2026_08_12_counts_as_two_rises() -> None:
 
     assert max(sample.desired for sample in observed) == 2
     assert observed[-1].desired == 0
-    assert rises_from_zero(observed) == 2
+    assert releases_under_load(observed) == 1
+
+
+def test_a_collapse_in_a_run_that_never_parked_is_still_a_release() -> None:
+    """The case counting rises missed.
+
+    This run starts at one replica, is dropped to zero under load, and recovers.
+    It has exactly one rise from zero, so a check of "more than one rise" let it
+    through — while it is precisely the fault being looked for.
+    """
+    from sonata_tasks.loadtest.autoscaling import ReplicaSample, releases_under_load
+
+    never_parked = [
+        ReplicaSample(elapsed_seconds=float(index), desired=desired, ready=desired)
+        for index, desired in enumerate([1, 1, 0, 0, 2, 2])
+    ]
+
+    assert releases_under_load(never_parked) == 1
+
+
+def test_a_run_never_seen_at_zero_releases_nothing() -> None:
+    """An autoscaler that wakes a function as it dispatches to it never shows the
+    parked state to an external sampler. That must read as "no release", not as a
+    verdict about how the run began."""
+    from sonata_tasks.loadtest.autoscaling import ReplicaSample, releases_under_load
+
+    internal = [
+        ReplicaSample(elapsed_seconds=float(index), desired=desired, ready=desired)
+        for index, desired in enumerate([1, 1, 2, 2, 5, 5, 5])
+    ]
+
+    assert releases_under_load(internal) == 0
 
 
 def test_a_slow_pod_is_not_mistaken_for_the_autoscaler_changing_its_mind() -> None:
     """`ready` dips while a replacement pod starts; `desired` is what was decided."""
-    from sonata_tasks.loadtest.autoscaling import ReplicaSample, rises_from_zero
+    from sonata_tasks.loadtest.autoscaling import ReplicaSample, releases_under_load
 
     samples = [
         ReplicaSample(elapsed_seconds=0.0, desired=0, ready=0),
@@ -472,7 +503,7 @@ def test_a_slow_pod_is_not_mistaken_for_the_autoscaler_changing_its_mind() -> No
         ReplicaSample(elapsed_seconds=4.0, desired=2, ready=2),
     ]
 
-    assert rises_from_zero(samples) == 1
+    assert releases_under_load(samples) == 0
 
 
 def test_the_first_sample_is_taken_before_start_returns() -> None:

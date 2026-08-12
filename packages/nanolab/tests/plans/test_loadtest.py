@@ -639,9 +639,9 @@ def test_autoscaling_loadtest_rejects_nonzero_initial_replicas_before_k6(
 def test_internal_autoscaling_waits_for_the_park_at_zero_it_configures(tmp_path: Path) -> None:
     """The INTERNAL strategy gets a replica floor of 0 and must wait for it.
 
-    Without the wait the load starts against a function that was never parked,
-    so the wake-from-zero path goes unexercised and `rises_from_zero` comes back
-    as 0 — indistinguishable from an autoscaler that never moved.
+    Without the wait the load starts against a function that was never parked, so
+    the wake-from-zero path goes unexercised and the run proves less than it looks
+    like it proves.
     """
     executor = RecordingExecutor()
     config = ScenarioConfig.model_validate(

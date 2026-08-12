@@ -374,17 +374,17 @@ def test_a_failed_load_test_still_deregisters_what_it_registered() -> None:
     assert any("helm uninstall" in command for command in commands)
 
 
-def _autoscaling(rises: int) -> AutoscalingSummary:
+def _autoscaling(releases: int) -> AutoscalingSummary:
     return AutoscalingSummary(
         deployment_name="fn-word-stats-java",
         max_replicas_observed=2,
         final_desired_replicas=0,
-        rises_from_zero=rises,
+        releases_under_load=releases,
     )
 
 
-def test_the_gate_passes_a_run_that_rose_from_zero_once() -> None:
-    outcome = LoadtestOutcome(k6=_k6(), autoscaling=_autoscaling(1))
+def test_the_gate_passes_a_run_that_never_released_the_function() -> None:
+    outcome = LoadtestOutcome(k6=_k6(), autoscaling=_autoscaling(0))
 
     assert EvaluateGateTask().run(_inputs(outcome)).value is outcome
 
@@ -395,7 +395,36 @@ def test_the_gate_fails_a_run_whose_autoscaler_let_go_mid_load() -> None:
     Peak replicas and final replicas are identical to the healthy run above, so
     this is the first signal that can tell the two apart.
     """
-    outcome = LoadtestOutcome(k6=_k6(passed=True), autoscaling=_autoscaling(2))
+    outcome = LoadtestOutcome(k6=_k6(passed=True), autoscaling=_autoscaling(1))
 
-    with pytest.raises(RuntimeError, match="came up from zero 2 times"):
+    with pytest.raises(RuntimeError, match="released fn-word-stats-java 1 time"):
+        EvaluateGateTask().run(_inputs(outcome))
+
+
+def test_the_gate_fails_a_collapse_in_a_run_that_never_parked() -> None:
+    """The trajectory the previous check let through.
+
+    Counting rises from zero, this run has exactly one — so a threshold of
+    "more than one" passed it, while the autoscaler had dropped the function to
+    zero under load and taken it back. Built from samples rather than a
+    hardcoded count so the counter and the threshold are tested together.
+    """
+    from sonata_tasks.loadtest.autoscaling import ReplicaSample, releases_under_load
+
+    samples = tuple(
+        ReplicaSample(elapsed_seconds=float(index), desired=desired, ready=desired)
+        for index, desired in enumerate([1, 1, 0, 0, 2, 2])
+    )
+    outcome = LoadtestOutcome(
+        k6=_k6(passed=True),
+        autoscaling=AutoscalingSummary(
+            deployment_name="fn-word-stats-java",
+            max_replicas_observed=2,
+            final_desired_replicas=2,
+            replica_samples=samples,
+            releases_under_load=releases_under_load(samples),
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="released fn-word-stats-java 1 time"):
         EvaluateGateTask().run(_inputs(outcome))
