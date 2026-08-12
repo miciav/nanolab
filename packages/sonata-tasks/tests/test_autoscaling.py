@@ -402,3 +402,74 @@ def test_fetch_autoscaling_summary_creates_parent_and_fetches(tmp_path) -> None:
 
     assert local.parent.is_dir()
     assert fetched == [("/home/ubuntu/two-vm-loadtest/results/autoscaling-k6-summary.json", local)]
+
+
+
+def test_watcher_keeps_the_whole_trajectory_not_just_its_peak() -> None:
+    """The peak is derivable from the series; the series is not derivable from the peak."""
+    import time as _time
+
+    from sonata_tasks.loadtest.autoscaling import ReplicaProbe, ReplicaWatcher
+
+    runner = _Runner(["0", "0", "2", "2", "0", "0", "2", "2"])
+    probe = ReplicaProbe(
+        runner=runner,
+        namespace="nanofaas",
+        deployment_name="fn-word-stats-java",
+        remote_dir="/home/ubuntu/mcFaas",
+    )
+    watcher = ReplicaWatcher(probe, poll_interval_seconds=0.01)
+    watcher.start()
+    deadline = _time.time() + 5
+    while len(watcher.samples) < 4 and _time.time() < deadline:
+        _time.sleep(0.01)
+    watcher.stop()
+
+    observed = [sample.desired for sample in watcher.samples]
+    assert observed[:4] == [0, 2, 0, 2]
+    assert watcher.max_observed == 2
+    assert all(sample.elapsed_seconds >= 0 for sample in watcher.samples)
+
+
+def test_a_healthy_scale_to_zero_run_rises_from_zero_exactly_once() -> None:
+    from sonata_tasks.loadtest.autoscaling import ReplicaSample, rises_from_zero
+
+    healthy = [
+        ReplicaSample(elapsed_seconds=float(index), desired=desired, ready=desired)
+        for index, desired in enumerate([0, 0, 2, 2, 2, 2, 0])
+    ]
+
+    assert rises_from_zero(healthy) == 1
+
+
+def test_the_oscillation_observed_on_2026_08_12_counts_as_two_rises() -> None:
+    """The real shape of the HPA run that passed while dropping to zero mid-load.
+
+    Its peak was 2 and it ended at 0 — indistinguishable from the healthy run
+    above by the two numbers the summary used to carry.
+    """
+    from sonata_tasks.loadtest.autoscaling import ReplicaSample, rises_from_zero
+
+    observed = [
+        ReplicaSample(elapsed_seconds=float(index), desired=desired, ready=desired)
+        for index, desired in enumerate([0, 2, 2, 1, 0, 2, 2, 0])
+    ]
+
+    assert max(sample.desired for sample in observed) == 2
+    assert observed[-1].desired == 0
+    assert rises_from_zero(observed) == 2
+
+
+def test_a_slow_pod_is_not_mistaken_for_the_autoscaler_changing_its_mind() -> None:
+    """`ready` dips while a replacement pod starts; `desired` is what was decided."""
+    from sonata_tasks.loadtest.autoscaling import ReplicaSample, rises_from_zero
+
+    samples = [
+        ReplicaSample(elapsed_seconds=0.0, desired=0, ready=0),
+        ReplicaSample(elapsed_seconds=1.0, desired=2, ready=0),
+        ReplicaSample(elapsed_seconds=2.0, desired=2, ready=1),
+        ReplicaSample(elapsed_seconds=3.0, desired=2, ready=0),
+        ReplicaSample(elapsed_seconds=4.0, desired=2, ready=2),
+    ]
+
+    assert rises_from_zero(samples) == 1

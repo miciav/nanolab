@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 import shlex
@@ -63,11 +64,47 @@ class ReplicaStatusProbe(Protocol):
     def desired_replicas(self) -> int: ...
 
 
+@dataclass(frozen=True, slots=True)
+class ReplicaSample:
+    """One reading of a deployment's replica counts while load was running."""
+
+    elapsed_seconds: float
+    desired: int
+    ready: int
+
+
+def rises_from_zero(samples: Sequence[ReplicaSample]) -> int:
+    """How many times the deployment came up from zero during the load.
+
+    A healthy scale-to-zero run rises exactly once: parked at zero, up when the
+    load arrives, down again after it. Rising twice means the autoscaler let go
+    of the function while traffic was still flowing and had to fetch it back —
+    which a peak replica count cannot express, because both runs peak the same.
+
+    Counted on `desired` rather than `ready`: desired is what the autoscaler
+    decided, and a pod that is merely slow to become ready is not the autoscaler
+    changing its mind.
+    """
+    rises = 0
+    previous = None
+    for sample in samples:
+        if previous is not None and previous == 0 and sample.desired > 0:
+            rises += 1
+        previous = sample.desired
+    return rises
+
+
 @dataclass(frozen=True)
 class AutoscalingSummary:
     deployment_name: str
     max_replicas_observed: int
     final_desired_replicas: int
+    # The trajectory, not just its peak. `max()` over the samples answers "did it
+    # ever scale up" and nothing else; an autoscaler that oscillates to zero
+    # mid-load produces the same peak as one that holds steady, so the defect was
+    # invisible until the series itself was kept.
+    replica_samples: tuple[ReplicaSample, ...] = ()
+    rises_from_zero: int = 0
 
 
 @dataclass(frozen=True)
@@ -182,17 +219,32 @@ class ReplicaWatcher:
         self._poll_interval = poll_interval_seconds
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
-        self._max_observed = 0
+        self._samples: list[ReplicaSample] = []
+        self._started_at: float | None = None
         self.errors: list[str] = []
 
     @property
+    def samples(self) -> tuple[ReplicaSample, ...]:
+        """Every reading taken, in order.
+
+        The list is what makes the shape of a run knowable after the fact. It
+        is appended from the sampling thread and read from the caller's, which
+        CPython's GIL makes safe for `list.append` plus `tuple()`.
+        """
+        return tuple(self._samples)
+
+    @property
     def max_observed(self) -> int:
-        return self._max_observed
+        return max(
+            (max(sample.desired, sample.ready) for sample in self._samples),
+            default=0,
+        )
 
     def start(self) -> None:
         if self._thread is not None:
             raise RuntimeError("ReplicaWatcher already started")
         self._stop.clear()
+        self._started_at = time.monotonic()
         self._thread = threading.Thread(target=self._loop, name="replica-watcher", daemon=True)
         self._thread.start()
 
@@ -208,7 +260,15 @@ class ReplicaWatcher:
             try:
                 ready = self._probe.ready_replicas()
                 desired = self._probe.desired_replicas()
-                self._max_observed = max(self._max_observed, ready, desired)
+                self._samples.append(
+                    ReplicaSample(
+                        elapsed_seconds=round(
+                            time.monotonic() - (self._started_at or time.monotonic()), 3
+                        ),
+                        desired=desired,
+                        ready=ready,
+                    )
+                )
             except RuntimeError as exc:
                 # A transient probe failure must not kill the watcher mid-load;
                 # errors are kept for diagnostics.
@@ -258,10 +318,16 @@ class VerifyAutoscalingReplicas:
         return self._result
 
     def _complete(self, max_replicas: int, final_desired: int) -> AutoscalingSummary:
+        # getattr, like `errors` above: a sampler that reports only a peak is
+        # still a valid Watcher, and requiring the series of every double would
+        # buy nothing the summary cannot express as "no samples".
+        samples = tuple(getattr(self.watcher, "samples", ()) or ())
         self._result = AutoscalingSummary(
             deployment_name=self.deployment_name,
             max_replicas_observed=max_replicas,
             final_desired_replicas=final_desired,
+            replica_samples=samples,
+            rises_from_zero=rises_from_zero(samples),
         )
         return self._result
 

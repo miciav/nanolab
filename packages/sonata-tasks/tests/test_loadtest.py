@@ -372,3 +372,30 @@ def test_a_failed_load_test_still_deregisters_what_it_registered() -> None:
     commands = [" ".join(spec.argv) for spec in executor.seen]
     assert any("-X DELETE" in command for command in commands)
     assert any("helm uninstall" in command for command in commands)
+
+
+def _autoscaling(rises: int) -> AutoscalingSummary:
+    return AutoscalingSummary(
+        deployment_name="fn-word-stats-java",
+        max_replicas_observed=2,
+        final_desired_replicas=0,
+        rises_from_zero=rises,
+    )
+
+
+def test_the_gate_passes_a_run_that_rose_from_zero_once() -> None:
+    outcome = LoadtestOutcome(k6=_k6(), autoscaling=_autoscaling(1))
+
+    assert EvaluateGateTask().run(_inputs(outcome)).value is outcome
+
+
+def test_the_gate_fails_a_run_whose_autoscaler_let_go_mid_load() -> None:
+    """k6 passes in both cases: retries hide the requests dropped at scale-down.
+
+    Peak replicas and final replicas are identical to the healthy run above, so
+    this is the first signal that can tell the two apart.
+    """
+    outcome = LoadtestOutcome(k6=_k6(passed=True), autoscaling=_autoscaling(2))
+
+    with pytest.raises(RuntimeError, match="came up from zero 2 times"):
+        EvaluateGateTask().run(_inputs(outcome))
