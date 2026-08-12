@@ -205,15 +205,15 @@ class EvaluateGateTask(Task[LoadtestOutcome]):
     def run(self, inputs: TaskInputs) -> TaskOutcome[LoadtestOutcome]:
         outcome = load_outcome(inputs, self.title)
         autoscaling = outcome.autoscaling
-        if autoscaling is not None and autoscaling.rises_from_zero > 1:
+        if autoscaling is not None and autoscaling.releases_under_load > 0:
             # Client-side thresholds cannot see this: the platform retries the
             # requests that were in flight when the replicas went away, so k6
             # reports success while the function was dropped and re-fetched
             # mid-load.
             raise RuntimeError(
-                f"{autoscaling.deployment_name} came up from zero "
-                f"{autoscaling.rises_from_zero} times during the load; the "
-                "autoscaler released it while traffic was still flowing. See "
+                f"the autoscaler released {autoscaling.deployment_name} "
+                f"{autoscaling.releases_under_load} time(s) while traffic was "
+                "still flowing, dropping it to zero and fetching it back. See "
                 "replica_samples in summary.json"
             )
         if not outcome.k6.passed:

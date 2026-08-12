@@ -442,7 +442,7 @@ def test_write_loadtest_summary_combines_k6_prometheus_and_autoscaling(
         # Additive: a reader of the previous shape still finds every key it knew,
         # which is why schema_version stays at 1.
         "replica_samples": [],
-        "rises_from_zero": 0,
+        "releases_under_load": 0,
     }
 
 
