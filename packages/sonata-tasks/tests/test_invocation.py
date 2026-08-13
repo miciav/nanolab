@@ -371,7 +371,7 @@ def test_http_contract_rejects_mismatched_api_envelope_fields(
         task.run(TaskInputs.empty())
 
 
-def test_http_contract_rejects_function_response_headers_on_the_outer_http_response() -> None:
+def test_http_contract_requires_encoding_marker_but_rejects_function_content_type_on_outer_response() -> None:
     task, _ = _contract(
         "HTTP/1.1 200 OK\r\n"
         "Content-Type: image/png\r\n"
@@ -379,12 +379,23 @@ def test_http_contract_rejects_function_response_headers_on_the_outer_http_respo
         '{"status":"success","output":"ok","statusCode":200}',
         expectation=HttpFunctionExpectation(
             status=200,
-            forbidden_header_values=(
-                ("Content-Type", "image/png"),
-                ("X-NanoFaaS-Encoding", "base64"),
-            ),
+            required_headers=(("X-NanoFaaS-Encoding", "base64"),),
+            forbidden_header_values=(("Content-Type", "image/png"),),
         ),
     )
 
     with pytest.raises(RuntimeError, match="forbidden header Content-Type"):
+        task.run(TaskInputs.empty())
+
+
+def test_http_contract_rejects_missing_required_encoding_marker() -> None:
+    task, _ = _contract(
+        "HTTP/1.1 200 OK\r\n\r\n"
+        '{"status":"success","output":"ok","statusCode":200}',
+        expectation=HttpFunctionExpectation(
+            status=200, required_headers=(("X-NanoFaaS-Encoding", "base64"),)
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="missing required header X-NanoFaaS-Encoding"):
         task.run(TaskInputs.empty())

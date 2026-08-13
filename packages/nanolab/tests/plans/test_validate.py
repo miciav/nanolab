@@ -43,6 +43,11 @@ HANDLER_ENVELOPE_FUNCTIONS = (
     "word-stats-javascript",
     "word-stats-python",
     "handler-envelope-java",
+    "handler-envelope-exec",
+    "handler-envelope-go",
+    "handler-envelope-javascript",
+    "handler-envelope-python",
+    "binary-envelope-java",
 )
 EXCLUDED_HANDLER_ENVELOPE_FUNCTIONS = {"figlet-exec", "figlet-java", "mlimage-python"}
 
@@ -168,6 +173,8 @@ def test_handler_envelope_validation_adds_contract_tasks_for_each_selected_funct
     assert "Verify qr-code-java HTTP envelope" in titles
     assert "Verify qr-code-python HTTP envelope" in titles
     assert "Verify handler-envelope HTTP envelope" in titles
+    assert "Verify handler-envelope-python HTTP envelope" in titles
+    assert "Verify binary-envelope-java HTTP envelope" in titles
     assert "Verify word-stats-java HTTP envelope" in titles
 
 
@@ -255,6 +262,12 @@ def test_handler_envelope_contracts_send_real_header_and_binary_sentinels() -> N
     assert transform[-2] == '{"input":{}}'
     plain = _argv(plan, "Verify word-stats-java HTTP envelope")
     assert plain[-2] == sonata_function(resolve_function(config, "word-stats-java")).payload
+    for key in ("handler-envelope-exec", "handler-envelope-go", "handler-envelope-java", "handler-envelope-javascript", "handler-envelope-python"):
+        probe = _argv(plan, f"Verify {resolve_function(config, key).name} HTTP envelope")
+        assert probe[-2] == '{"input":{"message":"body-sentinel"},"headers":{"x-e2e-token":"forged"}}'
+        assert "X-E2E-Token: header-sentinel" in probe
+    binary = _argv(plan, "Verify binary-envelope-java HTTP envelope")
+    assert binary[-2] == '{"input":{}}'
 
 
 def test_validate_plan_builds_java_lite_with_its_native_dockerfile() -> None:

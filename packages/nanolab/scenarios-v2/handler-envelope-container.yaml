@@ -29,3 +29,8 @@ functions:
   - word-stats-javascript
   - word-stats-python
   - handler-envelope-java
+  - handler-envelope-exec
+  - handler-envelope-go
+  - handler-envelope-javascript
+  - handler-envelope-python
+  - binary-envelope-java

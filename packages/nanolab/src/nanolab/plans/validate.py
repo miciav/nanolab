@@ -34,7 +34,18 @@ _JSON_TRANSFORMS = (
     "json-transform-javascript",
     "json-transform-python",
 )
-_HANDLER_ENVELOPE_TARGETS = (*_QR_CODES, *_ROMAN_NUMERALS, *_JSON_TRANSFORMS, "handler-envelope-java")
+_HEADER_ENVELOPE_PROBES = (
+    "handler-envelope-exec",
+    "handler-envelope-go",
+    "handler-envelope-java",
+    "handler-envelope-javascript",
+    "handler-envelope-python",
+)
+_BINARY_ENVELOPE_PROBE = "binary-envelope-java"
+_HANDLER_ENVELOPE_TARGETS = (
+    *_QR_CODES, *_ROMAN_NUMERALS, *_JSON_TRANSFORMS, *_HEADER_ENVELOPE_PROBES,
+    _BINARY_ENVELOPE_PROBE, "word-stats-java",
+)
 
 
 def _handler_envelope_checks(functions: dict[str, SonataFunction]) -> tuple[EnvelopeCheck, ...]:
@@ -55,18 +66,14 @@ def _handler_envelope_checks(functions: dict[str, SonataFunction]) -> tuple[Enve
                     status=200,
                     api_status="success",
                     status_code=200,
-                    required_headers=marker,
-                    forbidden_header_values=(
-                        ("Content-Type", "image/png"),
-                        ("X-NanoFaaS-Encoding", "base64"),
-                    ),
+                    required_headers=(*marker, ("X-NanoFaaS-Encoding", "base64")),
+                    forbidden_header_values=(("Content-Type", "image/png"),),
                     api_headers={"Content-Type": "image/png"},
                     encoding="base64",
                     decoded_prefix=_PNG_SIGNATURE,
                 ),
             )
             for key in _QR_CODES
-            if key in functions
         ),
         *(
             EnvelopeCheck(
@@ -81,7 +88,6 @@ def _handler_envelope_checks(functions: dict[str, SonataFunction]) -> tuple[Enve
                 ),
             )
             for key in _ROMAN_NUMERALS
-            if key in functions
         ),
         *(
             EnvelopeCheck(
@@ -96,19 +102,29 @@ def _handler_envelope_checks(functions: dict[str, SonataFunction]) -> tuple[Enve
                 ),
             )
             for key in _JSON_TRANSFORMS
-            if key in functions
         ),
         *(
             EnvelopeCheck(
-                name("handler-envelope-java"),
+                name(key),
                 '{"input":{"message":"body-sentinel"},"headers":{"x-e2e-token":"forged"}}',
                 HttpFunctionExpectation(
                     status=200,
                     api_status="success",
                     output={"body": "body-sentinel", "header": "header-sentinel"},
                     status_code=200,
-                ),
-                headers=("X-E2E-Token: header-sentinel",),
+            ),
+            headers=("X-E2E-Token: header-sentinel",),
+            ) for key in _HEADER_ENVELOPE_PROBES
+        ),
+        EnvelopeCheck(
+            name(_BINARY_ENVELOPE_PROBE),
+            '{"input":{}}',
+            HttpFunctionExpectation(
+                status=200, api_status="success", status_code=200,
+                required_headers=(*marker, ("X-NanoFaaS-Encoding", "base64")),
+                forbidden_header_values=(("Content-Type", "application/octet-stream"),),
+                api_headers={"Content-Type": "application/octet-stream"},
+                encoding="base64", decoded_bytes=b"\x00\x01\x02",
             ),
         ),
         # Java Lite is deliberately exercised by its ordinary invoke only: its
