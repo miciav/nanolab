@@ -39,6 +39,17 @@ def test_nanolab_readme_describes_the_adapted_tui_surface() -> None:
         assert removed_menu not in text
 
 
+def test_nanolab_readme_documents_local_handler_envelope_validation() -> None:
+    text = (NANOLAB_ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert (
+        f"{COMMAND_PREFIX} run "
+        "packages/nanolab/scenarios-v2/handler-envelope-container.yaml"
+    ) in text
+    assert "public handler envelope" in text
+    assert "functions, Compose project, and registry" in text
+
+
 def test_nanolab_readme_explains_provider_setup_entries() -> None:
     text = (NANOLAB_ROOT / "README.md").read_text(encoding="utf-8")
     marker = "When only the provider templates are present"

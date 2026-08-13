@@ -50,6 +50,17 @@ NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab plan packages/n
 NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab run packages/nanolab/scenarios-v2/deployment-lifecycle-container.yaml
 ```
 
+To validate the public handler envelope locally across the bundled SDK
+functions, including request headers, body, function status, response headers,
+and binary payloads:
+
+```bash
+NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab run packages/nanolab/scenarios-v2/handler-envelope-container.yaml
+```
+
+Sonata releases the functions, Compose project, and registry after the scenario,
+including when a verification fails.
+
 The interactive UI uses exactly the same plan/run implementation:
 
 ```bash
