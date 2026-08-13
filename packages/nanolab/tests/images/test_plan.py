@@ -105,8 +105,8 @@ def test_candidate_tags_include_architecture_and_non_default_flavor() -> None:
 def test_default_candidate_registry_is_stack_local_never_ghcr() -> None:
     plan = build_image_plan(NANOFAAS_ROOT, "v0.18.0", selectors=("watchdog",))
 
-    assert plan.registry == "localhost:5000/nanofaas"
-    assert all(cell.image.startswith("localhost:5000/nanofaas/") for cell in plan.cells)
+    assert plan.registry == "127.0.0.1:5000/nanofaas"
+    assert all(cell.image.startswith("127.0.0.1:5000/nanofaas/") for cell in plan.cells)
     assert all("ghcr.io" not in cell.image for cell in plan.cells)
 
 

@@ -26,7 +26,7 @@ def test_without_a_fingerprint_the_tag_stays_fixed() -> None:
 def test_a_fingerprint_names_the_image_after_the_source() -> None:
     reference = _request(source_fingerprint="abc123").control_plane_image_reference()
 
-    assert reference.startswith("localhost:5000/nanofaas/control-plane:e2e-")
+    assert reference.startswith("127.0.0.1:5000/nanofaas/control-plane:e2e-")
     assert not reference.endswith(":e2e")
 
 

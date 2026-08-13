@@ -197,8 +197,8 @@ def test_k8s_adds_the_preflight_the_images_and_the_helm_release() -> None:
     assert _ids(workflow) == [
         "001.check-kubectl-is-usable",
         "002.build-control-plane",
-        "003.build-image-localhost-5000-nanofaas-control-plane",
-        "004.push-image-localhost-5000-nanofaas-control-plane",
+        "003.build-image-127-0-0-1-5000-nanofaas-control-plane",
+        "004.push-image-127-0-0-1-5000-nanofaas-control-plane",
         "005.build-image-word-stats-java",
         "006.push-image-localhost-5000-nanofaas-java-word-stats-e2e",
         "007.acquire-helm-release-nanofaas",

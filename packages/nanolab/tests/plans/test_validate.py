@@ -287,7 +287,7 @@ def test_container_validation_builds_and_deploys_the_control_plane_with_compose(
         "002.acquire-docker-compose-project-nanofaas-validate",
         "003.build-application-artifact-word-stats-java",
         "004.build-image-word-stats-java",
-        "005.push-image-localhost-5000-nanofaas-java-word-stats-e2e",
+        "005.push-image-127-0-0-1-5000-nanofaas-java-word-stats-e2e",
         "006.acquire-word-stats-java",
         "007.invoke-word-stats-java",
         "008.inspect-resources-of-nanofaas-word-stats-java-r1",

@@ -71,7 +71,7 @@ def test_dynamic_catalog_preserves_existing_metadata() -> None:
     function = resolve_function_definition("word-stats-java")
 
     assert function.description == "Spring Boot Java word statistics demo."
-    assert function.default_image == "localhost:5000/nanofaas/java-word-stats:e2e"
+    assert function.default_image == "127.0.0.1:5000/nanofaas/java-word-stats:e2e"
     assert function.default_payload_file == "word-stats-sample.json"
 
 
@@ -79,7 +79,7 @@ def test_dynamic_catalog_exposes_manifest_backed_roman_numeral_details() -> None
     function = resolve_function_definition("roman-numeral-java")
 
     assert function.description == "Java roman numeral conversion demo."
-    assert function.default_image == "localhost:5000/nanofaas/java-roman-numeral:e2e"
+    assert function.default_image == "127.0.0.1:5000/nanofaas/java-roman-numeral:e2e"
     assert function.default_payload_file == "roman-numeral-sample.json"
 
 
@@ -181,7 +181,7 @@ def test_discovers_function_with_convention_fallback(tmp_path: Path) -> None:
     function = functions[0]
     assert function.family == "word-stats"
     assert function.runtime == "exec"
-    assert function.default_image == "localhost:5000/nanofaas/bash-word-stats:e2e"
+    assert function.default_image == "127.0.0.1:5000/nanofaas/bash-word-stats:e2e"
     assert function.default_payload_file == "word-stats-sample.json"
 
 
@@ -221,7 +221,7 @@ def test_discovers_java_lite_function_with_convention_fallback(tmp_path: Path) -
     function = functions[0]
     assert function.family == "word-stats"
     assert function.runtime == "java-lite"
-    assert function.default_image == "localhost:5000/nanofaas/java-lite-word-stats:e2e"
+    assert function.default_image == "127.0.0.1:5000/nanofaas/java-lite-word-stats:e2e"
     assert function.default_payload_file == "word-stats-sample.json"
 
 

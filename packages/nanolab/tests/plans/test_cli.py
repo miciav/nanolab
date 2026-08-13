@@ -236,7 +236,7 @@ def test_container_backend_wraps_the_workflow_in_a_local_control_plane() -> None
         "003.build-application-artifact-word-stats-java",
         "004.build-image-word-stats-java",
         "005.acquire-local-registry",
-        "006.push-image-localhost-5000-nanofaas-java-word-stats-e2e",
+        "006.push-image-127-0-0-1-5000-nanofaas-java-word-stats-e2e",
         "007.acquire-local-control-plane",
         "008.acquire-word-stats-java",
         "009.list-functions",

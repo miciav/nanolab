@@ -12,7 +12,7 @@ def test_the_lab_deployment_constants_have_their_documented_values() -> None:
     """Pinned deliberately: these are the values the scenarios, the Helm values
     and the CI assertions all assume, and a silent change would move them apart."""
     assert DEFAULT_NAMESPACE == "nanofaas-e2e"
-    assert LOCAL_REGISTRY == "localhost:5000"
+    assert LOCAL_REGISTRY == "127.0.0.1:5000"
     assert CONTROL_PLANE_NODE_PORT == 30080
     assert PROMETHEUS_NODE_PORT == 30090
     assert LOCAL_CONTROL_PLANE_API_PORT == 18080

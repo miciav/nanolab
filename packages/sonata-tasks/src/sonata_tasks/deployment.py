@@ -8,7 +8,7 @@ drift from the thing they described.
 from __future__ import annotations
 
 DEFAULT_NAMESPACE = "nanofaas-e2e"
-LOCAL_REGISTRY = "localhost:5000"
+LOCAL_REGISTRY = "127.0.0.1:5000"
 
 # Literal, not f"{DEFAULT_NAMESPACE}-registry": live environments already have
 # a container running under this name, and deriving it from the namespace
