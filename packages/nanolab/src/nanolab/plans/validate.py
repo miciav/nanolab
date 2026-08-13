@@ -66,7 +66,11 @@ def _handler_envelope_checks(functions: dict[str, SonataFunction]) -> tuple[Enve
                     status=200,
                     api_status="success",
                     status_code=200,
-                    required_headers=(*marker, ("X-NanoFaaS-Encoding", "base64")),
+                    required_headers=(
+                        *marker,
+                        ("Content-Type", "application/json"),
+                        ("X-NanoFaaS-Encoding", "base64"),
+                    ),
                     forbidden_header_values=(("Content-Type", "image/png"),),
                     api_headers={"Content-Type": "image/png"},
                     encoding="base64",
@@ -121,7 +125,11 @@ def _handler_envelope_checks(functions: dict[str, SonataFunction]) -> tuple[Enve
             '{"input":{}}',
             HttpFunctionExpectation(
                 status=200, api_status="success", status_code=200,
-                required_headers=(*marker, ("X-NanoFaaS-Encoding", "base64")),
+                required_headers=(
+                    *marker,
+                    ("Content-Type", "application/json"),
+                    ("X-NanoFaaS-Encoding", "base64"),
+                ),
                 forbidden_header_values=(("Content-Type", "application/octet-stream"),),
                 api_headers={"Content-Type": "application/octet-stream"},
                 encoding="base64", decoded_bytes=b"\x00\x01\x02",

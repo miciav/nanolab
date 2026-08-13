@@ -399,3 +399,16 @@ def test_http_contract_rejects_missing_required_encoding_marker() -> None:
 
     with pytest.raises(RuntimeError, match="missing required header X-NanoFaaS-Encoding"):
         task.run(TaskInputs.empty())
+
+
+def test_http_contract_requires_the_exact_outer_json_content_type() -> None:
+    task, _ = _contract(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=utf-8\r\n\r\n"
+        '{"status":"success","output":"ok","statusCode":200}',
+        expectation=HttpFunctionExpectation(
+            status=200, required_headers=(("Content-Type", "application/json"),)
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="required header Content-Type was 'application/json; charset=utf-8'"):
+        task.run(TaskInputs.empty())
