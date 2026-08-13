@@ -5,7 +5,8 @@ from sonata_engine import Workflow
 from sonata_tasks.compose import DockerComposeProject, docker_compose_resource
 from sonata_tasks.deployment import LOCAL_REGISTRY
 from sonata_tasks.registry import docker_registry_resource
-from sonata_tasks.validate import ValidateFunction as SonataFunction
+from sonata_tasks.http_function import HttpFunctionExpectation
+from sonata_tasks.validate import EnvelopeCheck, ValidateFunction as SonataFunction
 from sonata_tasks.validate import ValidateWorkflowRequest, build_validate_workflow
 from sonata_tasks.components.helm import control_plane_helm_values, helm_set_args
 from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
@@ -15,6 +16,99 @@ from nanolab.config.environment import EnvironmentConfig
 from nanolab.plans.functions import resolve_function, sonata_function
 from nanolab.workspace.paths import discover_tool_root
 from nanolab.workspace.provenance import source_fingerprint
+
+
+_PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+_QR_CODES = ("qr-code-exec", "qr-code-go", "qr-code-java", "qr-code-javascript", "qr-code-python")
+_ROMAN_NUMERALS = (
+    "roman-numeral-exec",
+    "roman-numeral-go",
+    "roman-numeral-java",
+    "roman-numeral-javascript",
+    "roman-numeral-python",
+)
+_JSON_TRANSFORMS = (
+    "json-transform-exec",
+    "json-transform-go",
+    "json-transform-java",
+    "json-transform-javascript",
+    "json-transform-python",
+)
+
+
+def _handler_envelope_checks(functions: dict[str, SonataFunction]) -> tuple[EnvelopeCheck, ...]:
+    def name(key: str) -> str:
+        return functions[key].name
+
+    marker = (("X-NanoFaaS-Function-Status", "true"),)
+    return (
+        *(
+            EnvelopeCheck(
+                name(key),
+                '{"input":{"text":"https://example.org/invite/abc","size":256}}',
+                HttpFunctionExpectation(
+                    status=200,
+                    api_status="success",
+                    status_code=200,
+                    required_headers=(
+                        *marker,
+                        ("Content-Type", "image/png"),
+                        ("X-NanoFaaS-Encoding", "base64"),
+                    ),
+                    decoded_prefix=_PNG_SIGNATURE,
+                ),
+            )
+            for key in _QR_CODES
+            if key in functions
+        ),
+        *(
+            EnvelopeCheck(
+                name(key),
+                '{"input":{}}',
+                HttpFunctionExpectation(
+                    status=422,
+                    api_status="success",
+                    output={"error": "missing required field: number"},
+                    status_code=422,
+                    required_headers=marker,
+                ),
+            )
+            for key in _ROMAN_NUMERALS
+            if key in functions
+        ),
+        *(
+            EnvelopeCheck(
+                name(key),
+                '{"input":{}}',
+                HttpFunctionExpectation(
+                    status=400,
+                    api_status="success",
+                    output={"error": "Fields 'data' (array) and 'groupBy' (string) are required"},
+                    status_code=400,
+                    required_headers=marker,
+                ),
+            )
+            for key in _JSON_TRANSFORMS
+            if key in functions
+        ),
+        *(
+            ()
+            if "handler-envelope-java" not in functions
+            else (
+                EnvelopeCheck(
+                    name("handler-envelope-java"),
+                    '{"input":{"message":"body-sentinel","headers":{"x-e2e-token":"forged"}}}',
+                    HttpFunctionExpectation(
+                        status=200,
+                        api_status="success",
+                        output={"body": "body-sentinel", "header": "header-sentinel"},
+                        status_code=200,
+                    ),
+                    headers=("X-E2E-Token: header-sentinel",),
+                ),
+            )
+        ),
+    )
 
 
 def build_validate_plan(
@@ -38,13 +132,15 @@ def build_validate_plan(
         raise ValueError("validate plan requires a validate scenario with a backend")
     root = repo_root or Path.cwd()
     kubernetes = config.backend == "k8s"
+    functions = {
+        key: sonata_function(resolve_function(config, key, tool_root=tool_root))
+        for key in config.functions
+    }
     request = ValidateWorkflowRequest(
         backend=config.backend,
         build=config.build,
-        functions=tuple(
-            sonata_function(resolve_function(config, key, tool_root=tool_root))
-            for key in config.functions
-        ),
+        functions=tuple(functions.values()),
+        envelope_checks=_handler_envelope_checks(functions) if config.handler_envelope else (),
         additional_modules=("async-queue", "sync-queue") if kubernetes else (),
         source_fingerprint=source_fingerprint(root),
         build_control_plane=kubernetes,

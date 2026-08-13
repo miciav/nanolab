@@ -2,8 +2,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
+import yaml
 
 from nanolab.config.scenario import ScenarioConfig
+from nanolab.functions.catalog import list_functions
 from nanolab.plans.functions import resolve_function, sonata_function
 from nanolab.plans.validate import build_validate_plan
 from sonata_engine import Workflow
@@ -15,6 +17,34 @@ from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 DEPLOYMENT_PAYLOAD = (
     '{"spec":{"template":{"spec":{"containers":[{"resources":{}}]}}}}'
 )
+NANOLAB_ROOT = Path(__file__).resolve().parents[2]
+HANDLER_ENVELOPE_FUNCTIONS = (
+    "json-transform-exec",
+    "json-transform-go",
+    "json-transform-java",
+    "json-transform-java-lite",
+    "json-transform-javascript",
+    "json-transform-python",
+    "qr-code-exec",
+    "qr-code-go",
+    "qr-code-java",
+    "qr-code-javascript",
+    "qr-code-python",
+    "roman-numeral-exec",
+    "roman-numeral-go",
+    "roman-numeral-java",
+    "roman-numeral-java-lite",
+    "roman-numeral-javascript",
+    "roman-numeral-python",
+    "word-stats-exec",
+    "word-stats-go",
+    "word-stats-java",
+    "word-stats-java-lite",
+    "word-stats-javascript",
+    "word-stats-python",
+    "handler-envelope-java",
+)
+EXCLUDED_HANDLER_ENVELOPE_FUNCTIONS = {"figlet-exec", "figlet-java", "mlimage-python"}
 
 
 @dataclass
@@ -119,6 +149,100 @@ def test_validate_plan_keeps_container_validation_local() -> None:
     )
 
     assert stack.seen == []
+
+
+def test_handler_envelope_validation_adds_contract_tasks_for_each_selected_function() -> None:
+    plan = build_validate_plan(
+        ScenarioConfig.model_validate(
+            {
+                "workflow": "validate",
+                "backend": "container",
+                "functions": ["qr-code-java", "qr-code-python", "handler-envelope-java"],
+                "handler_envelope": True,
+            }
+        ),
+        RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor()),
+    )
+
+    titles = [task.task.title for task in plan.compile().tasks]
+    assert "Verify qr-code-java HTTP envelope" in titles
+    assert "Verify qr-code-python HTTP envelope" in titles
+    assert "Verify handler-envelope HTTP envelope" in titles
+    assert len([title for title in titles if title.endswith("HTTP envelope")]) == 3
+
+
+def test_handler_envelope_container_scenario_runs_every_deterministic_function() -> None:
+    config = ScenarioConfig.model_validate(
+        yaml.safe_load((NANOLAB_ROOT / "scenarios-v2/handler-envelope-container.yaml").read_text())
+    )
+    plan = build_validate_plan(
+        config,
+        RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor()),
+    )
+
+    assert config.backend == "container"
+    assert config.functions == list(HANDLER_ENVELOPE_FUNCTIONS)
+    titles = [task.task.title for task in plan.compile().tasks]
+    assert titles.count("Invoke handler-envelope") == 1
+    qr_invocation = next(
+        task.task.argv  # pyright: ignore[reportAttributeAccessIssue]
+        for task in plan.compile().tasks
+        if task.task.title == "Invoke qr-code-java"
+    )
+    assert qr_invocation[-2] == (
+        '{"input":{"text":"https://example.org/invite/abc","size":256}}'
+    )
+    for key in HANDLER_ENVELOPE_FUNCTIONS:
+        assert titles.count(f"Invoke {resolve_function(config, key).name}") == 1
+
+
+def test_handler_envelope_container_excludes_only_nondeterministic_catalog_functions(
+    nanofaas_checkout: Path,
+) -> None:
+    config = ScenarioConfig.model_validate(
+        yaml.safe_load((NANOLAB_ROOT / "scenarios-v2/handler-envelope-container.yaml").read_text())
+    )
+
+    example_keys = {
+        function.key
+        for function in list_functions(nanofaas_checkout)
+        if function.example_dir is not None
+    }
+
+    assert set(config.functions) == example_keys - EXCLUDED_HANDLER_ENVELOPE_FUNCTIONS
+
+
+def test_handler_envelope_contracts_send_real_header_and_binary_sentinels() -> None:
+    config = ScenarioConfig.model_validate(
+        {
+            "workflow": "validate",
+            "backend": "container",
+            "functions": list(HANDLER_ENVELOPE_FUNCTIONS),
+            "handler_envelope": True,
+        }
+    )
+    plan = build_validate_plan(
+        config, RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor())
+    )
+
+    probe = _argv(plan, "Verify handler-envelope HTTP envelope")
+    qr = _argv(plan, "Verify qr-code-java HTTP envelope")
+    roman = _argv(plan, "Verify roman-numeral-java HTTP envelope")
+    transform = _argv(plan, "Verify json-transform-java HTTP envelope")
+    assert probe[-2] == '{"input":{"message":"body-sentinel","headers":{"x-e2e-token":"forged"}}}'
+    assert "X-E2E-Token: header-sentinel" in probe
+    assert qr[-2] == '{"input":{"text":"https://example.org/invite/abc","size":256}}'
+    assert roman[-2] == '{"input":{}}'
+    assert transform[-2] == '{"input":{}}'
+
+
+def test_validate_plan_builds_java_lite_with_its_native_dockerfile() -> None:
+    image_build = _argv(
+        _plan("container", functions=["word-stats-java-lite"]),
+        "Build image word-stats-java-lite",
+    )
+
+    assert image_build[-2:] == ("functions/java/word-stats-lite/Dockerfile", ".")
 
 
 def test_container_validation_builds_and_deploys_the_control_plane_with_compose() -> None:

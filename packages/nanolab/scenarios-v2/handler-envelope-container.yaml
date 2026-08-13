@@ -1,0 +1,31 @@
+# All deterministic local catalog functions. Excluded: figlet-{exec,java} have no
+# catalog-compatible object payload; mlimage-python downloads model data at invocation.
+workflow: validate
+backend: container
+build: docker
+handlerEnvelope: true
+functions:
+  - json-transform-exec
+  - json-transform-go
+  - json-transform-java
+  - json-transform-java-lite
+  - json-transform-javascript
+  - json-transform-python
+  - qr-code-exec
+  - qr-code-go
+  - qr-code-java
+  - qr-code-javascript
+  - qr-code-python
+  - roman-numeral-exec
+  - roman-numeral-go
+  - roman-numeral-java
+  - roman-numeral-java-lite
+  - roman-numeral-javascript
+  - roman-numeral-python
+  - word-stats-exec
+  - word-stats-go
+  - word-stats-java
+  - word-stats-java-lite
+  - word-stats-javascript
+  - word-stats-python
+  - handler-envelope-java

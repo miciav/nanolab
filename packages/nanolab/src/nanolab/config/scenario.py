@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 WorkflowName = Literal["validate", "cli", "loadtest", "offload", "offload-loadtest", "release"]
 BackendName = Literal["container", "k8s"]
@@ -58,6 +58,11 @@ class ScenarioConfig(BaseModel):
     build: BuildStrategy = "docker"
     functions: list[str] = Field(min_length=1)
     resources: dict[str, ResourceSpec] = Field(default_factory=dict)
+    handler_envelope: bool = Field(
+        default=False,
+        alias="handlerEnvelope",
+        validation_alias=AliasChoices("handlerEnvelope", "handler_envelope"),
+    )
     autoscaling: bool = False
     autoscaling_strategy: AutoscalingStrategy = Field(default="INTERNAL", alias="autoscalingStrategy")
     hpa_scale_to_zero: bool = Field(default=False, alias="hpaScaleToZero")
