@@ -7,7 +7,7 @@ from sonata_engine import Resource, TaskInputs
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 from sonata_tasks.cli_function import CliFunctionInvokeTask
-from sonata_tasks.http_function import HttpFunctionInvokeTask
+from sonata_tasks.http_function import HttpFunctionContractTask, HttpFunctionExpectation, HttpFunctionInvokeTask
 from sonata_tasks.invocation import verify_invocation
 
 SUCCESS = '{"status":"success","output":"5 words"}'
@@ -162,3 +162,150 @@ def test_it_reports_whichever_half_of_the_reason_exists() -> None:
         verify_invocation(
             _result('{"status":"error","error":{"message":"no ready endpoint"}}')
         )
+
+
+ENVELOPE_422 = (
+    "HTTP/1.1 422 Unprocessable Content\r\n"
+    "Content-Type: application/json\r\n"
+    "X-NanoFaaS-Function-Status: true\r\n"
+    "X-Caller-Id: real\r\n"
+    "\r\n"
+    '{"status":"success","output":{"header":"real","body":"unique"},"statusCode":422}'
+)
+
+
+def _contract(
+    stdout: str = ENVELOPE_422, *, expectation: HttpFunctionExpectation | None = None
+) -> tuple[HttpFunctionContractTask, RecordingExecutor]:
+    executor = RecordingExecutor(stdout=stdout)
+    task = HttpFunctionContractTask(
+        "envelope-probe",
+        payload='{"message":"body-sentinel"}',
+        endpoint="http://cp:8080",
+        executor=executor,
+        role="host",
+        headers=("X-Caller-Id: preserved",),
+        expectation=expectation
+        or HttpFunctionExpectation(
+            status=422,
+            api_status="success",
+            output={"header": "real", "body": "unique"},
+            status_code=422,
+            required_headers=(("x-nanofaas-function-status", "true"), ("x-caller-id", "real")),
+            forbidden_headers=("x-secret",),
+        ),
+    )
+    return task, executor
+
+
+def test_http_contract_accepts_an_exact_422_function_envelope() -> None:
+    task, executor = _contract("HTTP/1.1 100 Continue\r\n\r\n" + ENVELOPE_422)
+
+    _ = task.run(TaskInputs.empty())
+
+    assert executor.seen[0].argv == (
+        "curl",
+        "-isS",
+        "-H",
+        "Content-Type: application/json",
+        "-H",
+        "X-Caller-Id: preserved",
+        "--data",
+        '{"message":"body-sentinel"}',
+        "http://cp:8080/v1/functions/envelope-probe:invoke",
+    )
+
+
+@pytest.mark.parametrize(
+    ("stdout", "expectation", "error"),
+    [
+        (ENVELOPE_422.replace("422 Unprocessable Content", "200 OK"), None, "status was 200"),
+        (ENVELOPE_422.replace("X-NanoFaaS-Function-Status: true\r\n", ""), None, "missing required header"),
+        (ENVELOPE_422.replace("unique", "wrong-output"), None, "output was"),
+        (ENVELOPE_422.replace("X-Caller-Id: real\r\n", "X-Caller-Id: real\r\nX-Secret: nope\r\n"), None, "forbidden header"),
+        (
+            "HTTP/1.1 200 OK\r\n\r\n"
+            '{"status":"success","output":"not base64!","statusCode":200}',
+            HttpFunctionExpectation(
+                status=200,
+                api_status="success",
+                output="not base64!",
+                status_code=200,
+                decoded_bytes=b"expected",
+            ),
+            "invalid base64 output",
+        ),
+    ],
+)
+def test_http_contract_rejects_a_mismatched_envelope(
+    stdout: str, expectation: HttpFunctionExpectation | None, error: str
+) -> None:
+    task, _ = _contract(stdout, expectation=expectation)
+
+    with pytest.raises(RuntimeError, match=error):
+        task.run(TaskInputs.empty())
+
+
+def test_http_contract_accepts_a_plain_response_when_no_markers_are_expected() -> None:
+    task, _ = _contract(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
+        '{"status":"success","output":"plain","statusCode":200}',
+        expectation=HttpFunctionExpectation(
+            status=200, api_status="success", output="plain", status_code=200
+        ),
+    )
+
+    _ = task.run(TaskInputs.empty())
+
+
+def test_success_only_invoke_keeps_its_first_header_block_behavior() -> None:
+    task = HttpFunctionInvokeTask(
+        "word-stats",
+        payload="{}",
+        endpoint="http://cp:8080",
+        executor=RecordingExecutor(
+            stdout=(
+                "HTTP/1.1 100 Continue\r\n\r\n"
+                "HTTP/1.1 200 OK\r\nX-Final: true\r\n\r\n"
+                '{"status":"success","output":"ok"}'
+            )
+        ),
+        role="host",
+        require_header="X-Final",
+    )
+
+    with pytest.raises(RuntimeError, match="no X-Final header"):
+        task.run(TaskInputs.empty())
+
+
+def test_http_contract_decodes_expected_base64_bytes() -> None:
+    task, _ = _contract(
+        "HTTP/1.1 200 OK\r\n\r\n"
+        '{"status":"success","output":"cGF5bG9hZA==","statusCode":200}',
+        expectation=HttpFunctionExpectation(
+            status=200,
+            api_status="success",
+            output="cGF5bG9hZA==",
+            status_code=200,
+            decoded_bytes=b"payload",
+        ),
+    )
+
+    _ = task.run(TaskInputs.empty())
+
+
+def test_http_contract_rejects_different_decoded_base64_bytes() -> None:
+    task, _ = _contract(
+        "HTTP/1.1 200 OK\r\n\r\n"
+        '{"status":"success","output":"cGF5bG9hZA==","statusCode":200}',
+        expectation=HttpFunctionExpectation(
+            status=200,
+            api_status="success",
+            output="cGF5bG9hZA==",
+            status_code=200,
+            decoded_bytes=b"different",
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="decoded output was"):
+        task.run(TaskInputs.empty())

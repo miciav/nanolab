@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import base64
 from collections.abc import Callable
-from dataclasses import replace
+from dataclasses import dataclass, replace
 import json
 from pathlib import Path
 from time import monotonic, sleep
@@ -283,6 +284,120 @@ def _split_response(stdout: str) -> tuple[str, str]:
         if found:
             return head, body
     return "", stdout
+
+
+def _split_final_response(stdout: str) -> tuple[str, str]:
+    """Return curl's last HTTP block, skipping informational and redirect blocks."""
+    headers, body = _split_response(stdout)
+    while body.startswith("HTTP/"):
+        headers, body = _split_response(body)
+    return headers, body
+
+
+@dataclass(frozen=True)
+class HttpFunctionExpectation:
+    """The complete externally visible function-response contract to assert."""
+
+    status: int
+    api_status: str | None = None
+    output: object | None = None
+    status_code: int | None = None
+    required_headers: tuple[tuple[str, str], ...] = ()
+    forbidden_headers: tuple[str, ...] = ()
+    decoded_bytes: bytes | None = None
+
+
+class HttpFunctionContractTask(CommandTask):
+    """Invoke a function and assert its complete HTTP envelope."""
+
+    def __init__(
+        self,
+        name: str,
+        *,
+        payload: str,
+        endpoint: Endpoint,
+        executor: CommandTaskExecutor,
+        role: ExecutionRole,
+        expectation: HttpFunctionExpectation,
+        headers: tuple[str, ...] = (),
+        content_type: str = "application/json",
+        cwd: Path | None = None,
+    ) -> None:
+        def verify(result: TaskResult) -> None:
+            response_headers, body = _split_final_response(result.stdout)
+            lines = response_headers.splitlines()
+            try:
+                actual_status = int(lines[0].split()[1])
+            except (IndexError, ValueError) as error:
+                raise RuntimeError(f"{name}: response carried no HTTP status") from error
+            if actual_status != expectation.status:
+                raise RuntimeError(f"{name}: HTTP status was {actual_status}, expected {expectation.status}")
+
+            headers = {
+                line.split(":", 1)[0].strip().lower(): line.split(":", 1)[1].strip()
+                for line in lines[1:]
+                if ":" in line
+            }
+            for header, expected_value in expectation.required_headers:
+                actual_value = headers.get(header.lower())
+                if actual_value is None:
+                    raise RuntimeError(f"{name}: missing required header {header}")
+                if actual_value != expected_value:
+                    raise RuntimeError(
+                        f"{name}: required header {header} was {actual_value!r}, "
+                        f"expected {expected_value!r}"
+                    )
+            for header in expectation.forbidden_headers:
+                if header.lower() in headers:
+                    raise RuntimeError(f"{name}: forbidden header {header} was present")
+
+            try:
+                response = json.loads(body)
+            except json.JSONDecodeError as error:
+                raise RuntimeError(f"{name}: invalid JSON response") from error
+            if not isinstance(response, dict):
+                raise RuntimeError(f"{name}: response was not a JSON object")
+            for field, expected in (
+                ("status", expectation.api_status),
+                ("output", expectation.output),
+                ("statusCode", expectation.status_code),
+            ):
+                if expected is not None and response.get(field) != expected:
+                    raise RuntimeError(
+                        f"{name}: {field} was {response.get(field)!r}, expected {expected!r}"
+                    )
+            if expectation.decoded_bytes is not None:
+                output = response.get("output")
+                if not isinstance(output, str):
+                    raise RuntimeError(f"{name}: base64 output was not a string")
+                try:
+                    decoded = base64.b64decode(output, validate=True)
+                except ValueError as error:
+                    raise RuntimeError(f"{name}: invalid base64 output") from error
+                if decoded != expectation.decoded_bytes:
+                    raise RuntimeError(f"{name}: decoded output was {decoded!r}, expected {expectation.decoded_bytes!r}")
+
+        request_headers = tuple(part for header in headers for part in ("-H", header))
+        super().__init__(
+            title=f"Verify {name} HTTP envelope",
+            argv=_argv(
+                endpoint,
+                lambda base: (
+                    "curl",
+                    "-isS",
+                    "-H",
+                    f"Content-Type: {content_type}",
+                    *request_headers,
+                    "--data",
+                    payload,
+                    f"{base}/v1/functions/{name}:invoke",
+                ),
+            ),
+            executor=executor,
+            role=role,
+            cwd=cwd,
+            verify=verify,
+        )
 
 
 class HttpFunctionInvokeTask(CommandTask):
