@@ -157,7 +157,7 @@ def test_handler_envelope_validation_adds_contract_tasks_for_each_selected_funct
             {
                 "workflow": "validate",
                 "backend": "container",
-                "functions": ["qr-code-java", "qr-code-python", "handler-envelope-java"],
+                "functions": list(HANDLER_ENVELOPE_FUNCTIONS),
                 "handler_envelope": True,
             }
         ),
@@ -168,7 +168,24 @@ def test_handler_envelope_validation_adds_contract_tasks_for_each_selected_funct
     assert "Verify qr-code-java HTTP envelope" in titles
     assert "Verify qr-code-python HTTP envelope" in titles
     assert "Verify handler-envelope HTTP envelope" in titles
-    assert len([title for title in titles if title.endswith("HTTP envelope")]) == 3
+    assert "Verify word-stats-java HTTP envelope" in titles
+
+
+def test_handler_envelope_validation_requires_every_contract_function() -> None:
+    with pytest.raises(ValueError, match="handler envelope requires qr-code-java"):
+        build_validate_plan(
+            ScenarioConfig.model_validate(
+                {
+                    "workflow": "validate",
+                    "backend": "container",
+                    "functions": [
+                        key for key in HANDLER_ENVELOPE_FUNCTIONS if key != "qr-code-java"
+                    ],
+                    "handler_envelope": True,
+                }
+            ),
+            RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor()),
+        )
 
 
 def test_handler_envelope_container_scenario_runs_every_deterministic_function() -> None:
@@ -229,11 +246,15 @@ def test_handler_envelope_contracts_send_real_header_and_binary_sentinels() -> N
     qr = _argv(plan, "Verify qr-code-java HTTP envelope")
     roman = _argv(plan, "Verify roman-numeral-java HTTP envelope")
     transform = _argv(plan, "Verify json-transform-java HTTP envelope")
-    assert probe[-2] == '{"input":{"message":"body-sentinel","headers":{"x-e2e-token":"forged"}}}'
+    assert probe[-2] == (
+        '{"input":{"message":"body-sentinel"},"headers":{"x-e2e-token":"forged"}}'
+    )
     assert "X-E2E-Token: header-sentinel" in probe
     assert qr[-2] == '{"input":{"text":"https://example.org/invite/abc","size":256}}'
     assert roman[-2] == '{"input":{}}'
     assert transform[-2] == '{"input":{}}'
+    plain = _argv(plan, "Verify word-stats-java HTTP envelope")
+    assert plain[-2] == sonata_function(resolve_function(config, "word-stats-java")).payload
 
 
 def test_validate_plan_builds_java_lite_with_its_native_dockerfile() -> None:

@@ -314,12 +314,15 @@ def test_http_contract_rejects_different_decoded_base64_bytes() -> None:
 def test_http_contract_accepts_a_base64_output_with_the_expected_png_signature() -> None:
     task, _ = _contract(
         "HTTP/1.1 200 OK\r\n\r\n"
-        '{"status":"success","output":"iVBORw0KGgpwYXlsb2Fk","statusCode":200}',
+        '{"status":"success","output":"iVBORw0KGgpwYXlsb2Fk","statusCode":200,'
+        '"headers":{"Content-Type":"image/png"},"encoding":"base64"}',
         expectation=HttpFunctionExpectation(
             status=200,
             api_status="success",
             output="iVBORw0KGgpwYXlsb2Fk",
             status_code=200,
+            api_headers={"Content-Type": "image/png"},
+            encoding="base64",
             decoded_prefix=b"\x89PNG\r\n\x1a\n",
         ),
     )
@@ -341,4 +344,47 @@ def test_http_contract_rejects_a_base64_output_with_the_wrong_signature() -> Non
     )
 
     with pytest.raises(RuntimeError, match="did not start with"):
+        task.run(TaskInputs.empty())
+
+
+@pytest.mark.parametrize(
+    ("response", "expectation", "message"),
+    [
+        (
+            '{"status":"success","output":"ok","statusCode":200}',
+            HttpFunctionExpectation(status=200, api_headers={"Content-Type": "image/png"}),
+            "headers was None",
+        ),
+        (
+            '{"status":"success","output":"ok","statusCode":200,"encoding":"json"}',
+            HttpFunctionExpectation(status=200, encoding="base64"),
+            "encoding was 'json'",
+        ),
+    ],
+)
+def test_http_contract_rejects_mismatched_api_envelope_fields(
+    response: str, expectation: HttpFunctionExpectation, message: str
+) -> None:
+    task, _ = _contract("HTTP/1.1 200 OK\r\n\r\n" + response, expectation=expectation)
+
+    with pytest.raises(RuntimeError, match=message):
+        task.run(TaskInputs.empty())
+
+
+def test_http_contract_rejects_function_response_headers_on_the_outer_http_response() -> None:
+    task, _ = _contract(
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: image/png\r\n"
+        "X-NanoFaaS-Encoding: base64\r\n\r\n"
+        '{"status":"success","output":"ok","statusCode":200}',
+        expectation=HttpFunctionExpectation(
+            status=200,
+            forbidden_header_values=(
+                ("Content-Type", "image/png"),
+                ("X-NanoFaaS-Encoding", "base64"),
+            ),
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="forbidden header Content-Type"):
         task.run(TaskInputs.empty())

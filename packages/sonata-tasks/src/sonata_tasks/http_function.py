@@ -302,8 +302,11 @@ class HttpFunctionExpectation:
     api_status: str | None = None
     output: object | None = None
     status_code: int | None = None
+    api_headers: dict[str, str] | None = None
+    encoding: str | None = None
     required_headers: tuple[tuple[str, str], ...] = ()
     forbidden_headers: tuple[str, ...] = ()
+    forbidden_header_values: tuple[tuple[str, str], ...] = ()
     decoded_bytes: bytes | None = None
     decoded_prefix: bytes | None = None
 
@@ -351,6 +354,11 @@ class HttpFunctionContractTask(CommandTask):
             for header in expectation.forbidden_headers:
                 if header.lower() in headers:
                     raise RuntimeError(f"{name}: forbidden header {header} was present")
+            for header, forbidden_value in expectation.forbidden_header_values:
+                if headers.get(header.lower()) == forbidden_value:
+                    raise RuntimeError(
+                        f"{name}: forbidden header {header} had value {forbidden_value!r}"
+                    )
 
             try:
                 response = json.loads(body)
@@ -362,6 +370,8 @@ class HttpFunctionContractTask(CommandTask):
                 ("status", expectation.api_status),
                 ("output", expectation.output),
                 ("statusCode", expectation.status_code),
+                ("headers", expectation.api_headers),
+                ("encoding", expectation.encoding),
             ):
                 if expected is not None and response.get(field) != expected:
                     raise RuntimeError(

@@ -34,9 +34,14 @@ _JSON_TRANSFORMS = (
     "json-transform-javascript",
     "json-transform-python",
 )
+_HANDLER_ENVELOPE_TARGETS = (*_QR_CODES, *_ROMAN_NUMERALS, *_JSON_TRANSFORMS, "handler-envelope-java")
 
 
 def _handler_envelope_checks(functions: dict[str, SonataFunction]) -> tuple[EnvelopeCheck, ...]:
+    missing = [key for key in _HANDLER_ENVELOPE_TARGETS if key not in functions]
+    if missing:
+        raise ValueError(f"handler envelope requires {', '.join(missing)}")
+
     def name(key: str) -> str:
         return functions[key].name
 
@@ -50,11 +55,13 @@ def _handler_envelope_checks(functions: dict[str, SonataFunction]) -> tuple[Enve
                     status=200,
                     api_status="success",
                     status_code=200,
-                    required_headers=(
-                        *marker,
+                    required_headers=marker,
+                    forbidden_header_values=(
                         ("Content-Type", "image/png"),
                         ("X-NanoFaaS-Encoding", "base64"),
                     ),
+                    api_headers={"Content-Type": "image/png"},
+                    encoding="base64",
                     decoded_prefix=_PNG_SIGNATURE,
                 ),
             )
@@ -92,21 +99,28 @@ def _handler_envelope_checks(functions: dict[str, SonataFunction]) -> tuple[Enve
             if key in functions
         ),
         *(
-            ()
-            if "handler-envelope-java" not in functions
-            else (
-                EnvelopeCheck(
-                    name("handler-envelope-java"),
-                    '{"input":{"message":"body-sentinel","headers":{"x-e2e-token":"forged"}}}',
-                    HttpFunctionExpectation(
-                        status=200,
-                        api_status="success",
-                        output={"body": "body-sentinel", "header": "header-sentinel"},
-                        status_code=200,
-                    ),
-                    headers=("X-E2E-Token: header-sentinel",),
+            EnvelopeCheck(
+                name("handler-envelope-java"),
+                '{"input":{"message":"body-sentinel"},"headers":{"x-e2e-token":"forged"}}',
+                HttpFunctionExpectation(
+                    status=200,
+                    api_status="success",
+                    output={"body": "body-sentinel", "header": "header-sentinel"},
+                    status_code=200,
                 ),
-            )
+                headers=("X-E2E-Token: header-sentinel",),
+            ),
+        ),
+        # Java Lite is deliberately exercised by its ordinary invoke only: its
+        # binding was not part of the envelope changes covered by this scenario.
+        EnvelopeCheck(
+            name("word-stats-java"),
+            functions["word-stats-java"].payload,
+            HttpFunctionExpectation(
+                status=200,
+                api_status="success",
+                forbidden_headers=("X-NanoFaaS-Function-Status", "X-NanoFaaS-Encoding"),
+            ),
         ),
     )
 
