@@ -305,6 +305,7 @@ class HttpFunctionExpectation:
     required_headers: tuple[tuple[str, str], ...] = ()
     forbidden_headers: tuple[str, ...] = ()
     decoded_bytes: bytes | None = None
+    decoded_prefix: bytes | None = None
 
 
 class HttpFunctionContractTask(CommandTask):
@@ -366,7 +367,7 @@ class HttpFunctionContractTask(CommandTask):
                     raise RuntimeError(
                         f"{name}: {field} was {response.get(field)!r}, expected {expected!r}"
                     )
-            if expectation.decoded_bytes is not None:
+            if expectation.decoded_bytes is not None or expectation.decoded_prefix is not None:
                 output = response.get("output")
                 if not isinstance(output, str):
                     raise RuntimeError(f"{name}: base64 output was not a string")
@@ -374,8 +375,12 @@ class HttpFunctionContractTask(CommandTask):
                     decoded = base64.b64decode(output, validate=True)
                 except ValueError as error:
                     raise RuntimeError(f"{name}: invalid base64 output") from error
-                if decoded != expectation.decoded_bytes:
+                if expectation.decoded_bytes is not None and decoded != expectation.decoded_bytes:
                     raise RuntimeError(f"{name}: decoded output was {decoded!r}, expected {expectation.decoded_bytes!r}")
+                if expectation.decoded_prefix is not None and not decoded.startswith(expectation.decoded_prefix):
+                    raise RuntimeError(
+                        f"{name}: decoded output did not start with {expectation.decoded_prefix!r}"
+                    )
 
         request_headers = tuple(part for header in headers for part in ("-H", header))
         super().__init__(

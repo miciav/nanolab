@@ -309,3 +309,36 @@ def test_http_contract_rejects_different_decoded_base64_bytes() -> None:
 
     with pytest.raises(RuntimeError, match="decoded output was"):
         task.run(TaskInputs.empty())
+
+
+def test_http_contract_accepts_a_base64_output_with_the_expected_png_signature() -> None:
+    task, _ = _contract(
+        "HTTP/1.1 200 OK\r\n\r\n"
+        '{"status":"success","output":"iVBORw0KGgpwYXlsb2Fk","statusCode":200}',
+        expectation=HttpFunctionExpectation(
+            status=200,
+            api_status="success",
+            output="iVBORw0KGgpwYXlsb2Fk",
+            status_code=200,
+            decoded_prefix=b"\x89PNG\r\n\x1a\n",
+        ),
+    )
+
+    _ = task.run(TaskInputs.empty())
+
+
+def test_http_contract_rejects_a_base64_output_with_the_wrong_signature() -> None:
+    task, _ = _contract(
+        "HTTP/1.1 200 OK\r\n\r\n"
+        '{"status":"success","output":"iVBORw0KGgpwYXlsb2Fk","statusCode":200}',
+        expectation=HttpFunctionExpectation(
+            status=200,
+            api_status="success",
+            output="iVBORw0KGgpwYXlsb2Fk",
+            status_code=200,
+            decoded_prefix=b"GIF89a",
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="did not start with"):
+        task.run(TaskInputs.empty())
