@@ -14,7 +14,13 @@ from sonata_tasks.execution.bindings import (
 
 from sonata_tasks.command import CommandTask
 from sonata_tasks.deployment import LOCAL_CONTROL_PLANE_API_PORT
-from sonata_tasks.http_function import HttpExecutionSuccessTask, HttpFunctionEnqueueTask, HttpFunctionInvokeTask
+from sonata_tasks.http_function import (
+    HttpExecutionSuccessTask,
+    HttpFunctionContractTask,
+    HttpFunctionEnqueueTask,
+    HttpFunctionExpectation,
+    HttpFunctionInvokeTask,
+)
 from sonata_tasks.k6 import K6Task
 from sonata_tasks.loadtest.models import K6Config
 from sonata_tasks.metrics import PrometheusMinimumCheckTask
@@ -31,12 +37,23 @@ ValidateFunction = PlatformFunction
 
 
 @dataclass(frozen=True, slots=True)
+class EnvelopeCheck:
+    """One externally visible HTTP envelope expected from a registered function."""
+
+    function_name: str
+    payload: str
+    expectation: HttpFunctionExpectation
+    headers: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class ValidateWorkflowRequest(PlatformRequest):
     """The common platform request plus the K8s-only queue probe."""
 
     queue_probe: PlatformFunction | None = None
     extended_k8s_checks: bool = False
     queue_burst_script: Path | None = None
+    envelope_checks: tuple[EnvelopeCheck, ...] = ()
 
 
 def _inspection_task(
@@ -149,6 +166,30 @@ def build_validate_workflow(
                 ),
                 requires=(*requires, *platform.resources, registered),
             )
+    registered_by_name = {
+        function.name: registered
+        for function, registered in zip(request.functions, platform.functions)
+    }
+    for check in request.envelope_checks:
+        try:
+            registered = registered_by_name[check.function_name]
+        except KeyError as error:
+            raise ValueError(
+                f"envelope check references unknown function {check.function_name!r}"
+            ) from error
+        workflow.add(
+            HttpFunctionContractTask(
+                check.function_name,
+                payload=check.payload,
+                headers=check.headers,
+                expectation=check.expectation,
+                endpoint=platform.endpoint,
+                executor=executor,
+                role=request.role,
+                cwd=cwd,
+            ),
+            requires=(*requires, *platform.resources, registered),
+        )
     if request.queue_probe is not None:
         queue_registered = platform.functions[len(request.functions)]
         workflow.add(

@@ -8,9 +8,11 @@ import pytest
 from sonata_engine import Resource, TaskInputs, Workflow
 from sonata_engine.workflow.context import bind_workflow_sink
 from sonata_tasks.execution.bindings import RoleBindings
+from sonata_tasks.http_function import HttpFunctionExpectation
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 from sonata_tasks.validate import (
+    EnvelopeCheck,
     ValidateFunction,
     ValidateWorkflowRequest,
     build_validate_workflow,
@@ -121,6 +123,70 @@ def test_container_compiles_build_register_invoke_inspect_and_a_release() -> Non
         "005.inspect-resources-of-nanofaas-word-stats-java-r1",
         "006.release-word-stats-java",
     ]
+
+
+ENVELOPE_CHECK = EnvelopeCheck(
+    function_name=FUNCTION.name,
+    payload='{"input":{"message":"body-sentinel"},"headers":{"x-e2e-token":"forged"}}',
+    headers=("X-E2E-Token: header-sentinel",),
+    expectation=HttpFunctionExpectation(
+        status=422,
+        api_status="success",
+        output={"body": "body-sentinel", "header": "header-sentinel"},
+        status_code=422,
+        required_headers=(("X-NanoFaaS-Function-Status", "true"),),
+    ),
+)
+
+
+def test_envelope_check_compiles_after_its_function_registration() -> None:
+    workflow = build_validate_workflow(
+        _request(envelope_checks=(ENVELOPE_CHECK,)), _bindings(ScriptedExecutor())
+    )
+
+    titles = _titles(workflow)
+    assert titles.index("Verify word-stats-java HTTP envelope") > titles.index(
+        "Acquire word-stats-java"
+    )
+
+
+def test_envelope_check_runs_after_registration_and_accepts_expected_422() -> None:
+    executor = ScriptedExecutor(
+        responses={
+            "curl -isS": TaskResult(
+                task_id="",
+                status="passed",
+                return_code=0,
+                stdout=(
+                    "HTTP/1.1 422 Unprocessable Content\r\n"
+                    "X-NanoFaaS-Function-Status: true\r\n\r\n"
+                    '{"status":"success","output":{"body":"body-sentinel",'
+                    '"header":"header-sentinel"},"statusCode":422}'
+                ),
+            )
+        }
+    )
+
+    build_validate_workflow(
+        _request(envelope_checks=(ENVELOPE_CHECK,)), _bindings(executor)
+    ).run()
+
+    commands = [" ".join(spec.argv) for spec in executor.seen]
+    registered = next(i for i, command in enumerate(commands) if command.endswith("/v1/functions"))
+    checked = next(i for i, command in enumerate(commands) if "curl -isS" in command)
+    assert registered < checked
+    contract = executor.seen[checked]
+    assert contract.argv == (
+        "curl",
+        "-isS",
+        "-H",
+        "Content-Type: application/json",
+        "-H",
+        "X-E2E-Token: header-sentinel",
+        "--data",
+        ENVELOPE_CHECK.payload,
+        "http://127.0.0.1:18080/v1/functions/word-stats-java:invoke",
+    )
 
 
 def test_k8s_adds_the_preflight_the_images_and_the_helm_release() -> None:
