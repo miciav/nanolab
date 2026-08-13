@@ -10,6 +10,7 @@ from nanolab.functions.catalog import (
     resolve_function_definition,
     resolve_function_preset,
 )
+from sonata_tasks.deployment import LOCAL_REGISTRY
 
 
 def _write(path: Path, text: str) -> None:
@@ -73,6 +74,17 @@ def test_dynamic_catalog_preserves_existing_metadata() -> None:
     assert function.description == "Spring Boot Java word statistics demo."
     assert function.default_image == "127.0.0.1:5000/nanofaas/java-word-stats:e2e"
     assert function.default_payload_file == "word-stats-sample.json"
+
+
+def test_real_catalog_default_images_share_the_local_registry_prefix() -> None:
+    images = [
+        function.default_image
+        for function in list_functions()
+        if function.example_dir is not None and function.default_image is not None
+    ]
+
+    assert images
+    assert all(image.startswith(f"{LOCAL_REGISTRY}/") for image in images)
 
 
 def test_dynamic_catalog_exposes_manifest_backed_roman_numeral_details() -> None:
