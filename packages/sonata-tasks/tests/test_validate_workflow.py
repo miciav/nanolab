@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -219,6 +220,25 @@ def test_k8s_can_add_a_dedicated_queue_probe() -> None:
     assert "Build image k8s-sync-queue" in titles
     assert "Push image localhost:5000/nanofaas/java-warm-echo:e2e" in titles
     assert "Acquire k8s-sync-queue" in titles
+
+
+def test_queue_burst_writes_its_summary_in_the_task_directory() -> None:
+    executor = ScriptedExecutor()
+    cwd = Path("run-local")
+
+    build_validate_workflow(
+        _request(
+            backend="k8s",
+            queue_probe=QUEUE_PROBE,
+            queue_burst_script=Path("assets/k6/k8s-queue-burst.js"),
+        ),
+        _bindings(executor),
+        cwd=cwd,
+    ).run()
+
+    k6 = next(spec for spec in executor.seen if spec.argv[:2] == ("k6", "run"))
+    assert k6.argv[3] == "nanolab-k8s-queue-burst.json"
+    assert k6.cwd == cwd
 
 
 def test_the_teardown_is_compiled_in_rather_than_left_to_the_caller() -> None:

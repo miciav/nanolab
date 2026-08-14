@@ -218,7 +218,7 @@ def build_validate_workflow(
                     K6Config(
                         script_path=request.queue_burst_script,
                         target_url=platform.endpoint,
-                        summary_output_path=Path("/tmp/nanolab-k8s-queue-burst.json"),
+                        summary_output_path=Path("nanolab-k8s-queue-burst.json"),
                         vus=12,
                         duration="2s",
                         env={
@@ -230,6 +230,7 @@ def build_validate_workflow(
                     role=request.role,
                     remote_dir=".",
                     title="Burst the synchronous queue",
+                    cwd=cwd,
                     require_pass=True,
                 ),
                 requires=(*requires, *platform.resources, queue_registered),
