@@ -61,5 +61,6 @@ def test_bind_ui_temporary_override_restores_previous():
 
 def test_init_ui_returns_resolved_context_with_width_populated():
     ui = init_ui(UIContext())
+    assert isinstance(ui, UIContext)
     assert ui.content_width is not None
     assert ui.content_width > 0

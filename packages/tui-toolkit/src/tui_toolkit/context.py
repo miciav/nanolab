@@ -32,7 +32,7 @@ def init_ui(ctx: UIContext | None = None) -> UIContext:
     global _ctx_shared
     base = ctx or UIContext()
     width = min(shutil.get_terminal_size((80, 24)).columns, base.max_content_cols)
-    resolved = replace(base, content_width=width)
+    resolved: UIContext = replace(base, content_width=width)
     _ctx_shared = resolved
     _ctx_var.set(resolved)
     try:
