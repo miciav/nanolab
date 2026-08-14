@@ -179,7 +179,8 @@ def _platform(
     )
     if offload_target is not None:
         values = _offload_target(values, offload_target)
-    return replace(request, helm_values=helm_set_args(values))
+    helm_args: tuple[str, ...] = helm_set_args(values)
+    return replace(request, helm_values=helm_args)
 
 
 def build_offload_loadtest_plan(

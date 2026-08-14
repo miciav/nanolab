@@ -117,7 +117,8 @@ def _resolved_context(
     resolved_request = context.vm_request.model_copy(
         update={"lifecycle": "external", "host": info.host, "user": info.user, "home": info.home}
     )
-    return replace(context, vm_request=resolved_request)
+    resolved_context: ScenarioExecutionContext = replace(context, vm_request=resolved_request)
+    return resolved_context
 
 
 def _bootstrap_tasks(

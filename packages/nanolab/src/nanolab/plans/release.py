@@ -53,6 +53,7 @@ from nanolab.release.model import (
     git_state,
 )
 from nanolab.release.tasks import (
+    ReleasePhaseTask,
     versioned_release_run_dir,
 )
 from nanolab.release.versioning import normalize_version, verify_version_consistency
@@ -323,7 +324,7 @@ def build_release_workflow(
         scenario=benchmark_config,
         run_dir=versioned_release_run_dir(request.run_dir, identity.prepared_version),
     )
-    benchmark_runs = build_benchmark_phase(
+    benchmark_runs: tuple[ReleasePhaseTask, ...] = build_benchmark_phase(
         identity=identity,
         run_dir=request.run_dir,
         benchmark_plan=benchmark_plan,
@@ -337,13 +338,14 @@ def build_release_workflow(
     )
 
     # --- Phases 7-8: Aggregate and Regression Gate ---
-    aggregate, reg_gate = build_regression_phase(
+    regression_tasks: tuple[ReleasePhaseTask, ReleasePhaseTask] = build_regression_phase(
         identity=identity,
         run_dir=request.run_dir,
         benchmark_plan=benchmark_plan,
         runs=request.settings.benchmark_runs,
         benchmark_runs=benchmark_runs,
     )
+    aggregate, reg_gate = regression_tasks
 
     # --- Phase 9: ARM64 Build ---
     arm_plan = build_arm64_image_plan(
@@ -421,7 +423,7 @@ def build_release_workflow(
     all_published = publication.all_published
     docker_credentials = publication.docker_credentials
 
-    attest, finalize = build_attestation_phase(
+    attestation_tasks: tuple[ReleasePhaseTask, ReleasePhaseTask] = build_attestation_phase(
         request=request,
         identity=identity,
         release_dir=release_dir,
@@ -437,6 +439,7 @@ def build_release_workflow(
         all_published=all_published,
         docker_credentials=docker_credentials,
     )
+    attest, finalize = attestation_tasks
 
     # --- Wire the DAG ---
     # Order of wf.add() defines execution order. requires only lists Resource

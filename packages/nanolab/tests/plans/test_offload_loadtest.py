@@ -14,6 +14,7 @@ from nanolab.plans.offload_loadtest import (
     build_offload_loadtest_plan,
 )
 from sonata_tasks.execution.bindings import RoleBindings
+from sonata_tasks.platform import PlatformFunction, PlatformRequest
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 NANOFAAS_ROOT = Path(os.environ["NANOFAAS_ROOT"]).resolve()
@@ -59,6 +60,20 @@ def _external_environment() -> EnvironmentConfig:
 
 def _bindings(executor: RecordingExecutor) -> RoleBindings:
     return RoleBindings(host=executor, stack=executor, loadgen=executor, cloud=executor)
+
+
+def test_platform_returns_helm_arguments_in_the_platform_request() -> None:
+    request = offload_loadtest_plan._platform(
+        (PlatformFunction(name="f", image="image", payload="{}", build_argv=("true",)),),
+        label="stack",
+        role="stack",
+        build="docker",
+        repo_root=NANOFAAS_ROOT,
+        offload_target="http://cloud:8080",
+    )
+    assert isinstance(request, PlatformRequest)
+    assert request.helm_values == tuple(request.helm_values)
+    assert "--set" in request.helm_values
 
 
 @pytest.fixture(autouse=True)

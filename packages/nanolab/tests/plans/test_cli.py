@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from typing import cast
 
@@ -12,7 +13,7 @@ from sonata_tasks.command import CommandTask
 from sonata_tasks.execution.bindings import RoleBindings
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 from sonata_tasks.vm import multipass
-from sonata_tasks.vm.models import VmRequest
+from sonata_tasks.vm.models import VmInfo, VmRequest
 
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
@@ -72,6 +73,15 @@ class FakeAzureOrchestrator(FakeMultipassOrchestrator):
 def _multipass_environment(**role_overrides: object) -> EnvironmentConfig:
     role = {"name": "nanofaas-e2e-cli", **role_overrides}
     return EnvironmentConfig.model_validate({"provider": "multipass", "roles": {"stack": role}})
+
+
+def test_resolved_context_returns_scenario_execution_context() -> None:
+    context = cli._placeholder_context(
+        Path("/repo"), VmRequest(lifecycle="multipass", name="stack")
+    )
+    resolved = cli._resolved_context(context, VmInfo("stack", "10.0.0.2", "ubuntu", "/home/ubuntu"))
+    assert isinstance(resolved, type(context))
+    assert resolved.vm_request.host == "10.0.0.2"
 
 
 def _azure_environment() -> EnvironmentConfig:
