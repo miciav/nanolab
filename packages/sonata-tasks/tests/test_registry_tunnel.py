@@ -131,3 +131,50 @@ def test_failed_acquire_propagates_programming_errors_from_cleanup():
 
     with pytest.raises(ValueError, match="bad provider contract"):
         resource.acquire(TaskInputs.empty())
+
+
+def test_failed_acquire_ignores_operational_cleanup_errors():
+    class FailingCleanupProvider(_RecordingProvider):
+        def exec_argv(self, request, argv, *, env=None, remote_dir=None, dry_run=False):
+            self.calls.append((request, argv))
+            if len(self.calls) == 1:
+                return _result(return_code=1, stderr="command failed")
+            raise RuntimeError("cleanup unavailable")
+
+    resource = registry_tunnel_resource(
+        registry_upstream="10.0.0.1", provider=FailingCleanupProvider(), request=object()
+    )
+
+    with pytest.raises(RuntimeError, match="registry tunnel acquire failed"):
+        resource.acquire(TaskInputs.empty())
+
+
+def test_release_ignores_operational_reset_error():
+    class FailingResetProvider(_RecordingProvider):
+        def exec_argv(self, request, argv, *, env=None, remote_dir=None, dry_run=False):
+            self.calls.append((request, argv))
+            if argv == ("sudo", "systemctl", "reset-failed", "nanofaas-registry-tunnel"):
+                raise RuntimeError("reset unavailable")
+            return _result()
+
+    resource = registry_tunnel_resource(
+        registry_upstream="10.0.0.1", provider=FailingResetProvider(), request=object()
+    )
+
+    resource.release(TaskInputs.empty(), None)
+
+
+def test_release_propagates_programming_error_from_reset():
+    class BrokenResetProvider(_RecordingProvider):
+        def exec_argv(self, request, argv, *, env=None, remote_dir=None, dry_run=False):
+            self.calls.append((request, argv))
+            if argv == ("sudo", "systemctl", "reset-failed", "nanofaas-registry-tunnel"):
+                raise ValueError("bad reset contract")
+            return _result()
+
+    resource = registry_tunnel_resource(
+        registry_upstream="10.0.0.1", provider=BrokenResetProvider(), request=object()
+    )
+
+    with pytest.raises(ValueError, match="bad reset contract"):
+        resource.release(TaskInputs.empty(), None)
