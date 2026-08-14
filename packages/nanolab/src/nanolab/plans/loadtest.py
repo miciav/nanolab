@@ -294,15 +294,18 @@ def build_loadtest_plan(
         script_path = product_root / "assets" / "k6" / script_name
         summary_path = run_dir / "k6-summary.json"
 
+    if not config.autoscaling:
+        additional_modules = ()
+    elif hpa:
+        additional_modules = ("async-queue", "sync-queue")
+    else:
+        additional_modules = ("autoscaler", "async-queue", "sync-queue")
+
     request = PlatformRequest(
         backend=backend,
         build=config.build,
         functions=functions,
-        additional_modules=(
-            ("async-queue", "sync-queue") if hpa else ("autoscaler", "async-queue", "sync-queue")
-        )
-        if config.autoscaling
-        else (),
+        additional_modules=additional_modules,
         build_images=not prebuilt,
         build_control_plane=backend == "k8s",
         push_function_images=backend == "container" and not prebuilt,

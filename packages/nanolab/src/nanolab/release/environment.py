@@ -151,13 +151,12 @@ def verify_release_vm_facts(
     assert azure is not None
     facts = provider.release_vm_facts(request)  # type: ignore[attr-defined]
     target = environment.target(role)
-    expected_size = (
-        azure.loadgen_vm_size
-        if role == "loadgen"
-        else azure.arm_vm_size
-        if role == "arm-builder"
-        else azure.vm_size
-    )
+    if role == "loadgen":
+        expected_size = azure.loadgen_vm_size
+    elif role == "arm-builder":
+        expected_size = azure.arm_vm_size
+    else:
+        expected_size = azure.vm_size
     expected = {
         "location": azure.location,
         "vm_size": expected_size,

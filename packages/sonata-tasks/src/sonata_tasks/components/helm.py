@@ -42,9 +42,13 @@ def control_plane_helm_values(
         "demos.enabled": "false",
         "prometheus.create": "false",
     }
-    sync_queue_depth = str(
-        sync_queue_max_depth if sync_queue_max_depth is not None else 100 if expose_node_port else 1
-    )
+    if sync_queue_max_depth is not None:
+        sync_queue_depth_value = sync_queue_max_depth
+    elif expose_node_port:
+        sync_queue_depth_value = 100
+    else:
+        sync_queue_depth_value = 1
+    sync_queue_depth = str(sync_queue_depth_value)
     sync_queue_wait = "30s" if expose_node_port else "5s"
     extra_env = [
         ("NANOFAAS_DEPLOYMENT_DEFAULT_BACKEND", "k8s"),
