@@ -39,7 +39,7 @@ export NANOFAAS_ROOT=/path/to/nanofaas
 
 `.github/workflows/ci.yml` runs on every push and pull request against
 `main`. It checks out this repo, checks out the pinned nanoFaaS source
-snapshot (`miciav/nanofaas` at `d44b5f95caf3843709475445cb608567ffb15d6d`,
+snapshot (`miciav/nanofaas` at `8c93f3df16f60e138531574841639a689ce371a0`,
 which has moved on from the initial snapshot above) into `.nanofaas-source`, points
 `NANOFAAS_ROOT` at that checkout, and runs the full gate below.
 `miciav/nanofaas` is private, so the cross-repo checkout authenticates with
