@@ -19,6 +19,8 @@ from sonata_tasks.vm.models import VmRequest
 from sonata_tasks.components.context import ScenarioExecutionContext
 from sonata_tasks.components.operations import RemoteCommandOperation
 
+_ASSETS_SYNC_TO_VM = "assets.sync_to_vm"
+
 
 def _remote_home(vm_request: VmRequest) -> str:
     if vm_request.home:
@@ -209,7 +211,7 @@ def plan_assets_sync_to_vm(
     return (
         _rsync_operation(
             context.vm_request,
-            operation_id="assets.sync_to_vm",
+            operation_id=_ASSETS_SYNC_TO_VM,
             summary="Sync tooling assets into VM",
             source=context.assets_root,
             destination=remote_assets_dir(context.vm_request),
@@ -241,9 +243,9 @@ def retarget_bootstrap_operation(
         retargeted_ansible: RemoteCommandOperation = replace(operation, argv=tuple(argv))
         return retargeted_ansible
 
-    if operation.operation_id in ("repo.sync_to_vm", "assets.sync_to_vm"):
+    if operation.operation_id in ("repo.sync_to_vm", _ASSETS_SYNC_TO_VM):
         request = context.vm_request
-        assets = operation.operation_id == "assets.sync_to_vm"
+        assets = operation.operation_id == _ASSETS_SYNC_TO_VM
         if assets and context.assets_root is None:
             raise ValueError("assets sync requires context.assets_root")
         argv = repo_rsync_command(

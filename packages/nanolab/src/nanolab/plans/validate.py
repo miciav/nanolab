@@ -46,6 +46,7 @@ _HANDLER_ENVELOPE_TARGETS = (
     *_QR_CODES, *_ROMAN_NUMERALS, *_JSON_TRANSFORMS, *_HEADER_ENVELOPE_PROBES,
     _BINARY_ENVELOPE_PROBE, "word-stats-java",
 )
+_EMPTY_INPUT_PAYLOAD = '{"input":{}}'
 
 
 def _handler_envelope_checks(functions: dict[str, SonataFunction]) -> tuple[EnvelopeCheck, ...]:
@@ -82,7 +83,7 @@ def _handler_envelope_checks(functions: dict[str, SonataFunction]) -> tuple[Enve
         *(
             EnvelopeCheck(
                 name(key),
-                '{"input":{}}',
+                _EMPTY_INPUT_PAYLOAD,
                 HttpFunctionExpectation(
                     status=422,
                     api_status="success",
@@ -96,7 +97,7 @@ def _handler_envelope_checks(functions: dict[str, SonataFunction]) -> tuple[Enve
         *(
             EnvelopeCheck(
                 name(key),
-                '{"input":{}}',
+                _EMPTY_INPUT_PAYLOAD,
                 HttpFunctionExpectation(
                     status=400,
                     api_status="success",
@@ -125,7 +126,7 @@ def _handler_envelope_checks(functions: dict[str, SonataFunction]) -> tuple[Enve
         ),
         EnvelopeCheck(
             name(_BINARY_ENVELOPE_PROBE),
-            '{"input":{}}',
+            _EMPTY_INPUT_PAYLOAD,
             HttpFunctionExpectation(
                 status=200, api_status="success", status_code=200,
                 required_headers=(

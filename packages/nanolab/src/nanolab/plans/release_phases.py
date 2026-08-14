@@ -78,6 +78,9 @@ from nanolab.release.tasks import (
 )
 
 
+_AGGREGATE_FILENAME = "aggregate.json"
+
+
 def build_source_test_phase(
     *,
     identity: ReleaseIdentity,
@@ -582,7 +585,7 @@ def build_attestation_phase(
 ) -> tuple[ReleasePhaseTask, ReleasePhaseTask]:
     """Sign and attest the published digests, then write the release record."""
     def release_record() -> dict[str, Any]:
-        aggregate_file = release_dir / "aggregate.json"
+        aggregate_file = release_dir / _AGGREGATE_FILENAME
         verified_file_receipt(aggregate.receipt, "aggregate", aggregate_file)
         return build_release_record(
             version=request.version,
@@ -613,7 +616,7 @@ def build_attestation_phase(
             raise ValueError("release Cosign credentials are required for attestation")
         images = all_published()
         aggregate_evidence = verified_file_receipt(
-            aggregate.receipt, "aggregate", release_dir / "aggregate.json"
+            aggregate.receipt, "aggregate", release_dir / _AGGREGATE_FILENAME
         )
         predicate_file.write_text(
             release_attest.render_predicate(
@@ -722,7 +725,7 @@ def build_attestation_phase(
 
     def finalize_documentation(_inputs: Any) -> tuple[Evidence, ...]:
         aggregate_evidence = verified_file_receipt(
-            aggregate.receipt, "aggregate", release_dir / "aggregate.json"
+            aggregate.receipt, "aggregate", release_dir / _AGGREGATE_FILENAME
         )
         expected_predicate = release_attest.build_release_predicate(
             version=request.version,

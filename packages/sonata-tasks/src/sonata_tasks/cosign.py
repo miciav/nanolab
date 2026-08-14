@@ -19,6 +19,9 @@ CosignOperation = Literal[
     "sign", "attest", "attach sbom", "verify", "verify-attestation", "public-key"
 ]
 
+_ATTACH_SBOM = "attach sbom"
+_KEY_COSIGN = "/key.cosign"
+
 
 class CosignTask(CommandTask):
     """Run a cosign operation via the pinned cosign Docker image.
@@ -82,7 +85,7 @@ class CosignTask(CommandTask):
             run.extend(["-v", f"{public_key_file}:/pub.key:ro"])
         if predicate_file is not None and operation == "attest":
             run.extend(["-v", f"{predicate_file}:/predicate.json:ro"])
-        if sbom_file is not None and operation == "attach sbom":
+        if sbom_file is not None and operation == _ATTACH_SBOM:
             run.extend(["-v", f"{sbom_file}:/sbom.json:ro"])
 
         # Build the cosign subcommand run inside the container.
@@ -91,20 +94,20 @@ class CosignTask(CommandTask):
         # finds an attestation whose type it was told to expect.
         cosign: tuple[str, ...]
         if operation == "sign":
-            cosign = ("sign", "--yes", "--key", "/key.cosign", image)
+            cosign = ("sign", "--yes", "--key", _KEY_COSIGN, image)
         elif operation == "attest":
             cosign = (
                 "attest",
                 "--yes",
                 "--key",
-                "/key.cosign",
+                _KEY_COSIGN,
                 "--type",
                 "custom",
                 "--predicate",
                 "/predicate.json",
                 image,
             )
-        elif operation == "attach sbom":
+        elif operation == _ATTACH_SBOM:
             cosign = ("attach", "sbom", "--sbom", "/sbom.json", "--type", "spdx", image)
         elif operation == "verify":
             cosign = ("verify", "--key", "/pub.key", image)
@@ -113,7 +116,7 @@ class CosignTask(CommandTask):
         elif operation == "public-key":
             if output_file is None:
                 raise ValueError("cosign public-key needs an output_file")
-            cosign = ("public-key", "--key", "/key.cosign")
+            cosign = ("public-key", "--key", _KEY_COSIGN)
         else:
             raise ValueError(f"unknown cosign operation: {operation}")
 

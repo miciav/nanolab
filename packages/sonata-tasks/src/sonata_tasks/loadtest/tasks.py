@@ -14,6 +14,8 @@ from sonata_tasks.loadtest.ports import PrometheusClient, RemoteFileFetcher
 if TYPE_CHECKING:
     from sonata_tasks.loadtest.autoscaling import AutoscalingResult
 
+_PROMETHEUS_SNAPSHOT = "prometheus-snapshot.json"
+
 
 @dataclass
 class FetchVmResults:
@@ -113,7 +115,7 @@ class CapturePrometheusSnapshot:
             "end": window.end.isoformat(),
             "queries": result,
         }
-        dest = metrics_dir / "prometheus-snapshot.json"
+        dest = metrics_dir / _PROMETHEUS_SNAPSHOT
         dest.write_text(json.dumps(snapshot, indent=2), encoding="utf-8")
         return dest
 
@@ -187,7 +189,7 @@ class WriteK6Report:
         k6_summary_path = self.data_dir / "k6-summary.json"
         k6_summary = json.loads(k6_summary_path.read_text(encoding="utf-8"))
 
-        prom_path = self.data_dir / "metrics" / "prometheus-snapshot.json"
+        prom_path = self.data_dir / "metrics" / _PROMETHEUS_SNAPSHOT
         prom_snapshot: dict | None = None
         if prom_path.exists():
             try:
@@ -226,7 +228,7 @@ class WriteLoadtestSummary:
 
     def run(self) -> Path:
         k6 = json.loads((self.data_dir / "k6-summary.json").read_text(encoding="utf-8"))
-        prometheus_path = self.data_dir / "metrics" / "prometheus-snapshot.json"
+        prometheus_path = self.data_dir / "metrics" / _PROMETHEUS_SNAPSHOT
         prometheus = (
             json.loads(prometheus_path.read_text(encoding="utf-8"))
             if prometheus_path.exists()

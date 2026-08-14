@@ -23,6 +23,9 @@ from sonata_engine.workflow.models import WorkflowState
 from tui_toolkit import render_screen_frame
 
 
+_DIM_BORDER = "cyan dim"
+
+
 @dataclass
 class WorkflowStepState:
     label: str
@@ -160,7 +163,7 @@ class WorkflowDashboard:
 
         for step in nested_roots:
             add_children(tree, step)
-        return Panel(tree, title="Nested Verification Work", border_style="cyan dim")
+        return Panel(tree, title="Nested Verification Work", border_style=_DIM_BORDER)
 
     def _summary_panel_height(self) -> int:
         return max(1, len(self.summary_lines) or 1) + 2
@@ -184,7 +187,7 @@ class WorkflowDashboard:
         summary_panel = Panel(
             Text("\n".join(self.summary_lines) or "No scenario details.", style="cyan"),
             title="Summary",
-            border_style="cyan dim",
+            border_style=_DIM_BORDER,
         )
         phases = Table.grid(padding=(0, 1))
         phases.expand = True
@@ -199,7 +202,7 @@ class WorkflowDashboard:
                 )
         else:
             phases.add_row("[dim]Waiting for workflow steps...[/]", "")
-        phases_panel = Panel(phases, title="Execution Phases", border_style="cyan dim")
+        phases_panel = Panel(phases, title="Execution Phases", border_style=_DIM_BORDER)
         nested_panel = self._nested_detail_panel()
         error_panel = self._error_detail_panel()
         left_pane: list[RenderableType] = [summary_panel, phases_panel]
@@ -217,7 +220,7 @@ class WorkflowDashboard:
             log_panel = Panel(
                 log_body,
                 title="Raw Command Output",
-                border_style="cyan dim",
+                border_style=_DIM_BORDER,
                 height=self._log_panel_height(),
             )
             layout = Table.grid(expand=True)

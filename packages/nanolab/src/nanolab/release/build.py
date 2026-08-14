@@ -30,6 +30,9 @@ _RUST_TOOLCHAIN = (
     "rust:1.97.1-alpine3.21@sha256:e5c73e7a712b368eb90b1190c6e1c4a01a3ebb0fe0abfff68c3bcd2df26ecc41"
 )
 
+_SHA256_PREFIX = "sha256:"
+_ARM64_BUILDER_ID = "release.arm64.builder"
+
 ArchiveBuilder = Callable[[Path, str, Path], ArtifactEvidence]
 
 
@@ -476,7 +479,7 @@ def stage_source_archive(
     )
     checksum = _provider_exec(provider, request, ("sha256sum", remote_archive))
     actual = str(getattr(checksum, "stdout", "")).split(maxsplit=1)[0]
-    expected = (expected_digest or local_digest).removeprefix("sha256:")
+    expected = (expected_digest or local_digest).removeprefix(_SHA256_PREFIX)
     if actual != expected:
         raise RuntimeError("source archive checksum mismatch")
     _provider_exec(
@@ -532,7 +535,7 @@ def _build_arm64_images(
             not in {
                 "release.arm64.registry-tunnel",
                 "release.arm64.builder-create",
-                "release.arm64.builder",
+                _ARM64_BUILDER_ID,
             }
         )
     for command in commands:
@@ -542,9 +545,9 @@ def _build_arm64_images(
             command.argv,
             remote_dir=command.remote_dir,
             # The builder task's stdout is parsed below — keep it clean.
-            bounded=command.task_id != "release.arm64.builder",
+            bounded=command.task_id != _ARM64_BUILDER_ID,
         )
-        if command.task_id == "release.arm64.builder":
+        if command.task_id == _ARM64_BUILDER_ID:
             arm.require_arm64_builder(str(getattr(result, "stdout", "")))
 
     for cell in image_plan.cells:
@@ -767,7 +770,7 @@ def _inspect_image_digest(provider: object, request: object, reference: str) -> 
         ("docker", "image", "inspect", "--format={{.Id}}", reference),
     )
     digest = str(getattr(result, "stdout", "")).strip()
-    if not digest.startswith("sha256:") or len(digest) != 71:
+    if not digest.startswith(_SHA256_PREFIX) or len(digest) != 71:
         raise RuntimeError(f"invalid image digest for {reference}")
     return digest
 
@@ -821,7 +824,7 @@ def _inspect_ghcr_digest(
         ),
     )
     digest = str(getattr(result, "stdout", "")).strip()
-    if not digest.startswith("sha256:") or len(digest) != 71:
+    if not digest.startswith(_SHA256_PREFIX) or len(digest) != 71:
         raise RuntimeError(f"invalid registry digest for {reference}")
     return digest
 
@@ -839,7 +842,7 @@ def _inspect_registry_digest(provider: object, request: object, reference: str) 
         ),
     )
     digest = str(getattr(result, "stdout", "")).strip()
-    if not digest.startswith("sha256:") or len(digest) != 71:
+    if not digest.startswith(_SHA256_PREFIX) or len(digest) != 71:
         raise RuntimeError(f"invalid registry digest for {reference}")
     return digest
 

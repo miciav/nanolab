@@ -59,6 +59,10 @@ from nanolab.workspace.paths import default_tool_paths, discover_tool_root
 from nanolab.workspace.provenance import git_provenance
 
 
+_JOURNAL_FILENAME = "sonata.jsonl"
+_LOCAL_PROMETHEUS_URL = "http://127.0.0.1:9090"
+
+
 def _read(path: Path) -> dict[str, object]:
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
@@ -98,7 +102,7 @@ def _workflow(
     environment: EnvironmentConfig,
     *,
     control_plane_url: str | None = None,
-    prometheus_url: str = "http://127.0.0.1:9090",
+    prometheus_url: str = _LOCAL_PROMETHEUS_URL,
     run_dir: Path | None = None,
     dry_run: bool = False,
 ):
@@ -165,11 +169,11 @@ def _teardown_release(
     paths = default_tool_paths()
     version = normalize_version(scenario_config.release.version)[0]
     release_dir = versioned_release_run_dir(run_dir or paths.runs_dir / "release", version)
-    journal_paths = [release_dir / "sonata.jsonl"]
+    journal_paths = [release_dir / _JOURNAL_FILENAME]
     journal_paths.extend(
-        path / "sonata.jsonl"
+        path / _JOURNAL_FILENAME
         for path in sorted(release_dir.parent.glob(f"{release_dir.name}.superseded-*"))
-        if (path / "sonata.jsonl").is_file()
+        if (path / _JOURNAL_FILENAME).is_file()
     )
     journals = tuple(JournalConfig(path) for path in journal_paths if path.is_file())
     if not journals:
@@ -499,7 +503,7 @@ def install_product_commands(app: typer.Typer) -> None:
                                 scenario_config,
                                 environment_config,
                                 control_plane_url=control_plane_url,
-                                prometheus_url=prometheus_url or "http://127.0.0.1:9090",
+                                prometheus_url=prometheus_url or _LOCAL_PROMETHEUS_URL,
                                 run_dir=effective_run_dir,
                             ),
                         )
@@ -644,7 +648,7 @@ def install_product_commands(app: typer.Typer) -> None:
                 scenario_config,
                 environment_config,
                 control_plane_url=control_plane_url,
-                prometheus_url=prometheus_url or "http://127.0.0.1:9090",
+                prometheus_url=prometheus_url or _LOCAL_PROMETHEUS_URL,
                 run_dir=run_dir,
                 dry_run=True,
             ),

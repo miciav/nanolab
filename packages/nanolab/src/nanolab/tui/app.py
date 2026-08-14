@@ -25,6 +25,8 @@ from nanolab.workspace.paths import default_tool_paths, discover_tool_root
 from tui_toolkit import Choice, render_screen_frame, select
 from tui_toolkit.console import console as default_console
 
+_INSPECT_SCENARIO_TITLE = "Inspect scenario"
+
 MAIN_MENU = [
     Choice(
         "Validation",
@@ -91,7 +93,7 @@ LOADTEST_MENU = [
     ),
 ]
 TOOLS_MENU = [
-    Choice("Inspect scenario", "inspect", "Inspect a supported scenario."),
+    Choice(_INSPECT_SCENARIO_TITLE, "inspect", "Inspect a supported scenario."),
     Choice("Doctor", "doctor", "Check required local executables."),
 ]
 
@@ -219,7 +221,7 @@ class NanofaasTUI:
                 ],
                 include_back=True,
                 escape_value="back",
-                title="Inspect scenario",
+                title=_INSPECT_SCENARIO_TITLE,
                 breadcrumb="Main / Tools / Inspect scenario",
             )
             if selected == "back":
@@ -232,7 +234,7 @@ class NanofaasTUI:
             except Exception as exc:
                 body = str(exc)
             self._show_static(
-                title="Inspect scenario",
+                title=_INSPECT_SCENARIO_TITLE,
                 breadcrumb="Main / Tools / Inspect scenario",
                 body=body,
             )

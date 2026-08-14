@@ -17,6 +17,7 @@ from tempfile import mkdtemp
 _REMOTE_TEMPLATE = "/tmp/nanofaas-release-credentials.XXXXXX"  # NOSONAR (S5443)
 # This accepts only the private directory returned by that `mktemp -d` invocation.
 _REMOTE_DIRECTORY = re.compile(r"/tmp/nanofaas-release-credentials\.[A-Za-z0-9]+")  # NOSONAR (S5443)
+_SECRET_REGULAR_FILE = "release secret must be a regular file"
 
 
 @dataclass(frozen=True)
@@ -44,14 +45,14 @@ def validate_secret_file(path: Path) -> Path:
     try:
         metadata = path.lstat()
     except OSError:
-        raise ValueError("release secret must be a regular file") from None
+        raise ValueError(_SECRET_REGULAR_FILE) from None
     _validate_secret_metadata(metadata)
     return path
 
 
 def _validate_secret_metadata(metadata: os.stat_result) -> None:
     if not stat.S_ISREG(metadata.st_mode):
-        raise ValueError("release secret must be a regular file")
+        raise ValueError(_SECRET_REGULAR_FILE)
     if metadata.st_uid != os.getuid():
         raise PermissionError("release secret must be owned by the current user")
     if metadata.st_mode & 0o077:
@@ -66,13 +67,13 @@ def _copy_secret_file(source: Path, destination: Path) -> None:
     try:
         before = source.lstat()
     except OSError:
-        raise ValueError("release secret must be a regular file") from None
+        raise ValueError(_SECRET_REGULAR_FILE) from None
     _validate_secret_metadata(before)
     flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
     try:
         source_fd = os.open(source, flags)
     except OSError:
-        raise ValueError("release secret must be a regular file") from None
+        raise ValueError(_SECRET_REGULAR_FILE) from None
 
     with os.fdopen(source_fd, "rb") as source_stream:
         opened = os.fstat(source_stream.fileno())
