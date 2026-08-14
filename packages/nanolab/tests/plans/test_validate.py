@@ -270,6 +270,61 @@ def test_handler_envelope_contracts_send_real_header_and_binary_sentinels() -> N
     assert binary[-2] == '{"input":{}}'
 
 
+@pytest.mark.parametrize(
+    ("marker", "error"),
+    [
+        ('"statusCode":200', "statusCode was 200"),
+        ('"headers":{"Content-Type":"text/plain"}', "headers was"),
+        ('"encoding":"utf-8"', "encoding was 'utf-8'"),
+    ],
+)
+def test_plain_and_header_probe_contracts_reject_unexpected_api_markers(
+    marker: str, error: str
+) -> None:
+    config = ScenarioConfig.model_validate(
+        {
+            "workflow": "validate",
+            "backend": "container",
+            "functions": list(HANDLER_ENVELOPE_FUNCTIONS),
+            "handler_envelope": True,
+        }
+    )
+    plan = build_validate_plan(
+        config, RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor())
+    )
+    tasks = {task.task.title: task.task for task in plan.compile().tasks}
+    responses = {
+        **{
+            resolve_function(config, key).name: (
+                '{"status":"success","output":{"body":"body-sentinel",'
+                f'"header":"header-sentinel"}},{marker}}}'
+            )
+            for key in (
+                "handler-envelope-exec",
+                "handler-envelope-go",
+                "handler-envelope-java",
+                "handler-envelope-javascript",
+                "handler-envelope-python",
+            )
+        },
+        "word-stats-java": f'{{"status":"success","output":"plain",{marker}}}',
+    }
+
+    for function_name, body in responses.items():
+        verifier = tasks[f"Verify {function_name} HTTP envelope"].verify  # pyright: ignore[reportAttributeAccessIssue]
+        assert verifier is not None
+        with pytest.raises(RuntimeError, match=error):
+            verifier(
+                TaskResult(
+                    task_id="",
+                    status="passed",
+                    return_code=0,
+                    stdout="HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
+                    + body,
+                )
+            )
+
+
 def test_validate_plan_builds_java_lite_with_its_native_dockerfile() -> None:
     image_build = _argv(
         _plan("container", functions=["word-stats-java-lite"]),

@@ -258,6 +258,34 @@ def test_http_contract_accepts_a_plain_response_when_no_markers_are_expected() -
     _ = task.run(TaskInputs.empty())
 
 
+@pytest.mark.parametrize(
+    ("marker", "error"),
+    [
+        ('"statusCode":200', "statusCode was 200"),
+        ('"headers":{"Content-Type":"text/plain"}', "headers was"),
+        ('"encoding":"utf-8"', "encoding was 'utf-8'"),
+    ],
+)
+def test_http_contract_rejects_api_markers_expected_to_be_null(
+    marker: str, error: str
+) -> None:
+    task, _ = _contract(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
+        f'{{"status":"success","output":"plain",{marker}}}',
+        expectation=HttpFunctionExpectation(
+            status=200,
+            api_status="success",
+            output="plain",
+            status_code=None,
+            api_headers=None,
+            encoding=None,
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match=error):
+        task.run(TaskInputs.empty())
+
+
 def test_success_only_invoke_keeps_its_first_header_block_behavior() -> None:
     task = HttpFunctionInvokeTask(
         "word-stats",

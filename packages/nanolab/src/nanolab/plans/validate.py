@@ -115,9 +115,13 @@ def _handler_envelope_checks(functions: dict[str, SonataFunction]) -> tuple[Enve
                     status=200,
                     api_status="success",
                     output={"body": "body-sentinel", "header": "header-sentinel"},
-            ),
-            headers=("X-E2E-Token: header-sentinel",),
-            ) for key in _HEADER_ENVELOPE_PROBES
+                    status_code=None,
+                    api_headers=None,
+                    encoding=None,
+                ),
+                headers=("X-E2E-Token: header-sentinel",),
+            )
+            for key in _HEADER_ENVELOPE_PROBES
         ),
         EnvelopeCheck(
             name(_BINARY_ENVELOPE_PROBE),
@@ -142,6 +146,9 @@ def _handler_envelope_checks(functions: dict[str, SonataFunction]) -> tuple[Enve
             HttpFunctionExpectation(
                 status=200,
                 api_status="success",
+                status_code=None,
+                api_headers=None,
+                encoding=None,
                 forbidden_headers=("X-NanoFaaS-Function-Status", "X-NanoFaaS-Encoding"),
             ),
         ),

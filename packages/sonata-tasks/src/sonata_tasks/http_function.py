@@ -294,16 +294,19 @@ def _split_final_response(stdout: str) -> tuple[str, str]:
     return headers, body
 
 
+_UNSET = object()
+
+
 @dataclass(frozen=True)
 class HttpFunctionExpectation:
     """The complete externally visible function-response contract to assert."""
 
     status: int
-    api_status: str | None = None
-    output: object | None = None
-    status_code: int | None = None
-    api_headers: dict[str, str] | None = None
-    encoding: str | None = None
+    api_status: str | None | object = _UNSET
+    output: object = _UNSET
+    status_code: int | None | object = _UNSET
+    api_headers: dict[str, str] | None | object = _UNSET
+    encoding: str | None | object = _UNSET
     required_headers: tuple[tuple[str, str], ...] = ()
     forbidden_headers: tuple[str, ...] = ()
     forbidden_header_values: tuple[tuple[str, str], ...] = ()
@@ -372,19 +375,21 @@ class HttpFunctionContractTask(CommandTask):
                 ("statusCode", expectation.status_code),
                 ("encoding", expectation.encoding),
             ):
-                if expected is not None and response.get(field) != expected:
+                if expected is not _UNSET and response.get(field) != expected:
                     raise RuntimeError(
                         f"{name}: {field} was {response.get(field)!r}, expected {expected!r}"
                     )
-            if expectation.api_headers is not None:
+            if expectation.api_headers is not _UNSET:
                 actual_headers = response.get("headers")
-                if (
-                    not isinstance(actual_headers, dict)
-                    or {header.lower(): value for header, value in actual_headers.items()}
-                    != {header.lower(): value for header, value in expectation.api_headers.items()}
-                ):
+                expected_headers = expectation.api_headers
+                matches = actual_headers == expected_headers
+                if isinstance(actual_headers, dict) and isinstance(expected_headers, dict):
+                    matches = {
+                        header.lower(): value for header, value in actual_headers.items()
+                    } == {header.lower(): value for header, value in expected_headers.items()}
+                if not matches:
                     raise RuntimeError(
-                        f"{name}: headers was {actual_headers!r}, expected {expectation.api_headers!r}"
+                        f"{name}: headers was {actual_headers!r}, expected {expected_headers!r}"
                     )
             if expectation.decoded_bytes is not None or expectation.decoded_prefix is not None:
                 output = response.get("output")
