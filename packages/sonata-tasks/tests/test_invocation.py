@@ -223,6 +223,13 @@ def test_http_contract_rejects_a_malformed_status_line() -> None:
         task.run(TaskInputs.empty())
 
 
+def test_http_contract_rejects_a_numeric_status_with_a_non_http_protocol() -> None:
+    task, _ = _contract(ENVELOPE_422.replace("HTTP/1.1 422", "NOT-HTTP 422"))
+
+    with pytest.raises(RuntimeError, match="response carried no HTTP status"):
+        task.run(TaskInputs.empty())
+
+
 def test_http_contract_rejects_a_mismatched_outer_header_value() -> None:
     task, _ = _contract(ENVELOPE_422.replace("X-Caller-Id: real", "X-Caller-Id: spoofed"))
 

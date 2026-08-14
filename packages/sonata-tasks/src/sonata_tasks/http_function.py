@@ -324,7 +324,15 @@ def _parse_contract_response(name: str, stdout: str) -> tuple[int, dict[str, str
     response_headers, body = _split_final_response(stdout)
     lines = response_headers.splitlines()
     try:
-        actual_status = int(lines[0].split()[1])
+        protocol, status, *_ = lines[0].split()
+        version_parts = protocol.removeprefix("HTTP/").split(".")
+        if (
+            not protocol.startswith("HTTP/")
+            or len(version_parts) > 2
+            or not all(part.isdigit() for part in version_parts)
+        ):
+            raise ValueError
+        actual_status = int(status)
     except (IndexError, ValueError) as error:
         raise RuntimeError(f"{name}: response carried no HTTP status") from error
     headers = {
