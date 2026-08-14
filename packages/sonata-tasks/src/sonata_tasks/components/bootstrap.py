@@ -238,7 +238,8 @@ def retarget_bootstrap_operation(
                 argv[argv.index("--private-key") + 1] = str(private_key)
             else:
                 argv.extend(["--private-key", str(private_key)])
-        return replace(operation, argv=tuple(argv))
+        retargeted_ansible: RemoteCommandOperation = replace(operation, argv=tuple(argv))
+        return retargeted_ansible
 
     if operation.operation_id in ("repo.sync_to_vm", "assets.sync_to_vm"):
         request = context.vm_request
@@ -252,7 +253,8 @@ def retarget_bootstrap_operation(
             destination=remote_assets_dir(request) if assets else _remote_project_dir(request),
             ssh_rsh=repo_sync_ssh_rsh(private_key, port=port),
         )
-        return replace(operation, argv=tuple(argv))
+        retargeted_sync: RemoteCommandOperation = replace(operation, argv=tuple(argv))
+        return retargeted_sync
 
     return operation
 

@@ -109,7 +109,7 @@ def run_bootstrap_operations(
             + ", ".join(inside_vm)
         )
     executor = HostCommandTaskExecutor(runner)
-    tasks = [
+    tasks: list[OperationTask] = [
         operation_task(
             replace(operation, operation_id=f"provision.{role}.{operation.operation_id}"),
             executor,

@@ -79,6 +79,7 @@ def test_retarget_bootstrap_ansible_uses_endpoint_port_and_key() -> None:
         private_key=Path("/keys/id_ed25519"),
     )
 
+    assert isinstance(retargeted, RemoteCommandOperation)
     argv = list(retargeted.argv)
     assert argv[argv.index("-i") + 1] == "pve.example,"
     assert argv[argv.index("ansible_port=42022") - 1] == "-e"
@@ -97,6 +98,7 @@ def test_retarget_bootstrap_repo_sync_uses_endpoint_port_and_key() -> None:
         private_key=Path("/keys/id_ed25519"),
     )
 
+    assert isinstance(retargeted, RemoteCommandOperation)
     argv = list(retargeted.argv)
     assert argv[0] == "rsync"
     assert (

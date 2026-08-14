@@ -2,19 +2,22 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-
 from typing import cast
 
 import pytest
 
 from sonata_tasks.components.operations import RemoteCommandOperation
 from sonata_tasks.provisioning.bootstrap import (
+    OperationTask,
+    operation_task,
     remote_operations,
     retarget_cloud_operations,
     run_bootstrap_operations,
     scenario_context,
 )
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
+from sonata_tasks.tasks.executors import HostCommandTaskExecutor
+from sonata_tasks.shell import SubprocessShell
 from sonata_tasks.vm.models import VmRequest
 from sonata_tasks.vm.proxmox import ProxmoxVmProvider
 
@@ -57,6 +60,13 @@ def test_run_bootstrap_operations_records_each_command() -> None:
     op = RemoteCommandOperation(operation_id="k3s", summary="install", argv=("helm", "install"))
     run_bootstrap_operations(provider, [op], role="stack")
     assert provider.shell.seen[0].argv == ("helm", "install")
+
+
+def test_operation_task_returns_the_concrete_operation_task() -> None:
+    operation = RemoteCommandOperation(operation_id="k3s", summary="install", argv=("helm",))
+    task = operation_task(operation, HostCommandTaskExecutor(SubprocessShell()))
+    assert isinstance(task, OperationTask)
+    assert task.spec.argv == ("helm",)
 
 
 def test_run_bootstrap_operations_keeps_stdout_failure_alongside_stderr() -> None:

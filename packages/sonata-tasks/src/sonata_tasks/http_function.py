@@ -460,9 +460,10 @@ class HttpFunctionContractTask(CommandTask):
         cwd: Path | None = None,
     ) -> None:
         def verify(result: TaskResult) -> None:
-            actual_status, response_headers, response = _parse_contract_response(
+            contract: tuple[int, dict[str, str], dict[str, object]] = _parse_contract_response(
                 name, result.stdout
             )
+            actual_status, response_headers, response = contract
             _verify_outer_headers(name, actual_status, response_headers, expectation)
             _verify_api_envelope(name, response, expectation)
             _verify_decoded_output(name, response, expectation)
