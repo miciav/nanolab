@@ -113,6 +113,21 @@ def test_provision_roles_cleanup_error_without_main_error(tmp_path) -> None:
     assert "destroy stack failed" in str(excinfo.value)
 
 
+def test_provision_roles_propagates_programming_errors_from_destroy(tmp_path) -> None:
+    class BrokenOrchestrator(FakeOrchestrator):
+        def teardown(self, request: VmRequest) -> None:
+            raise ValueError("bad teardown contract")
+
+    with pytest.raises(ValueError, match="bad teardown contract"):
+        with provision_roles(
+            BrokenOrchestrator(),
+            (ProvisionedRole(role="stack", request=VmRequest(lifecycle="multipass", name="stack")),),
+            repo_root=tmp_path,
+            assets_root=tmp_path / "assets",
+        ):
+            pass
+
+
 def test_provision_roles_ensures_all_before_verify_then_operations(tmp_path) -> None:
     events: list[str] = []
     provider = FakeOrchestrator(events=events, shell=RecordingShell(events=events))

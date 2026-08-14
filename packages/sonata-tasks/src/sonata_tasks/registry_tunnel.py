@@ -50,7 +50,7 @@ def registry_tunnel_resource(
         for argv in (_STOP, _RESET):
             try:
                 _ = provider.exec_argv(request, argv)
-            except BaseException:
+            except RuntimeError:
                 pass
 
     def acquire(_inputs: TaskInputs) -> None:
@@ -80,7 +80,7 @@ def registry_tunnel_resource(
         finally:
             try:
                 _ = provider.exec_argv(request, _RESET)
-            except BaseException:
+            except RuntimeError:
                 pass
 
     return Resource(

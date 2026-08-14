@@ -115,3 +115,19 @@ def test_release_raises_on_provider_failure():
     resource.acquire(TaskInputs.empty())
     with pytest.raises(RuntimeError, match="registry tunnel release failed"):
         resource.release(TaskInputs.empty(), None)
+
+
+def test_failed_acquire_propagates_programming_errors_from_cleanup():
+    class BrokenProvider(_RecordingProvider):
+        def exec_argv(self, request, argv, *, env=None, remote_dir=None, dry_run=False):
+            self.calls.append((request, argv))
+            if len(self.calls) == 1:
+                return _result(return_code=1, stderr="command failed")
+            raise ValueError("bad provider contract")
+
+    resource = registry_tunnel_resource(
+        registry_upstream="10.0.0.1", provider=BrokenProvider(), request=object()
+    )
+
+    with pytest.raises(ValueError, match="bad provider contract"):
+        resource.acquire(TaskInputs.empty())

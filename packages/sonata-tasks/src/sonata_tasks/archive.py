@@ -124,7 +124,7 @@ def source_archive_resource(
             provider.exec_argv(
                 request, argv=("rm", "-rf", remote_source_dir)
             )
-        except BaseException:
+        except RuntimeError:
             pass
 
     return Resource(

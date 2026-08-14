@@ -160,6 +160,24 @@ def test_release_removes_source_dir(git_repo: Path) -> None:
     os.unlink(remote_archive)
 
 
+def test_release_propagates_programming_errors(git_repo: Path) -> None:
+    class BrokenProvider(RecordingProvider):
+        def exec_argv(self, request: object, *, argv: tuple[str, ...]) -> ShellResult:
+            raise ValueError("bad provider contract")
+
+    resource = source_archive_resource(
+        repo_root=git_repo,
+        commit="HEAD",
+        remote_source_dir="/tmp/source",
+        remote_archive="/tmp/source.tar",
+        provider=BrokenProvider(),
+        request=object(),
+    )
+
+    with pytest.raises(ValueError, match="bad provider contract"):
+        resource.release(TaskInputs.empty(), "/tmp/source")
+
+
 def test_acquire_cleans_up_archive_on_verify_failure(git_repo: Path) -> None:
     """When sha256sum fails, the remote archive is cleaned up."""
     remote_dir = Path(tempfile.mkdtemp())

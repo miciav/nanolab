@@ -116,7 +116,7 @@ def provision_roles(
                 try:
                     with subtask(task_id=task.task_id, title=task.title):
                         task.run()
-                except Exception as exc:
+                except RuntimeError as exc:
                     cleanup_errors.append(str(exc))
 
     if main_error is not None:

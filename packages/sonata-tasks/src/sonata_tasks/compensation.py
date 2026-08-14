@@ -24,7 +24,7 @@ def best_effort(error: BaseException, cleanup: Callable[[], object], *, what: st
     """
     try:
         _ = cleanup()
-    except BaseException as cleanup_error:
+    except (OSError, RuntimeError) as cleanup_error:
         error.add_note(f"Best-effort {what} after a failed acquire failed: {cleanup_error}")
 
 

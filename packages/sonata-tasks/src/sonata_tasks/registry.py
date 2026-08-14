@@ -3,7 +3,6 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 from typing import Any, Literal
-from urllib.error import URLError
 from urllib.request import urlopen
 
 from sonata_engine import Resource, TaskInputs
@@ -22,7 +21,7 @@ def _answers(port: int) -> bool:
     try:
         with urlopen(f"http://127.0.0.1:{port}/v2/", timeout=1) as response:
             return response.status == 200
-    except (OSError, URLError):
+    except OSError:
         return False
 
 
