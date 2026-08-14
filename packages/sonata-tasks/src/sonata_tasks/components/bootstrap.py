@@ -220,6 +220,27 @@ def plan_assets_sync_to_vm(
     )
 
 
+def _retarget_ansible_argv(
+    argv: tuple[str, ...] | list[str],
+    *,
+    host: str,
+    port: int | None,
+    private_key: Path | None,
+) -> list[str]:
+    """Point an Ansible playbook argv at a resolved SSH endpoint."""
+    argv = list(argv)
+    if "-i" in argv:
+        argv[argv.index("-i") + 1] = f"{host},"
+    if port is not None:
+        argv.extend(["-e", f"ansible_port={port}"])
+    if private_key is not None:
+        if "--private-key" in argv:
+            argv[argv.index("--private-key") + 1] = str(private_key)
+        else:
+            argv.extend(["--private-key", str(private_key)])
+    return argv
+
+
 def retarget_bootstrap_operation(
     operation: RemoteCommandOperation,
     *,
@@ -230,18 +251,7 @@ def retarget_bootstrap_operation(
 ) -> RemoteCommandOperation:
     """Point an Ansible or repository-sync operation at a resolved SSH endpoint."""
     if operation.argv and operation.argv[0] == "ansible-playbook":
-        argv = list(operation.argv)
-        if "-i" in argv:
-            argv[argv.index("-i") + 1] = f"{host},"
-        if port is not None:
-            argv.extend(["-e", f"ansible_port={port}"])
-        if private_key is not None:
-            if "--private-key" in argv:
-                argv[argv.index("--private-key") + 1] = str(private_key)
-            else:
-                argv.extend(["--private-key", str(private_key)])
-        retargeted_ansible: RemoteCommandOperation = replace(operation, argv=tuple(argv))
-        return retargeted_ansible
+        return replace(operation, argv=tuple(_retarget_ansible_argv(operation.argv, host=host, port=port, private_key=private_key)))
 
     if operation.operation_id in ("repo.sync_to_vm", _ASSETS_SYNC_TO_VM):
         request = context.vm_request

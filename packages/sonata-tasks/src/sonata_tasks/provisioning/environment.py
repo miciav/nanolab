@@ -77,6 +77,32 @@ def _destroy_task(provider: object, request: VmRequest, *, role: str) -> Destroy
     )
 
 
+def _run_cleanup_tasks(cleanup_tasks: list[DestroyVm]) -> list[str]:
+    """Tear down in reverse order, collecting RuntimeError messages."""
+    cleanup_errors: list[str] = []
+    for task in reversed(cleanup_tasks):
+        try:
+            with subtask(task_id=task.task_id, title=task.title):
+                task.run()
+        except RuntimeError as exc:
+            cleanup_errors.append(str(exc))
+    return cleanup_errors
+
+
+def _raise_if_failed(
+    main_error: BaseException | None,
+    cleanup_errors: list[str],
+) -> None:
+    """Translate a main error and any cleanup failures into the final exception."""
+    if main_error is not None:
+        if cleanup_errors:
+            combined = f"{main_error}\n\nCleanup errors:\n" + "\n".join(cleanup_errors)
+            raise RuntimeError(combined) from main_error
+        raise main_error
+    if cleanup_errors:
+        raise RuntimeError("Cleanup failed:\n" + "\n".join(cleanup_errors))
+
+
 @contextmanager
 def provision_roles(
     provider: object,
@@ -112,17 +138,6 @@ def provision_roles(
         main_error = exc
     finally:
         if not keep:
-            for task in reversed(cleanup_tasks):
-                try:
-                    with subtask(task_id=task.task_id, title=task.title):
-                        task.run()
-                except RuntimeError as exc:
-                    cleanup_errors.append(str(exc))
+            cleanup_errors = _run_cleanup_tasks(cleanup_tasks)
 
-    if main_error is not None:
-        if cleanup_errors:
-            combined = f"{main_error}\n\nCleanup errors:\n" + "\n".join(cleanup_errors)
-            raise RuntimeError(combined) from main_error
-        raise main_error
-    if cleanup_errors:
-        raise RuntimeError("Cleanup failed:\n" + "\n".join(cleanup_errors))
+    _raise_if_failed(main_error, cleanup_errors)

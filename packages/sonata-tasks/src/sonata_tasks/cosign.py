@@ -65,60 +65,10 @@ class CosignTask(CommandTask):
         public_key_file: str | None = None,
         output_file: str | None = None,
     ) -> None:
-        # Build the docker run arguments.
-        run: list[str] = [
-            "docker",
-            "run",
-            "--rm",
-            "--user",
-            "0",
-            "-e",
-            "COSIGN_PASSWORD",
-            "-e",
-            "DOCKER_CONFIG=/auth",
-            "-v",
-            f"{docker_config}:/auth:ro",
-        ]
-        if operation in ("sign", "attest", "public-key"):
-            run.extend(["-v", f"{key_file}:/key.cosign:ro"])
-        if public_key_file is not None and operation in ("verify", "verify-attestation"):
-            run.extend(["-v", f"{public_key_file}:/pub.key:ro"])
-        if predicate_file is not None and operation == "attest":
-            run.extend(["-v", f"{predicate_file}:/predicate.json:ro"])
-        if sbom_file is not None and operation == _ATTACH_SBOM:
-            run.extend(["-v", f"{sbom_file}:/sbom.json:ro"])
-
-        # Build the cosign subcommand run inside the container.
-        # --yes: these run unattended; without it cosign blocks on a prompt.
-        # --type: the release predicate is `custom`, and verify-attestation only
-        # finds an attestation whose type it was told to expect.
-        cosign: tuple[str, ...]
-        if operation == "sign":
-            cosign = ("sign", "--yes", "--key", _KEY_COSIGN, image)
-        elif operation == "attest":
-            cosign = (
-                "attest",
-                "--yes",
-                "--key",
-                _KEY_COSIGN,
-                "--type",
-                "custom",
-                "--predicate",
-                "/predicate.json",
-                image,
-            )
-        elif operation == _ATTACH_SBOM:
-            cosign = ("attach", "sbom", "--sbom", "/sbom.json", "--type", "spdx", image)
-        elif operation == "verify":
-            cosign = ("verify", "--key", "/pub.key", image)
-        elif operation == "verify-attestation":
-            cosign = ("verify-attestation", "--key", "/pub.key", "--type", "custom", image)
-        elif operation == "public-key":
-            if output_file is None:
-                raise ValueError("cosign public-key needs an output_file")
-            cosign = ("public-key", "--key", _KEY_COSIGN)
-        else:
-            raise ValueError(f"unknown cosign operation: {operation}")
+        run = _docker_run_args(
+            operation, docker_config, key_file, public_key_file, predicate_file, sbom_file
+        )
+        cosign = _cosign_command(operation, image, output_file)
 
         run.append(COSIGN_IMAGE)
         run.extend(cosign)
@@ -150,3 +100,75 @@ class CosignTask(CommandTask):
             cwd=cwd,
             verify=verify,
         )
+
+
+def _docker_run_args(
+    operation: CosignOperation | str,
+    docker_config: str,
+    key_file: str,
+    public_key_file: str | None,
+    predicate_file: str | None,
+    sbom_file: str | None,
+) -> list[str]:
+    """Build the docker run argument list: base flags plus per-operation mounts."""
+    run: list[str] = [
+        "docker",
+        "run",
+        "--rm",
+        "--user",
+        "0",
+        "-e",
+        "COSIGN_PASSWORD",
+        "-e",
+        "DOCKER_CONFIG=/auth",
+        "-v",
+        f"{docker_config}:/auth:ro",
+    ]
+    if operation in ("sign", "attest", "public-key"):
+        run.extend(["-v", f"{key_file}:/key.cosign:ro"])
+    if public_key_file is not None and operation in ("verify", "verify-attestation"):
+        run.extend(["-v", f"{public_key_file}:/pub.key:ro"])
+    if predicate_file is not None and operation == "attest":
+        run.extend(["-v", f"{predicate_file}:/predicate.json:ro"])
+    if sbom_file is not None and operation == _ATTACH_SBOM:
+        run.extend(["-v", f"{sbom_file}:/sbom.json:ro"])
+    return run
+
+
+def _cosign_command(
+    operation: CosignOperation | str, image: str, output_file: str | None
+) -> tuple[str, ...]:
+    """Build the cosign subcommand run inside the container.
+
+    --yes: these run unattended; without it cosign blocks on a prompt.
+    --type: the release predicate is `custom`, and verify-attestation only
+    finds an attestation whose type it was told to expect.
+    """
+    cosign: tuple[str, ...]
+    if operation == "sign":
+        cosign = ("sign", "--yes", "--key", _KEY_COSIGN, image)
+    elif operation == "attest":
+        cosign = (
+            "attest",
+            "--yes",
+            "--key",
+            _KEY_COSIGN,
+            "--type",
+            "custom",
+            "--predicate",
+            "/predicate.json",
+            image,
+        )
+    elif operation == _ATTACH_SBOM:
+        cosign = ("attach", "sbom", "--sbom", "/sbom.json", "--type", "spdx", image)
+    elif operation == "verify":
+        cosign = ("verify", "--key", "/pub.key", image)
+    elif operation == "verify-attestation":
+        cosign = ("verify-attestation", "--key", "/pub.key", "--type", "custom", image)
+    elif operation == "public-key":
+        if output_file is None:
+            raise ValueError("cosign public-key needs an output_file")
+        cosign = ("public-key", "--key", _KEY_COSIGN)
+    else:
+        raise ValueError(f"unknown cosign operation: {operation}")
+    return cosign

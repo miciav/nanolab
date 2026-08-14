@@ -55,6 +55,29 @@ def managed_process_resource(
     ...
 
 
+def _wait_until_ready(
+    *,
+    title: str,
+    current: ManagedProcess,
+    ready: Callable[[], bool],
+    readiness_attempts: int,
+    readiness_interval: float,
+    sleep: Callable[[float], None],
+) -> ManagedProcess:
+    """Wait until the spawned process answers `ready()`, raising if it exits."""
+    for attempt in range(readiness_attempts):
+        exit_code = current.poll()
+        if exit_code is not None:
+            raise RuntimeError(
+                f"{title} exited with code {exit_code} before becoming ready"
+            )
+        if ready():
+            return current
+        if attempt < readiness_attempts - 1:
+            sleep(readiness_interval)
+    raise RuntimeError(f"{title} never became ready")
+
+
 def managed_process_resource(
     *,
     title: str,
@@ -100,17 +123,14 @@ def managed_process_resource(
         )
         current = actual_spawn(argv, cwd=cwd, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
         try:
-            for attempt in range(readiness_attempts):
-                exit_code = current.poll()
-                if exit_code is not None:
-                    raise RuntimeError(
-                        f"{title} exited with code {exit_code} before becoming ready"
-                    )
-                if ready():
-                    return current
-                if attempt < readiness_attempts - 1:
-                    sleep(readiness_interval)
-            raise RuntimeError(f"{title} never became ready")
+            return _wait_until_ready(
+                title=title,
+                current=current,
+                ready=ready,
+                readiness_attempts=readiness_attempts,
+                readiness_interval=readiness_interval,
+                sleep=sleep,
+            )
         except BaseException as error:
             # The engine never releases an acquire that did not complete, and
             # the wait can end in more ways than "gave up": ready() can raise,

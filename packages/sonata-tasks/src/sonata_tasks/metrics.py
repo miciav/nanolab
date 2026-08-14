@@ -32,6 +32,40 @@ def _metric_sum(scrape: str, name: str, labels: Mapping[str, str]) -> tuple[int,
     return matches, total
 
 
+def _resolve_prometheus_url(url: Endpoint | str, inputs: object) -> str:
+    if isinstance(url, str):
+        return url
+    return str(getattr(inputs, "resource")(url)).replace(":8080", ":8081") + "/actuator/prometheus"
+
+
+def _require_metric_sum(
+    url: Endpoint | str,
+    scrape: str,
+    names: tuple[str, ...],
+    labels: Mapping[str, str],
+    minimum: float,
+) -> None:
+    for name in names:
+        matches, total = _metric_sum(scrape, name, labels)
+        if matches:
+            if total < minimum:
+                raise RuntimeError(f"{url}: {name}{dict(labels)} sum was {total}, expected >= {minimum}")
+            return
+    raise RuntimeError(f"{url}: none of {names} appeared with labels {dict(labels)}")
+
+
+def _check_minimums(
+    result: TaskResult,
+    url: Endpoint | str,
+    minimums: tuple[tuple[str, Mapping[str, str], float], ...],
+    any_minimums: tuple[tuple[tuple[str, ...], Mapping[str, str], float], ...],
+) -> None:
+    for name, labels, minimum in minimums:
+        _require_metric_sum(url, result.stdout, (name,), labels, minimum)
+    for names, labels, minimum in any_minimums:
+        _require_metric_sum(url, result.stdout, names, labels, minimum)
+
+
 class PrometheusScrapeCheckTask(CommandTask):
     """Scrape an actuator endpoint and assert which samples are there.
 
@@ -94,31 +128,11 @@ class PrometheusMinimumCheckTask(CommandTask):
         if not minimums and not any_minimums:
             raise ValueError("a metric minimum check needs at least one expectation")
 
-        def resolved(inputs: object) -> str:
-            if isinstance(url, str):
-                return url
-            return str(getattr(inputs, "resource")(url)).replace(":8080", ":8081") + "/actuator/prometheus"
-
-        def require(scrape: str, names: tuple[str, ...], labels: Mapping[str, str], minimum: float) -> None:
-            for name in names:
-                matches, total = _metric_sum(scrape, name, labels)
-                if matches:
-                    if total < minimum:
-                        raise RuntimeError(f"{url}: {name}{dict(labels)} sum was {total}, expected >= {minimum}")
-                    return
-            raise RuntimeError(f"{url}: none of {names} appeared with labels {dict(labels)}")
-
-        def check(result: TaskResult) -> None:
-            for name, labels, minimum in minimums:
-                require(result.stdout, (name,), labels, minimum)
-            for names, labels, minimum in any_minimums:
-                require(result.stdout, names, labels, minimum)
-
         super().__init__(
             title=title or "Check metric values",
-            argv=lambda inputs: ("curl", "-fsS", resolved(inputs)),
+            argv=lambda inputs: ("curl", "-fsS", _resolve_prometheus_url(url, inputs)),
             executor=executor,
             role=role,
             cwd=cwd,
-            verify=check,
+            verify=lambda result: _check_minimums(result, url, minimums, any_minimums),
         )

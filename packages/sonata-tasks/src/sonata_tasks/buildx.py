@@ -12,6 +12,99 @@ from sonata_tasks.command import CommandTask
 from sonata_tasks.compensation import best_effort
 
 
+def _buildx_builder_run(
+    inputs: TaskInputs,
+    executor: CommandTaskExecutor,
+    role: ExecutionRole,
+    *args: str,
+    expected_exit_codes: frozenset[int] = frozenset({0}),
+) -> TaskResult:
+    result = (
+        CommandTask(
+            title=f"docker buildx {' '.join(args)}",
+            argv=("docker", "buildx", *args),
+            executor=executor,
+            role=role,
+            expected_exit_codes=expected_exit_codes,
+        )
+        .run(inputs)
+        .value
+    )
+    assert result is not None
+    return result
+
+
+def _buildx_builder_create_argv(name: str, buildkitd_config: str | None) -> list[str]:
+    create = ["create", "--name", name, "--driver", "docker-container"]
+    if buildkitd_config is not None:
+        create.extend(("--buildkitd-config", buildkitd_config))
+    create.append("--use")
+    return create
+
+
+def _buildx_builder_bootstrap(
+    inputs: TaskInputs,
+    executor: CommandTaskExecutor,
+    role: ExecutionRole,
+    *,
+    name: str,
+    buildkitd_config: str | None,
+    validate: Callable[[str], None] | None,
+) -> None:
+    create = _buildx_builder_create_argv(name, buildkitd_config)
+    try:
+        _ = _buildx_builder_run(inputs, executor, role, *create)
+        bootstrapped = _buildx_builder_run(inputs, executor, role, "inspect", "--bootstrap", name)
+        if validate is not None:
+            validate(str(bootstrapped.stdout or ""))
+    except BaseException as error:
+        best_effort(
+            error,
+            lambda: _buildx_builder_run(inputs, executor, role, "rm", "--force", name),
+            what=f"cleanup failed buildx builder {name}",
+        )
+        raise
+
+
+def _buildx_builder_acquire(
+    inputs: TaskInputs,
+    executor: CommandTaskExecutor,
+    role: ExecutionRole,
+    *,
+    name: str,
+    buildkitd_config: str | None,
+    validate: Callable[[str], None] | None,
+    replace_existing: bool,
+) -> str:
+    inspected = _buildx_builder_run(
+        inputs, executor, role, "inspect", name, expected_exit_codes=frozenset({0, 1})
+    )
+    if inspected.return_code == 0:
+        if not replace_existing:
+            if validate is not None:
+                validate(str(inspected.stdout or ""))
+            return "existing"
+        _ = _buildx_builder_run(inputs, executor, role, "rm", "--force", name)
+
+    _buildx_builder_bootstrap(
+        inputs, executor, role, name=name, buildkitd_config=buildkitd_config, validate=validate
+    )
+    return name
+
+
+def _buildx_builder_release(
+    inputs: TaskInputs,
+    executor: CommandTaskExecutor,
+    role: ExecutionRole,
+    *,
+    name: str,
+    state: str,
+) -> None:
+    if state == "existing":
+        return
+    _ = _buildx_builder_run(inputs, executor, role, "rm", "--force", name)
+
+
 def buildx_builder_resource(
     *,
     name: str,
@@ -35,56 +128,19 @@ def buildx_builder_resource(
         Otherwise → ``docker buildx rm --force <name>``.
     """
 
-    def _run(
-        inputs: TaskInputs,
-        *args: str,
-        expected_exit_codes: frozenset[int] = frozenset({0}),
-    ) -> TaskResult:
-        result = (
-            CommandTask(
-                title=f"docker buildx {' '.join(args)}",
-                argv=("docker", "buildx", *args),
-                executor=executor,
-                role=role,
-                expected_exit_codes=expected_exit_codes,
-            )
-            .run(inputs)
-            .value
-        )
-        assert result is not None
-        return result
-
     def acquire(inputs: TaskInputs) -> str:
-        inspected = _run(inputs, "inspect", name, expected_exit_codes=frozenset({0, 1}))
-        if inspected.return_code == 0:
-            if not replace_existing:
-                if validate is not None:
-                    validate(str(inspected.stdout or ""))
-                return "existing"
-            _ = _run(inputs, "rm", "--force", name)
-
-        create = ["create", "--name", name, "--driver", "docker-container"]
-        if buildkitd_config is not None:
-            create.extend(("--buildkitd-config", buildkitd_config))
-        create.append("--use")
-        try:
-            _ = _run(inputs, *create)
-            bootstrapped = _run(inputs, "inspect", "--bootstrap", name)
-            if validate is not None:
-                validate(str(bootstrapped.stdout or ""))
-        except BaseException as error:
-            best_effort(
-                error,
-                lambda: _run(inputs, "rm", "--force", name),
-                what=f"cleanup failed buildx builder {name}",
-            )
-            raise
-        return name
+        return _buildx_builder_acquire(
+            inputs,
+            executor,
+            role,
+            name=name,
+            buildkitd_config=buildkitd_config,
+            validate=validate,
+            replace_existing=replace_existing,
+        )
 
     def release(inputs: TaskInputs, state: str) -> None:
-        if state == "existing":
-            return
-        _ = _run(inputs, "rm", "--force", name)
+        _buildx_builder_release(inputs, executor, role, name=name, state=state)
 
     return Resource(
         title=f"Acquire {name} buildx builder",

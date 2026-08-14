@@ -39,6 +39,35 @@ def query_prometheus_server_time(base_url: str, timeout_seconds: float = 4.0) ->
     raise RuntimeError(f"unexpected prometheus time() result: {result!r}")
 
 
+def _coerce_sample(sample: Any) -> tuple[float, float] | None:
+    """Return ``(timestamp, value)`` floats, or ``None`` when unparseable."""
+    if not isinstance(sample, list) or len(sample) != 2:
+        return None
+    raw_ts, raw_value = sample
+    try:
+        return float(raw_ts), float(raw_value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _merge_samples(result: list[Any]) -> dict[float, float]:
+    # Merge samples across label dimensions by timestamp.
+    merged: dict[float, float] = {}
+    for series in result:
+        if not isinstance(series, dict):
+            continue
+        values = series.get("values", [])
+        if not isinstance(values, list):
+            continue
+        for sample in values:
+            parsed = _coerce_sample(sample)
+            if parsed is None:
+                continue
+            ts, value = parsed
+            merged[ts] = merged.get(ts, 0.0) + value
+    return merged
+
+
 def query_prometheus_range_series(
     base_url: str,
     metric_name: str,
@@ -62,24 +91,7 @@ def query_prometheus_range_series(
     if not isinstance(result, list):
         raise RuntimeError("invalid prometheus query_range payload")
 
-    # Merge samples across label dimensions by timestamp.
-    merged: dict[float, float] = {}
-    for series in result:
-        if not isinstance(series, dict):
-            continue
-        values = series.get("values", [])
-        if not isinstance(values, list):
-            continue
-        for sample in values:
-            if not isinstance(sample, list) or len(sample) != 2:
-                continue
-            raw_ts, raw_value = sample
-            try:
-                ts = float(raw_ts)
-                value = float(raw_value)
-            except (TypeError, ValueError):
-                continue
-            merged[ts] = merged.get(ts, 0.0) + value
+    merged = _merge_samples(result)
 
     points: list[dict[str, float | str]] = []
     for timestamp in sorted(merged):

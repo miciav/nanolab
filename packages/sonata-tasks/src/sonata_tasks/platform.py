@@ -249,24 +249,13 @@ class Platform:
     functions: tuple[Resource[None], ...]
 
 
-def add_platform(
+def _check_kubectl(
     workflow: Workflow,
     request: PlatformRequest,
-    *,
     executor: CommandTaskExecutor,
-    cwd: Path | None = None,
-    control_plane_process: Callable[[], Resource[Any]] | None = None,
-    local_endpoint: str = f"http://127.0.0.1:{LOCAL_CONTROL_PLANE_API_PORT}",
-    requires: tuple[Resource[Any], ...] = (),
-) -> Platform:
-    """Add everything up to and including registered functions.
-
-    Shared because `validate` and `loadtest` need exactly the same platform and
-    differ only in what they do to it afterwards — one invokes and inspects, the
-    other puts it under load. The legacy pair had the same arrangement, with
-    `loadtest` importing `k8s_deployment_specs` out of the validate module; this
-    is that, given a home of its own so neither workflow imports the other.
-    """
+    cwd: Path | None,
+    requires: tuple[Resource[Any], ...],
+) -> None:
     if request.backend == "k8s":
         workflow.add(
             KubectlTask(
@@ -280,6 +269,56 @@ def add_platform(
             requires=requires,
         )
 
+
+def _add_function_build(
+    workflow: Workflow,
+    request: PlatformRequest,
+    function: PlatformFunction,
+    executor: CommandTaskExecutor,
+    cwd: Path | None,
+    requires: tuple[Resource[Any], ...],
+) -> None:
+    if function.image_build_argv is not None:
+        workflow.add(
+            CommandTask(
+                title=request.titled(f"Build application artifact: {function.name}"),
+                argv=function.build_argv,
+                executor=executor,
+                role=request.role,
+                cwd=cwd,
+            ),
+            requires=requires,
+        )
+    workflow.add(
+        CommandTask(
+            title=request.titled(f"Build image {function.name}"),
+            argv=function.image_build_argv or function.build_argv,
+            executor=executor,
+            role=request.role,
+            cwd=cwd,
+        ),
+        requires=requires,
+    )
+    if request.backend == "k8s" or request.push_function_images:
+        workflow.add(
+            DockerPushTask(
+                image=function.image,
+                executor=executor,
+                role=request.role,
+                title=request.titled(f"Push image {function.image}"),
+                cwd=cwd,
+            ),
+            requires=requires,
+        )
+
+
+def _add_build_tasks(
+    workflow: Workflow,
+    request: PlatformRequest,
+    executor: CommandTaskExecutor,
+    cwd: Path | None,
+    requires: tuple[Resource[Any], ...],
+) -> None:
     if request.build_images:
         if request.build_control_plane:
             workflow.add(
@@ -315,39 +354,17 @@ def add_platform(
                 requires=requires,
             )
         for function in request.functions:
-            if function.image_build_argv is not None:
-                workflow.add(
-                    CommandTask(
-                        title=request.titled(f"Build application artifact: {function.name}"),
-                        argv=function.build_argv,
-                        executor=executor,
-                        role=request.role,
-                        cwd=cwd,
-                    ),
-                    requires=requires,
-                )
-            workflow.add(
-                CommandTask(
-                    title=request.titled(f"Build image {function.name}"),
-                    argv=function.image_build_argv or function.build_argv,
-                    executor=executor,
-                    role=request.role,
-                    cwd=cwd,
-                ),
-                requires=requires,
-            )
-            if request.backend == "k8s" or request.push_function_images:
-                workflow.add(
-                    DockerPushTask(
-                        image=function.image,
-                        executor=executor,
-                        role=request.role,
-                        title=request.titled(f"Push image {function.image}"),
-                        cwd=cwd,
-                    ),
-                    requires=requires,
-                )
+            _add_function_build(workflow, request, function, executor, cwd, requires)
 
+
+def _resolve_platform_endpoint(
+    request: PlatformRequest,
+    control_plane_process: Callable[[], Resource[Any]] | None,
+    executor: CommandTaskExecutor,
+    cwd: Path | None,
+    requires: tuple[Resource[Any], ...],
+    local_endpoint: str,
+) -> tuple[tuple[Resource[Any], ...], Endpoint]:
     resources: tuple[Resource[Any], ...] = ()
     endpoint: Endpoint = local_endpoint
     if request.backend == "k8s":
@@ -355,41 +372,81 @@ def add_platform(
         resources, endpoint = (release,), release
     elif control_plane_process is not None:
         resources = (control_plane_process(),)
+    return resources, endpoint
+
+
+def _function_resource(
+    request: PlatformRequest,
+    function: PlatformFunction,
+    endpoint: Endpoint,
+    requires: tuple[Resource[Any], ...],
+    resources: tuple[Resource[Any], ...],
+    executor: CommandTaskExecutor,
+    cwd: Path | None,
+) -> Resource[None]:
+    return function_resource(
+        name=request.titled(function.name),
+        # Registering only asks the control plane to create the Deployment;
+        # it answers before the pod does. A live run invoked 0.4s later and
+        # got POOL_ERROR: Connection refused against a Service whose
+        # ClusterIP already existed.
+        readiness=(
+            k8s_deployment_readiness(
+                deployment=f"fn-{function.name}",
+                namespace=request.namespace,
+                executor=executor,
+                role=request.role,
+                cwd=cwd,
+            )
+            if request.backend == "k8s"
+            else ()
+        ),
+        register=HttpFunctionRegisterTask(
+            function.manifest(),
+            endpoint=endpoint,
+            executor=executor,
+            role=request.role,
+            cwd=cwd,
+        ),
+        delete=HttpFunctionDeleteTask(
+            function.name,
+            endpoint=endpoint,
+            executor=executor,
+            role=request.role,
+            cwd=cwd,
+        ),
+        requires=(*requires, *resources),
+    )
+
+
+def add_platform(
+    workflow: Workflow,
+    request: PlatformRequest,
+    *,
+    executor: CommandTaskExecutor,
+    cwd: Path | None = None,
+    control_plane_process: Callable[[], Resource[Any]] | None = None,
+    local_endpoint: str = f"http://127.0.0.1:{LOCAL_CONTROL_PLANE_API_PORT}",
+    requires: tuple[Resource[Any], ...] = (),
+) -> Platform:
+    """Add everything up to and including registered functions.
+
+    Shared because `validate` and `loadtest` need exactly the same platform and
+    differ only in what they do to it afterwards — one invokes and inspects, the
+    other puts it under load. The legacy pair had the same arrangement, with
+    `loadtest` importing `k8s_deployment_specs` out of the validate module; this
+    is that, given a home of its own so neither workflow imports the other.
+    """
+    _check_kubectl(workflow, request, executor, cwd, requires)
+
+    _add_build_tasks(workflow, request, executor, cwd, requires)
+
+    resources, endpoint = _resolve_platform_endpoint(
+        request, control_plane_process, executor, cwd, requires, local_endpoint
+    )
 
     functions = tuple(
-        function_resource(
-            name=request.titled(function.name),
-            # Registering only asks the control plane to create the Deployment;
-            # it answers before the pod does. A live run invoked 0.4s later and
-            # got POOL_ERROR: Connection refused against a Service whose
-            # ClusterIP already existed.
-            readiness=(
-                k8s_deployment_readiness(
-                    deployment=f"fn-{function.name}",
-                    namespace=request.namespace,
-                    executor=executor,
-                    role=request.role,
-                    cwd=cwd,
-                )
-                if request.backend == "k8s"
-                else ()
-            ),
-            register=HttpFunctionRegisterTask(
-                function.manifest(),
-                endpoint=endpoint,
-                executor=executor,
-                role=request.role,
-                cwd=cwd,
-            ),
-            delete=HttpFunctionDeleteTask(
-                function.name,
-                endpoint=endpoint,
-                executor=executor,
-                role=request.role,
-                cwd=cwd,
-            ),
-            requires=(*requires, *resources),
-        )
+        _function_resource(request, function, endpoint, requires, resources, executor, cwd)
         for function in request.functions
     )
 

@@ -37,6 +37,7 @@ shell — every executor already quotes the argv it is handed.
 """
 
 _JSON_CONTENT_TYPE_HEADER = "Content-Type: application/json"
+_CONTENT_TYPE_HEADER_NAME = "content-type"
 
 
 def _argv(endpoint: Endpoint, build: Callable[[str], tuple[str, ...]]) -> Argv:
@@ -57,6 +58,53 @@ def _command_result(outcome: TaskOutcome[TaskResult], what: str) -> TaskResult:
     return outcome.value
 
 
+def _verify_registration_response(
+    manifest: FunctionManifest,
+    stdout: str,
+    expected_backend: str | None,
+    expected_endpoint_prefix: str | None,
+) -> None:
+    """Assert the control plane echoed the manifest and honored runtime expectations.
+
+    The backend and endpoint prefix are the deployment-derived values a workflow
+    pins down; when both are None the response needs no checks beyond parsing.
+    """
+    try:
+        response = json.loads(stdout)
+    except json.JSONDecodeError as error:
+        raise RuntimeError(f"{manifest.name}: invalid registration response") from error
+    for field, value in {
+        "name": manifest.name,
+        "image": manifest.image,
+        "requestedExecutionMode": manifest.execution_mode,
+        "effectiveExecutionMode": manifest.execution_mode,
+    }.items():
+        if response.get(field) != value:
+            raise RuntimeError(
+                f"{manifest.name}: {field} was {response.get(field)!r}, expected {value!r}"
+            )
+    if expected_backend is not None and response.get("deploymentBackend") != expected_backend:
+        raise RuntimeError(
+            f"{manifest.name}: deploymentBackend was {response.get('deploymentBackend')!r}, "
+            f"expected {expected_backend!r}"
+        )
+    _verify_registration_endpoint(
+        manifest.name, response.get("endpointUrl"), expected_endpoint_prefix
+    )
+
+
+def _verify_registration_endpoint(
+    name: str, endpoint_url: object, expected_prefix: str | None
+) -> None:
+    """The control plane's assigned endpoint must carry the expected prefix."""
+    if expected_prefix is not None and (
+        not isinstance(endpoint_url, str) or not endpoint_url.startswith(expected_prefix)
+    ):
+        raise RuntimeError(
+            f"{name}: endpointUrl was {endpoint_url!r}, expected prefix {expected_prefix!r}"
+        )
+
+
 class HttpFunctionRegisterTask(CommandTask):
     """POST a function manifest to the control plane."""
 
@@ -74,35 +122,9 @@ class HttpFunctionRegisterTask(CommandTask):
         def verify(result: TaskResult) -> None:
             if expected_backend is None and expected_endpoint_prefix is None:
                 return
-            try:
-                response = json.loads(result.stdout)
-            except json.JSONDecodeError as error:
-                raise RuntimeError(f"{manifest.name}: invalid registration response") from error
-            expected = {
-                "name": manifest.name,
-                "image": manifest.image,
-                "requestedExecutionMode": manifest.execution_mode,
-                "effectiveExecutionMode": manifest.execution_mode,
-            }
-            for field, value in expected.items():
-                if response.get(field) != value:
-                    raise RuntimeError(
-                        f"{manifest.name}: {field} was {response.get(field)!r}, expected {value!r}"
-                    )
-            if expected_backend is not None and response.get("deploymentBackend") != expected_backend:
-                raise RuntimeError(
-                    f"{manifest.name}: deploymentBackend was {response.get('deploymentBackend')!r}, "
-                    f"expected {expected_backend!r}"
-                )
-            endpoint_url = response.get("endpointUrl")
-            if expected_endpoint_prefix is not None and (
-                not isinstance(endpoint_url, str)
-                or not endpoint_url.startswith(expected_endpoint_prefix)
-            ):
-                raise RuntimeError(
-                    f"{manifest.name}: endpointUrl was {endpoint_url!r}, "
-                    f"expected prefix {expected_endpoint_prefix!r}"
-                )
+            _verify_registration_response(
+                manifest, result.stdout, expected_backend, expected_endpoint_prefix
+            )
 
         super().__init__(
             title=f"Register {manifest.name}",
@@ -353,23 +375,62 @@ def _parse_contract_response(name: str, stdout: str) -> tuple[int, dict[str, str
     return actual_status, headers, response
 
 
+def _header_matches(actual: str | None, expected: str, header: str) -> bool:
+    """Compare a header value; content-type matches on media type, the rest exactly.
+
+    Accepting parameters such as ``application/json; charset=utf-8`` without
+    failing the envelope is why content-type gets the partitioned comparison.
+    """
+    if header == _CONTENT_TYPE_HEADER_NAME and actual is not None:
+        return (
+            actual.partition(";")[0].strip().lower()
+            == expected.partition(";")[0].strip().lower()
+        )
+    return actual == expected
+
+
+def _headers_match(actual_headers: object, expected_headers: object) -> bool:
+    """Whether the API envelope's ``headers`` object equals the expected one.
+
+    Header names compare case-insensitively, and the content-type value by media
+    type, so a parameter on either side does not fail the match.
+    """
+    matches = actual_headers == expected_headers
+    if isinstance(actual_headers, dict) and isinstance(expected_headers, dict):
+        actual_normalized = {header.lower(): value for header, value in actual_headers.items()}
+        expected_normalized = {header.lower(): value for header, value in expected_headers.items()}
+        matches = actual_normalized == expected_normalized
+        if (
+            actual_normalized.keys() == expected_normalized.keys()
+            and _CONTENT_TYPE_HEADER_NAME in actual_normalized
+        ):
+            actual_content_type = actual_normalized[_CONTENT_TYPE_HEADER_NAME]
+            expected_content_type = expected_normalized[_CONTENT_TYPE_HEADER_NAME]
+            if isinstance(actual_content_type, str) and isinstance(expected_content_type, str):
+                matches = (
+                    actual_content_type.partition(";")[0].strip().lower()
+                    == expected_content_type.partition(";")[0].strip().lower()
+                    and all(
+                        actual_normalized[header] == expected_normalized[header]
+                        for header in actual_normalized.keys() - {_CONTENT_TYPE_HEADER_NAME}
+                    )
+                )
+    return matches
+
+
 def _verify_outer_headers(
     name: str,
     actual_status: int,
     headers: dict[str, str],
     expectation: HttpFunctionExpectation,
 ) -> None:
-    content_type = "content-type"
     if actual_status != expectation.status:
         raise RuntimeError(f"{name}: HTTP status was {actual_status}, expected {expectation.status}")
     for header, expected_value in expectation.required_headers:
         actual_value = headers.get(header.lower())
         if actual_value is None:
             raise RuntimeError(f"{name}: missing required header {header}")
-        matches = actual_value == expected_value
-        if header.lower() == content_type:
-            matches = actual_value.partition(";")[0].strip().lower() == expected_value.partition(";")[0].strip().lower()
-        if not matches:
+        if not _header_matches(actual_value, expected_value, header.lower()):
             raise RuntimeError(
                 f"{name}: required header {header} was {actual_value!r}, "
                 f"expected {expected_value!r}"
@@ -379,17 +440,14 @@ def _verify_outer_headers(
             raise RuntimeError(f"{name}: forbidden header {header} was present")
     for header, forbidden_value in expectation.forbidden_header_values:
         actual_value = headers.get(header.lower())
-        matches = actual_value == forbidden_value
-        if header.lower() == content_type and actual_value is not None:
-            matches = actual_value.partition(";")[0].strip().lower() == forbidden_value.partition(";")[0].strip().lower()
-        if matches:
+        if _header_matches(actual_value, forbidden_value, header.lower()):
             raise RuntimeError(f"{name}: forbidden header {header} had value {forbidden_value!r}")
 
 
-def _verify_api_envelope(
+def _verify_api_fields(
     name: str, response: dict[str, object], expectation: HttpFunctionExpectation
 ) -> None:
-    content_type = "content-type"
+    """Assert the envelope's status/output/statusCode/encoding fields."""
     for field, expected in (
         ("status", expectation.api_status),
         ("output", expectation.output),
@@ -398,29 +456,16 @@ def _verify_api_envelope(
     ):
         if expected is not _UNSET and response.get(field) != expected:
             raise RuntimeError(f"{name}: {field} was {response.get(field)!r}, expected {expected!r}")
+
+
+def _verify_api_envelope(
+    name: str, response: dict[str, object], expectation: HttpFunctionExpectation
+) -> None:
+    _verify_api_fields(name, response, expectation)
     if expectation.api_headers is _UNSET:
         return
-    actual_headers = response.get("headers")
-    expected_headers = expectation.api_headers
-    matches = actual_headers == expected_headers
-    if isinstance(actual_headers, dict) and isinstance(expected_headers, dict):
-        actual_normalized = {header.lower(): value for header, value in actual_headers.items()}
-        expected_normalized = {header.lower(): value for header, value in expected_headers.items()}
-        matches = actual_normalized == expected_normalized
-        if actual_normalized.keys() == expected_normalized.keys() and content_type in actual_normalized:
-            actual_content_type = actual_normalized[content_type]
-            expected_content_type = expected_normalized[content_type]
-            if isinstance(actual_content_type, str) and isinstance(expected_content_type, str):
-                matches = (
-                    actual_content_type.partition(";")[0].strip().lower()
-                    == expected_content_type.partition(";")[0].strip().lower()
-                    and all(
-                        actual_normalized[header] == expected_normalized[header]
-                        for header in actual_normalized.keys() - {content_type}
-                    )
-                )
-    if not matches:
-        raise RuntimeError(f"{name}: headers was {actual_headers!r}, expected {expected_headers!r}")
+    if not _headers_match(response.get("headers"), expectation.api_headers):
+        raise RuntimeError(f"{name}: headers was {response.get('headers')!r}, expected {expectation.api_headers!r}")
 
 
 def _verify_decoded_output(
