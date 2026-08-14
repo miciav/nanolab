@@ -105,7 +105,7 @@ def _run(
             remote_dir=None,
             dry_run=False,
         )
-    except Exception:
+    except (OSError, RuntimeError):
         raise RuntimeError("remote credential command failed") from None
     return _require_success(result, "remote credential command")
 
@@ -122,7 +122,7 @@ def _transfer(
             source=source,
             destination=destination,
         )
-    except Exception:
+    except (OSError, RuntimeError):
         raise RuntimeError("release credential transfer failed") from None
     _require_success(result, "release credential transfer")
 

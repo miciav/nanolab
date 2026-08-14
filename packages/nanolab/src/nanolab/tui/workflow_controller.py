@@ -98,7 +98,7 @@ class TuiWorkflowController:
                     refresh()
                     if listener.input_is_tty:
                         listener.wait_for_acknowledgment()
-            except BaseException as exc:
+            except (OSError, RuntimeError) as exc:
                 if error is None:
                     error = exc
                 else:
@@ -106,7 +106,7 @@ class TuiWorkflowController:
             finally:
                 try:
                     listener.stop()
-                except BaseException as cleanup_error:
+                except (OSError, RuntimeError) as cleanup_error:
                     if error is None:
                         error = cleanup_error
                     else:

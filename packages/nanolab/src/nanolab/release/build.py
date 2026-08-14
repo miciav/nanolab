@@ -719,7 +719,7 @@ def _smoke_arm64_server(
                 remote_dir=None,
                 dry_run=False,
             )
-        except BaseException:
+        except (OSError, RuntimeError):
             pass
         raise
     _provider_exec(

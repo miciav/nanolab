@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 from sonata_engine import Task, TaskInputs, TaskOutcome, Workflow
 
-from nanolab.release.secrets import validate_secret_file
+from nanolab.release.secrets import _run, validate_secret_file
 from nanolab.release.resources import ghcr_credentials_resource
 
 
@@ -74,6 +74,15 @@ class _Provider:
 
 class _BodyFailure(RuntimeError):
     pass
+
+
+def test_remote_credential_command_does_not_translate_programming_errors() -> None:
+    class BrokenProvider:
+        def exec_argv(self, *_args, **_kwargs) -> _Result:
+            raise ValueError("bad provider contract")
+
+    with pytest.raises(ValueError, match="bad provider contract"):
+        _run(BrokenProvider(), object(), ("true",))
 
 
 def test_ghcr_resource_validates_before_remote_action_and_always_releases(

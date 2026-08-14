@@ -398,7 +398,7 @@ def build_inputs_resource(
                 ("rm", "-f", "--", remote_bake, remote_buildkit),
             )
             _require_remote_success(result, f"{architecture} release input cleanup")
-        except BaseException as cleanup_error:
+        except RuntimeError as cleanup_error:
             error = cleanup_error
         finally:
             bake.unlink(missing_ok=True)
