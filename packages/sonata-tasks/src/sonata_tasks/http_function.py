@@ -36,6 +36,8 @@ the value from a resource removes the subshell, and with it the reason for the
 shell — every executor already quotes the argv it is handed.
 """
 
+_JSON_CONTENT_TYPE_HEADER = "Content-Type: application/json"
+
 
 def _argv(endpoint: Endpoint, build: Callable[[str], tuple[str, ...]]) -> Argv:
     if isinstance(endpoint, str):
@@ -117,7 +119,7 @@ class HttpFunctionRegisterTask(CommandTask):
                     "--retry-max-time",
                     "30",
                     "-H",
-                    "Content-Type: application/json",
+                    _JSON_CONTENT_TYPE_HEADER,
                     "--data",
                     manifest.json(),
                     f"{base}/v1/functions",
@@ -192,7 +194,7 @@ class HttpFunctionEnqueueTask(Task[str]):
                     "curl",
                     "-fsS",
                     "-H",
-                    "Content-Type: application/json",
+                    _JSON_CONTENT_TYPE_HEADER,
                     "-H",
                     f"Idempotency-Key: {idempotency_key}",
                     "--data",
@@ -318,6 +320,117 @@ class HttpFunctionExpectation:
     decoded_prefix: bytes | None = None
 
 
+def _parse_contract_response(name: str, stdout: str) -> tuple[int, dict[str, str], dict[str, object]]:
+    response_headers, body = _split_final_response(stdout)
+    lines = response_headers.splitlines()
+    try:
+        actual_status = int(lines[0].split()[1])
+    except (IndexError, ValueError) as error:
+        raise RuntimeError(f"{name}: response carried no HTTP status") from error
+    headers = {
+        line.split(":", 1)[0].strip().lower(): line.split(":", 1)[1].strip()
+        for line in lines[1:]
+        if ":" in line
+    }
+    try:
+        response = json.loads(body)
+    except json.JSONDecodeError as error:
+        raise RuntimeError(f"{name}: invalid JSON response") from error
+    if not isinstance(response, dict):
+        raise RuntimeError(f"{name}: response was not a JSON object")
+    return actual_status, headers, response
+
+
+def _verify_outer_headers(
+    name: str,
+    actual_status: int,
+    headers: dict[str, str],
+    expectation: HttpFunctionExpectation,
+) -> None:
+    content_type = "content-type"
+    if actual_status != expectation.status:
+        raise RuntimeError(f"{name}: HTTP status was {actual_status}, expected {expectation.status}")
+    for header, expected_value in expectation.required_headers:
+        actual_value = headers.get(header.lower())
+        if actual_value is None:
+            raise RuntimeError(f"{name}: missing required header {header}")
+        matches = actual_value == expected_value
+        if header.lower() == content_type:
+            matches = actual_value.partition(";")[0].strip().lower() == expected_value.partition(";")[0].strip().lower()
+        if not matches:
+            raise RuntimeError(
+                f"{name}: required header {header} was {actual_value!r}, "
+                f"expected {expected_value!r}"
+            )
+    for header in expectation.forbidden_headers:
+        if header.lower() in headers:
+            raise RuntimeError(f"{name}: forbidden header {header} was present")
+    for header, forbidden_value in expectation.forbidden_header_values:
+        actual_value = headers.get(header.lower())
+        matches = actual_value == forbidden_value
+        if header.lower() == content_type and actual_value is not None:
+            matches = actual_value.partition(";")[0].strip().lower() == forbidden_value.partition(";")[0].strip().lower()
+        if matches:
+            raise RuntimeError(f"{name}: forbidden header {header} had value {forbidden_value!r}")
+
+
+def _verify_api_envelope(
+    name: str, response: dict[str, object], expectation: HttpFunctionExpectation
+) -> None:
+    content_type = "content-type"
+    for field, expected in (
+        ("status", expectation.api_status),
+        ("output", expectation.output),
+        ("statusCode", expectation.status_code),
+        ("encoding", expectation.encoding),
+    ):
+        if expected is not _UNSET and response.get(field) != expected:
+            raise RuntimeError(f"{name}: {field} was {response.get(field)!r}, expected {expected!r}")
+    if expectation.api_headers is _UNSET:
+        return
+    actual_headers = response.get("headers")
+    expected_headers = expectation.api_headers
+    matches = actual_headers == expected_headers
+    if isinstance(actual_headers, dict) and isinstance(expected_headers, dict):
+        actual_normalized = {header.lower(): value for header, value in actual_headers.items()}
+        expected_normalized = {header.lower(): value for header, value in expected_headers.items()}
+        matches = actual_normalized == expected_normalized
+        if actual_normalized.keys() == expected_normalized.keys() and content_type in actual_normalized:
+            actual_content_type = actual_normalized[content_type]
+            expected_content_type = expected_normalized[content_type]
+            if isinstance(actual_content_type, str) and isinstance(expected_content_type, str):
+                matches = (
+                    actual_content_type.partition(";")[0].strip().lower()
+                    == expected_content_type.partition(";")[0].strip().lower()
+                    and all(
+                        actual_normalized[header] == expected_normalized[header]
+                        for header in actual_normalized.keys() - {content_type}
+                    )
+                )
+    if not matches:
+        raise RuntimeError(f"{name}: headers was {actual_headers!r}, expected {expected_headers!r}")
+
+
+def _verify_decoded_output(
+    name: str, response: dict[str, object], expectation: HttpFunctionExpectation
+) -> None:
+    if expectation.decoded_bytes is None and expectation.decoded_prefix is None:
+        return
+    output = response.get("output")
+    if not isinstance(output, str):
+        raise RuntimeError(f"{name}: base64 output was not a string")
+    try:
+        decoded = base64.b64decode(output, validate=True)
+    except ValueError as error:
+        raise RuntimeError(f"{name}: invalid base64 output") from error
+    if expectation.decoded_bytes is not None and decoded != expectation.decoded_bytes:
+        raise RuntimeError(f"{name}: decoded output was {decoded!r}, expected {expectation.decoded_bytes!r}")
+    if expectation.decoded_prefix is not None and not decoded.startswith(expectation.decoded_prefix):
+        raise RuntimeError(
+            f"{name}: decoded output did not start with {expectation.decoded_prefix!r}"
+        )
+
+
 class HttpFunctionContractTask(CommandTask):
     """Invoke a function and assert its complete HTTP envelope."""
 
@@ -335,80 +448,12 @@ class HttpFunctionContractTask(CommandTask):
         cwd: Path | None = None,
     ) -> None:
         def verify(result: TaskResult) -> None:
-            response_headers, body = _split_final_response(result.stdout)
-            lines = response_headers.splitlines()
-            try:
-                actual_status = int(lines[0].split()[1])
-            except (IndexError, ValueError) as error:
-                raise RuntimeError(f"{name}: response carried no HTTP status") from error
-            if actual_status != expectation.status:
-                raise RuntimeError(f"{name}: HTTP status was {actual_status}, expected {expectation.status}")
-
-            headers = {
-                line.split(":", 1)[0].strip().lower(): line.split(":", 1)[1].strip()
-                for line in lines[1:]
-                if ":" in line
-            }
-            for header, expected_value in expectation.required_headers:
-                actual_value = headers.get(header.lower())
-                if actual_value is None:
-                    raise RuntimeError(f"{name}: missing required header {header}")
-                if actual_value != expected_value:
-                    raise RuntimeError(
-                        f"{name}: required header {header} was {actual_value!r}, "
-                        f"expected {expected_value!r}"
-                    )
-            for header in expectation.forbidden_headers:
-                if header.lower() in headers:
-                    raise RuntimeError(f"{name}: forbidden header {header} was present")
-            for header, forbidden_value in expectation.forbidden_header_values:
-                if headers.get(header.lower()) == forbidden_value:
-                    raise RuntimeError(
-                        f"{name}: forbidden header {header} had value {forbidden_value!r}"
-                    )
-
-            try:
-                response = json.loads(body)
-            except json.JSONDecodeError as error:
-                raise RuntimeError(f"{name}: invalid JSON response") from error
-            if not isinstance(response, dict):
-                raise RuntimeError(f"{name}: response was not a JSON object")
-            for field, expected in (
-                ("status", expectation.api_status),
-                ("output", expectation.output),
-                ("statusCode", expectation.status_code),
-                ("encoding", expectation.encoding),
-            ):
-                if expected is not _UNSET and response.get(field) != expected:
-                    raise RuntimeError(
-                        f"{name}: {field} was {response.get(field)!r}, expected {expected!r}"
-                    )
-            if expectation.api_headers is not _UNSET:
-                actual_headers = response.get("headers")
-                expected_headers = expectation.api_headers
-                matches = actual_headers == expected_headers
-                if isinstance(actual_headers, dict) and isinstance(expected_headers, dict):
-                    matches = {
-                        header.lower(): value for header, value in actual_headers.items()
-                    } == {header.lower(): value for header, value in expected_headers.items()}
-                if not matches:
-                    raise RuntimeError(
-                        f"{name}: headers was {actual_headers!r}, expected {expected_headers!r}"
-                    )
-            if expectation.decoded_bytes is not None or expectation.decoded_prefix is not None:
-                output = response.get("output")
-                if not isinstance(output, str):
-                    raise RuntimeError(f"{name}: base64 output was not a string")
-                try:
-                    decoded = base64.b64decode(output, validate=True)
-                except ValueError as error:
-                    raise RuntimeError(f"{name}: invalid base64 output") from error
-                if expectation.decoded_bytes is not None and decoded != expectation.decoded_bytes:
-                    raise RuntimeError(f"{name}: decoded output was {decoded!r}, expected {expectation.decoded_bytes!r}")
-                if expectation.decoded_prefix is not None and not decoded.startswith(expectation.decoded_prefix):
-                    raise RuntimeError(
-                        f"{name}: decoded output did not start with {expectation.decoded_prefix!r}"
-                    )
+            actual_status, response_headers, response = _parse_contract_response(
+                name, result.stdout
+            )
+            _verify_outer_headers(name, actual_status, response_headers, expectation)
+            _verify_api_envelope(name, response, expectation)
+            _verify_decoded_output(name, response, expectation)
 
         request_headers = tuple(part for header in headers for part in ("-H", header))
         super().__init__(
@@ -479,7 +524,7 @@ class HttpFunctionInvokeTask(CommandTask):
                     "curl",
                     "-fsS" if require_header is None else "-isS",
                     "-H",
-                    "Content-Type: application/json",
+                    _JSON_CONTENT_TYPE_HEADER,
                     "--data",
                     payload,
                     f"{base}/v1/functions/{name}:invoke",
@@ -520,7 +565,7 @@ class HttpStatusCheckTask(CommandTask):
             if actual != str(expected_status):
                 raise RuntimeError(f"{url}: answered {actual or 'nothing'}, expected {expected_status}")
 
-        data = ("-H", "Content-Type: application/json", "--data", payload) if payload else ()
+        data = ("-H", _JSON_CONTENT_TYPE_HEADER, "--data", payload) if payload else ()
         super().__init__(
             title=title or f"Expect {expected_status} from {url}",
             argv=("curl", "-sS", "-o", "/dev/null", "-w", "%{http_code}", *data, url),

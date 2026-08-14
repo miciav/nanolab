@@ -216,6 +216,20 @@ def test_http_contract_accepts_an_exact_422_function_envelope() -> None:
     )
 
 
+def test_http_contract_rejects_a_malformed_status_line() -> None:
+    task, _ = _contract(ENVELOPE_422.replace("HTTP/1.1 422", "not-http"))
+
+    with pytest.raises(RuntimeError, match="response carried no HTTP status"):
+        task.run(TaskInputs.empty())
+
+
+def test_http_contract_rejects_a_mismatched_outer_header_value() -> None:
+    task, _ = _contract(ENVELOPE_422.replace("X-Caller-Id: real", "X-Caller-Id: spoofed"))
+
+    with pytest.raises(RuntimeError, match="required header x-caller-id was 'spoofed'"):
+        task.run(TaskInputs.empty())
+
+
 @pytest.mark.parametrize(
     ("stdout", "expectation", "error"),
     [
@@ -362,7 +376,7 @@ def test_http_contract_matches_api_header_names_case_insensitively() -> None:
     task, _ = _contract(
         "HTTP/1.1 200 OK\r\n\r\n"
         '{"status":"success","output":"iVBORw0KGgpwYXlsb2Fk","statusCode":200,'
-        '"headers":{"Content-type":"image/png"},"encoding":"base64"}',
+        '"headers":{"Content-type":"image/png; charset=binary"},"encoding":"base64"}',
         expectation=HttpFunctionExpectation(
             status=200,
             api_headers={"Content-Type": "image/png"},
@@ -417,7 +431,7 @@ def test_http_contract_rejects_mismatched_api_envelope_fields(
 def test_http_contract_requires_encoding_marker_but_rejects_function_content_type_on_outer_response() -> None:
     task, _ = _contract(
         "HTTP/1.1 200 OK\r\n"
-        "Content-Type: image/png\r\n"
+        "Content-Type: image/png; charset=binary\r\n"
         "X-NanoFaaS-Encoding: base64\r\n\r\n"
         '{"status":"success","output":"ok","statusCode":200}',
         expectation=HttpFunctionExpectation(
@@ -444,7 +458,7 @@ def test_http_contract_rejects_missing_required_encoding_marker() -> None:
         task.run(TaskInputs.empty())
 
 
-def test_http_contract_requires_the_exact_outer_json_content_type() -> None:
+def test_http_contract_accepts_parameters_on_the_outer_json_content_type() -> None:
     task, _ = _contract(
         "HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=utf-8\r\n\r\n"
         '{"status":"success","output":"ok","statusCode":200}',
@@ -453,5 +467,4 @@ def test_http_contract_requires_the_exact_outer_json_content_type() -> None:
         ),
     )
 
-    with pytest.raises(RuntimeError, match="required header Content-Type was 'application/json; charset=utf-8'"):
-        task.run(TaskInputs.empty())
+    _ = task.run(TaskInputs.empty())
