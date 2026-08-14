@@ -1,5 +1,6 @@
 from __future__ import annotations
 import pytest
+from pydantic import ValidationError
 from sonata_tasks.vm.models import VmConfig, VmInfo, VmLifecycle, VmRequest
 
 def test_vm_request_minimal() -> None:
@@ -12,7 +13,7 @@ def test_vm_request_minimal() -> None:
     assert req.disk == "30G"
 
 def test_vm_request_external_requires_host() -> None:
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         VmRequest(lifecycle="external")
 
 def test_vm_lifecycle_values() -> None:

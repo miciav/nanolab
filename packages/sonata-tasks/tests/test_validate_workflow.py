@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from sonata_engine import Resource, TaskInputs, Workflow
+from sonata_engine import Resource, TaskInputs, UndeclaredResourceError, Workflow
 from sonata_engine.workflow.context import bind_workflow_sink
 from sonata_tasks.execution.bindings import RoleBindings
 from sonata_tasks.http_function import HttpFunctionExpectation
@@ -503,7 +503,7 @@ def test_inputs_are_only_readable_where_declared() -> None:
         title="X", acquire=lambda _inputs: "v", release=lambda _inputs, _value: None
     )
 
-    with pytest.raises(Exception):
+    with pytest.raises(UndeclaredResourceError):
         _ = TaskInputs.empty().resource(resource)
 
 

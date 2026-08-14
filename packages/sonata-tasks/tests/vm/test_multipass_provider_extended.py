@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from pydantic import ValidationError
 
 from sonata_tasks.vm.models import VmRequest
 from sonata_tasks.vm.multipass import (
@@ -118,7 +119,7 @@ def test_resolve_connection_host_external_no_host_raises() -> None:
     # Manually clear host to test validation branch
     req_dict = req.model_dump()
     # Use a mock to simulate missing host
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         resolve_connection_host(
             VmRequest.model_validate({**req_dict, "lifecycle": "external", "host": None}),
             client,

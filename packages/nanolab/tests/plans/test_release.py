@@ -4,7 +4,7 @@ import hashlib
 import json
 import os
 from collections.abc import Callable, Mapping
-from dataclasses import asdict, replace
+from dataclasses import asdict, FrozenInstanceError, replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
@@ -187,7 +187,7 @@ def test_release_request_is_frozen():
         performance_root=Path("/tmp/perf"),
         source_tree=Path("/tmp"),
     )
-    with pytest.raises(Exception):
+    with pytest.raises(FrozenInstanceError):
         req.version = "2.0.0"  # type: ignore[misc]
 
 
