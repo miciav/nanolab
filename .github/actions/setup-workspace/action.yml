@@ -26,17 +26,14 @@ runs:
       uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       with:
         repository: miciav/nanofaas
-        # nanofaas main at "fix: preserve binary envelope content type". Same
-        # Java 25 / GraalVM 25.2.4 toolchain as the previous pin, plus what the
-        # handler-envelope validation scenarios now need: the qr-code,
-        # roman-numeral, json-transform, handler-envelope and binary-envelope
-        # example functions, and the IPv4 local registry default
-        # (127.0.0.1:5000) the catalog tests assert. It keeps everything the
-        # previous pin carried for the autoscaling scenarios (HPA scale-from-zero,
-        # the adapter rules, kube-state-metrics, the internal autoscaler gauges).
+        # nanofaas main at "fix: resolve SonarQube findings in Go and JavaScript
+        # SDKs". Same Java 25 / GraalVM 25.2.4 toolchain as the previous pin,
+        # and it keeps everything that pin carried (the handler-envelope example
+        # functions, the IPv4 local registry default, the autoscaling scenario
+        # support) plus the 0.19.0 version bump and the Go/JS SDK cleanups.
         # Tests read the version and the matrix from this checkout rather than
         # assuming them, so moving the pin needs no test edits.
-        ref: 8c93f3df16f60e138531574841639a689ce371a0
+        ref: 7a5a669792b57ef03b8552c4a626491f49138449
         path: .nanofaas-source
         token: ${{ inputs.nanofaas-token }}
 
