@@ -330,6 +330,21 @@ def test_http_contract_accepts_a_base64_output_with_the_expected_png_signature()
     _ = task.run(TaskInputs.empty())
 
 
+def test_http_contract_matches_api_header_names_case_insensitively() -> None:
+    task, _ = _contract(
+        "HTTP/1.1 200 OK\r\n\r\n"
+        '{"status":"success","output":"iVBORw0KGgpwYXlsb2Fk","statusCode":200,'
+        '"headers":{"Content-type":"image/png"},"encoding":"base64"}',
+        expectation=HttpFunctionExpectation(
+            status=200,
+            api_headers={"Content-Type": "image/png"},
+            encoding="base64",
+        ),
+    )
+
+    _ = task.run(TaskInputs.empty())
+
+
 def test_http_contract_rejects_a_base64_output_with_the_wrong_signature() -> None:
     task, _ = _contract(
         "HTTP/1.1 200 OK\r\n\r\n"

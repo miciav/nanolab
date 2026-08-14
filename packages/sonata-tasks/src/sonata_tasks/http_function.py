@@ -370,12 +370,21 @@ class HttpFunctionContractTask(CommandTask):
                 ("status", expectation.api_status),
                 ("output", expectation.output),
                 ("statusCode", expectation.status_code),
-                ("headers", expectation.api_headers),
                 ("encoding", expectation.encoding),
             ):
                 if expected is not None and response.get(field) != expected:
                     raise RuntimeError(
                         f"{name}: {field} was {response.get(field)!r}, expected {expected!r}"
+                    )
+            if expectation.api_headers is not None:
+                actual_headers = response.get("headers")
+                if (
+                    not isinstance(actual_headers, dict)
+                    or {header.lower(): value for header, value in actual_headers.items()}
+                    != {header.lower(): value for header, value in expectation.api_headers.items()}
+                ):
+                    raise RuntimeError(
+                        f"{name}: headers was {actual_headers!r}, expected {expectation.api_headers!r}"
                     )
             if expectation.decoded_bytes is not None or expectation.decoded_prefix is not None:
                 output = response.get("output")
