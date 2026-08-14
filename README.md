@@ -81,6 +81,23 @@ uv run --package nanolab nanolab plan packages/nanolab/scenarios-v2/deployment-l
 Nothing in this gate should modify `uv.lock`; if it does, run `uv lock` and
 commit the updated lockfile separately.
 
+## Local SonarQube analysis
+
+With Docker running and `sonar-scanner` installed (`brew install sonar-scanner`
+on macOS), scan all three workspace packages with:
+
+```bash
+./scripts/sonar.sh
+```
+
+The script starts an ephemeral SonarQube Community container on
+`127.0.0.1:9000`, analyses `packages/nanolab/src`,
+`packages/sonata-tasks/src`, and `packages/tui-toolkit/src` together with their
+test trees, then prints the open issue counts. It leaves the server running so
+the findings remain browsable and writes their complete API response to
+`.scannerwork/issues.json`. Use `./scripts/sonar.sh --rm` to remove the server
+after the scan, or `./scripts/sonar.sh --dry-run` to inspect the scanner command.
+
 ### Using a newer nanoFaaS checkout
 
 CI always pins `NANOFAAS_ROOT` to the nanoFaaS commit recorded above, so the

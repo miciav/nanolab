@@ -50,6 +50,23 @@ def test_nanolab_readme_documents_local_handler_envelope_validation() -> None:
     assert "functions, Compose project, and registry" in text
 
 
+def test_workspace_readme_documents_local_sonarqube_analysis() -> None:
+    text = (WORKSPACE_ROOT / "README.md").read_text(encoding="utf-8")
+
+    for phrase in (
+        "./scripts/sonar.sh",
+        "./scripts/sonar.sh --rm",
+        "./scripts/sonar.sh --dry-run",
+        "sonar-scanner",
+        "127.0.0.1:9000",
+        "packages/nanolab/src",
+        "packages/sonata-tasks/src",
+        "packages/tui-toolkit/src",
+        ".scannerwork/issues.json",
+    ):
+        assert phrase in text
+
+
 def test_nanolab_readme_explains_provider_setup_entries() -> None:
     text = (NANOLAB_ROOT / "README.md").read_text(encoding="utf-8")
     marker = "When only the provider templates are present"

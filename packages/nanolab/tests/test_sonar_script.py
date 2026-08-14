@@ -39,3 +39,10 @@ def test_sonar_working_directory_is_ignored() -> None:
     gitignore = (REPO_ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
 
     assert ".scannerwork/" in gitignore
+
+
+def test_sonar_script_exports_detailed_findings_without_credentials() -> None:
+    script = (REPO_ROOT / "scripts/sonar.sh").read_text(encoding="utf-8")
+
+    assert "ps=500" in script
+    assert '.scannerwork/issues.json' in script

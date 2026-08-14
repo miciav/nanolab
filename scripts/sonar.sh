@@ -119,8 +119,10 @@ while true; do
     sleep 2
 done
 
+mkdir -p .scannerwork
 curl -sf -u "$TOKEN": \
-    "$SONAR_HOST/api/issues/search?componentKeys=${PROJECT_KEY}&resolved=false&ps=1&facets=impactSeverities" \
+    "$SONAR_HOST/api/issues/search?componentKeys=${PROJECT_KEY}&resolved=false&ps=500&facets=impactSeverities" \
+    | tee .scannerwork/issues.json \
     | python3 -c '
 import json, sys
 
@@ -135,6 +137,7 @@ print(f"NanoLab Python: {total} open issues " + " ".join(
     for severity in ("BLOCKER", "HIGH", "MEDIUM", "LOW", "INFO")
 ))
 '
+echo "Detailed findings: .scannerwork/issues.json"
 
 if [ "$KEEP" = true ]; then
     echo "SonarQube UI: ${SONAR_HOST}/project/issues?resolved=false&id=${PROJECT_KEY}"
