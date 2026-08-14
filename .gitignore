@@ -22,3 +22,4 @@ packages/nanolab/scenarios-v2/release-config.yaml
 .wheel-smoke/
 .worktrees/
 .coverage
+.scannerwork/
