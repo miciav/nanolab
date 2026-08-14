@@ -294,7 +294,11 @@ def _split_final_response(stdout: str) -> tuple[str, str]:
     return headers, body
 
 
-_UNSET = object()
+class _UnsetType:
+    __slots__ = ()
+
+
+_UNSET = _UnsetType()
 
 
 @dataclass(frozen=True)
@@ -302,11 +306,11 @@ class HttpFunctionExpectation:
     """The complete externally visible function-response contract to assert."""
 
     status: int
-    api_status: str | None | object = _UNSET
+    api_status: str | None | _UnsetType = _UNSET
     output: object = _UNSET
-    status_code: int | None | object = _UNSET
-    api_headers: dict[str, str] | None | object = _UNSET
-    encoding: str | None | object = _UNSET
+    status_code: int | None | _UnsetType = _UNSET
+    api_headers: dict[str, str] | None | _UnsetType = _UNSET
+    encoding: str | None | _UnsetType = _UNSET
     required_headers: tuple[tuple[str, str], ...] = ()
     forbidden_headers: tuple[str, ...] = ()
     forbidden_header_values: tuple[tuple[str, str], ...] = ()
