@@ -134,7 +134,7 @@ def provision_roles(
                 )
                 run_bootstrap_operations(provider, retargeted, role=entry.role)
         yield
-    except BaseException as exc:
+    except BaseException as exc:  # NOSONAR (S5754): cleanup must run across the yield boundary
         main_error = exc
     finally:
         if not keep:

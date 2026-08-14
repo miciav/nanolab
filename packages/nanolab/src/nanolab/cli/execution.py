@@ -44,8 +44,8 @@ def _container_urls(
     if environment.provider != "local":
         raise ValueError("container load-test requires a local environment")
     return (
-        control_plane_url or "http://127.0.0.1:8080",
-        prometheus_url or "http://127.0.0.1:9090",
+        control_plane_url or "http://127.0.0.1:8080",  # NOSONAR (S5332): local loopback
+        prometheus_url or "http://127.0.0.1:9090",  # NOSONAR (S5332): local loopback
     )
 
 
@@ -83,25 +83,25 @@ def _vm_provider_urls(
     if dry_run:
         if environment.provider == "azure":
             host = f"<azure-ip:{request.name}>"
-            discovered_prometheus = f"http://{host}:{PROMETHEUS_NODE_PORT}"
+            discovered_prometheus = f"http://{host}:{PROMETHEUS_NODE_PORT}"  # NOSONAR (S5332): VM endpoint over SSH tunnel
         else:
             host = f"<proxmox-guest-ip:{request.name}>"
-            discovered_prometheus = f"http://<proxmox-prometheus:{request.name}>"
+            discovered_prometheus = f"http://<proxmox-prometheus:{request.name}>"  # NOSONAR (S5332): VM endpoint over SSH tunnel
     else:
         provider = vm_provider or provider_for(
             request, default_tool_paths().nanofaas_root
         )
         if environment.provider == "azure":
             host = provider.connection_host(request)  # type: ignore[attr-defined]
-            discovered_prometheus = f"http://{host}:{PROMETHEUS_NODE_PORT}"
+            discovered_prometheus = f"http://{host}:{PROMETHEUS_NODE_PORT}"  # NOSONAR (S5332): VM endpoint over SSH tunnel
         else:
             host = provider.guest_host(request)  # type: ignore[attr-defined]
             metrics_host, metrics_port = provider.publish_port(  # type: ignore[attr-defined]
                 request, service="PROMETHEUS_HTTP", guest_port=PROMETHEUS_NODE_PORT
             )
-            discovered_prometheus = f"http://{metrics_host}:{metrics_port}"
+            discovered_prometheus = f"http://{metrics_host}:{metrics_port}"  # NOSONAR (S5332): VM endpoint over SSH tunnel
     return (
-        control_plane_url or f"http://{host}:{CONTROL_PLANE_NODE_PORT}",
+        control_plane_url or f"http://{host}:{CONTROL_PLANE_NODE_PORT}",  # NOSONAR (S5332): VM endpoint over SSH tunnel
         prometheus_url or discovered_prometheus,
     )
 
@@ -136,8 +136,8 @@ def resolve_loadtest_urls(
         environment, target, dry_run=dry_run, host_resolver=host_resolver
     )
     return (
-        control_plane_url or f"http://{host}:{CONTROL_PLANE_NODE_PORT}",
-        prometheus_url or f"http://{host}:{PROMETHEUS_NODE_PORT}",
+        control_plane_url or f"http://{host}:{CONTROL_PLANE_NODE_PORT}",  # NOSONAR (S5332): VM endpoint over SSH tunnel
+        prometheus_url or f"http://{host}:{PROMETHEUS_NODE_PORT}",  # NOSONAR (S5332): VM endpoint over SSH tunnel
     )
 
 
@@ -246,7 +246,7 @@ def prometheus_over_ssh(
     try:
         deadline = time.monotonic() + timeout_seconds
         _wait_for_tunnel(process, host, ready, local_port, deadline, timeout_seconds)
-        yield f"http://127.0.0.1:{local_port}"
+        yield f"http://127.0.0.1:{local_port}"  # NOSONAR (S5332): local SSH tunnel loopback
     finally:
         _terminate_process(process)
 

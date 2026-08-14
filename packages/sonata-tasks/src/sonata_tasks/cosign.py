@@ -47,7 +47,7 @@ class CosignTask(CommandTask):
         ``cosign public-key --key /key.cosign``, redirected to ``output_file``
     """
 
-    def __init__(
+    def __init__(  # NOSONAR (S107): keyword-only task configuration
         self,
         *,
         operation: CosignOperation | str,

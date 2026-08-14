@@ -692,7 +692,7 @@ def _build_preflight(
     return preflight
 
 
-def build_loadtest_plan(
+def build_loadtest_plan(  # NOSONAR (S107): keyword-only inputs mix config, environment and many optional overrides
     config: ScenarioConfig,
     environment: EnvironmentConfig,
     bindings: RoleBindings,

@@ -193,6 +193,6 @@ def secure_release_endpoints(
         source_cidrs=sources,
     )
     return (
-        f"http://{stack_host}:{CONTROL_PLANE_NODE_PORT}",
-        f"http://{stack_host}:{PROMETHEUS_NODE_PORT}",
+        f"http://{stack_host}:{CONTROL_PLANE_NODE_PORT}",  # NOSONAR (S5332): VM endpoint over SSH tunnel
+        f"http://{stack_host}:{PROMETHEUS_NODE_PORT}",  # NOSONAR (S5332): VM endpoint over SSH tunnel
     )
