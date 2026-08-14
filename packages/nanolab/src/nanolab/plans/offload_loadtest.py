@@ -235,8 +235,8 @@ def build_offload_loadtest_plan(
 
     edge_host = _role_host(environment, "stack", dry_run=dry_run)
     cloud_host = _role_host(environment, "cloud", dry_run=dry_run)
-    edge_url = f"http://{edge_host}:{_CONTROL_PLANE_PORT}"
-    cloud_url = f"http://{cloud_host}:{_CONTROL_PLANE_PORT}"
+    edge_url = f"http://{edge_host}:{_CONTROL_PLANE_PORT}"  # NOSONAR (S5332): local control-plane endpoint
+    cloud_url = f"http://{cloud_host}:{_CONTROL_PLANE_PORT}"  # NOSONAR (S5332): local control-plane endpoint
 
     request = OffloadLoadtestRequest(
         # The cloud absorbs whatever the edge sheds, so it must not reproduce the
@@ -335,8 +335,8 @@ def build_offload_loadtest_plan(
                 task_id="",
                 title="Evaluate offload conservation",
                 k6_summary_path=local_summary_path,
-                edge_metrics_url=f"http://{edge_host}:{_ACTUATOR_PORT}/actuator/prometheus",
-                cloud_metrics_url=f"http://{cloud_host}:{_ACTUATOR_PORT}/actuator/prometheus",
+                edge_metrics_url=f"http://{edge_host}:{_ACTUATOR_PORT}/actuator/prometheus",  # NOSONAR (S5332): local actuator endpoint
+                cloud_metrics_url=f"http://{cloud_host}:{_ACTUATOR_PORT}/actuator/prometheus",  # NOSONAR (S5332): local actuator endpoint
                 offloadable=offloadable.name,
                 control=control.name,
                 output_path=run_dir / "offload-report.json",

@@ -72,7 +72,7 @@ class ClusterIpEndpointTask(Task[str]):
         address = result.stdout.strip()
         if not address:
             raise RuntimeError(f"service {self._service} reported no ClusterIP")
-        return TaskOutcome(value=f"http://{address}:{self._port}")
+        return TaskOutcome(value=f"http://{address}:{self._port}")  # NOSONAR (S5332): in-cluster ClusterIP service
 
 
 def k8s_deployment_readiness(

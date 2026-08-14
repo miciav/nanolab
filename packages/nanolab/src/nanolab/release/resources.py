@@ -286,8 +286,8 @@ def build_release_resources(
         stack_info = inputs.resource(stack)
         _ = inputs.resource(loadgen)
         return ReleaseEndpoints(
-            control_plane=f"http://{stack_info.host}:{CONTROL_PLANE_NODE_PORT}",
-            prometheus=f"http://{stack_info.host}:{PROMETHEUS_NODE_PORT}",
+            control_plane=f"http://{stack_info.host}:{CONTROL_PLANE_NODE_PORT}",  # NOSONAR (S5332): VM endpoint reached over the SSH tunnel
+            prometheus=f"http://{stack_info.host}:{PROMETHEUS_NODE_PORT}",  # NOSONAR (S5332): VM endpoint reached over the SSH tunnel
         )
 
     endpoints = Resource(

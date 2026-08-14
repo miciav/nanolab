@@ -32,7 +32,7 @@ def control_plane_helm_values(
     sync_queue_max_depth: int | None = None,
 ) -> dict[str, str]:
     repository, tag = _image_parts(control_plane_image)
-    callback_url = f"http://control-plane.{namespace}.svc.cluster.local:8080/v1/internal/executions"
+    callback_url = f"http://control-plane.{namespace}.svc.cluster.local:8080/v1/internal/executions"  # NOSONAR (S5332): in-cluster service DNS
     values = {
         "namespace.create": "false",
         "namespace.name": namespace,

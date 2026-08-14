@@ -386,7 +386,7 @@ class PublicationPhase(NamedTuple):
     docker_credentials: Callable[[Any], Any]
 
 
-def build_publication_phase(
+def build_publication_phase(  # NOSONAR (S107): keyword-only inputs mix request, identity and prior-phase results
     *,
     request: ReleaseRequest,
     identity: ReleaseIdentity,
@@ -566,7 +566,7 @@ def build_publication_phase(
     )
 
 
-def build_attestation_phase(
+def build_attestation_phase(  # NOSONAR (S107): keyword-only inputs mix request, identity and prior-phase results
     *,
     request: ReleaseRequest,
     identity: ReleaseIdentity,

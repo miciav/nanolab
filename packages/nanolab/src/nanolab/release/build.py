@@ -710,7 +710,7 @@ def _smoke_arm64_server(
                 "--retry-all-errors",
                 "--retry-max-time",
                 "120",
-                f"http://{endpoint}{smoke.health_path}",
+                f"http://{endpoint}{smoke.health_path}",  # NOSONAR (S5332): smoke-test health probe
             ),
         )
     except BaseException:
