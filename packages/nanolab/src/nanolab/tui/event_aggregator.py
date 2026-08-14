@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 
 from sonata_engine.workflow.events import WorkflowEvent
 from sonata_engine.workflow.models import WorkflowState
@@ -95,41 +96,56 @@ class WorkflowEventAggregator:
     # plus skipped and log.line); one aggregator reads it.
     def handle_event(self, event: WorkflowEvent) -> None:
         if event.kind == "log.line":
-            if event.task_id:
-                self._phase_for_event(event)
-            prefix = "stderr │ " if event.stream == "stderr" else ""
-            self.append_log(f"{prefix}{event.line}")
+            self._handle_log_line(event)
             return
         if event.kind == "task.started":
-            self.append_log(
-                f"[step] {event.title or event.task_id or 'Task'}"
-                + (f" ({event.detail})" if event.detail else "")
-            )
-            phase = self._phase_for_event(event)
-            if phase is not None:
-                self._mark_phase_running(phase)
+            self._append_task_log(event, "[step]")
+            self._mark_phase_for_event(event, self._mark_phase_running)
             return
         if event.kind == "task.passed":
-            self.append_log(
-                f"[ok] {event.title or event.task_id or 'Task'}"
-                + (f" ({event.detail})" if event.detail else "")
-            )
-            phase = self._phase_for_event(event)
-            if phase is not None:
-                self._mark_phase_success(phase, detail=event.detail)
+            self._append_task_log(event, "[ok]")
+            self._mark_phase_for_event(event, self._mark_phase_success, with_detail=True)
             return
         if event.kind == "task.failed":
-            self.append_log(
-                f"[fail] {event.title or event.task_id or 'Task'}"
-                + (f" ({event.detail})" if event.detail else "")
-            )
-            phase = self._phase_for_event(event)
-            if phase is not None:
-                self._mark_phase_failed(phase, detail=event.detail)
+            self._append_task_log(event, "[fail]")
+            self._mark_phase_for_event(event, self._mark_phase_failed, with_detail=True)
             return
         if event.kind == "task.skipped":
-            self.append_log(f"[skip] {event.title or event.task_id or 'Task'}")
+            self._append_task_log(event, "[skip]", with_detail=False)
             self._phase_for_event(event)
+
+    def _handle_log_line(self, event: WorkflowEvent) -> None:
+        if event.task_id:
+            self._phase_for_event(event)
+        prefix = "stderr │ " if event.stream == "stderr" else ""
+        self.append_log(f"{prefix}{event.line}")
+
+    def _append_task_log(
+        self,
+        event: WorkflowEvent,
+        marker: str,
+        *,
+        with_detail: bool = True,
+    ) -> None:
+        title = event.title or event.task_id or "Task"
+        self.append_log(
+            f"{marker} {title}"
+            + (f" ({event.detail})" if with_detail and event.detail else "")
+        )
+
+    def _mark_phase_for_event(
+        self,
+        event: WorkflowEvent,
+        mark: Callable[..., None],
+        *,
+        with_detail: bool = False,
+    ) -> None:
+        phase = self._phase_for_event(event)
+        if phase is not None:
+            if with_detail:
+                mark(phase, detail=event.detail)
+            else:
+                mark(phase)
 
     def _clone_phase(self, phase: TuiPhaseSnapshot) -> TuiPhaseSnapshot:
         return TuiPhaseSnapshot(
@@ -148,22 +164,32 @@ class WorkflowEventAggregator:
         event: WorkflowEvent,
     ) -> TuiPhaseSnapshot | None:
         if event.parent_task_id:
-            parent = self._phase_by_task_id.get(event.parent_task_id)
-            if parent is None:
-                return None
-            phase = self._phase_by_task_id.get(event.task_id or "")
-            if phase is not None:
-                self._sync_phase_metadata(phase, event.title or phase.label, event.task_id, event.detail)
-                return phase
-            return self._ensure_child_phase(
-                parent,
-                event.title or event.task_id or "Task",
-                task_id=event.task_id,
-                detail=event.detail,
-            )
+            return self._child_phase_for_event(event)
+        return self._top_level_phase_for_event(event)
+
+    def _existing_phase_for_task(self, event: WorkflowEvent) -> TuiPhaseSnapshot | None:
         phase = self._phase_by_task_id.get(event.task_id or "")
         if phase is not None:
             self._sync_phase_metadata(phase, event.title or phase.label, event.task_id, event.detail)
+        return phase
+
+    def _child_phase_for_event(self, event: WorkflowEvent) -> TuiPhaseSnapshot | None:
+        parent = self._phase_by_task_id.get(event.parent_task_id or "")
+        if parent is None:
+            return None
+        phase = self._existing_phase_for_task(event)
+        if phase is not None:
+            return phase
+        return self._ensure_child_phase(
+            parent,
+            event.title or event.task_id or "Task",
+            task_id=event.task_id,
+            detail=event.detail,
+        )
+
+    def _top_level_phase_for_event(self, event: WorkflowEvent) -> TuiPhaseSnapshot | None:
+        phase = self._existing_phase_for_task(event)
+        if phase is not None:
             return phase
         phase = self._next_unassigned_top_level_phase()
         if phase is None:

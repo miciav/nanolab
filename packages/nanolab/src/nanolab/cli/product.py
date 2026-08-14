@@ -55,7 +55,7 @@ from nanolab.release.environment import (
     release_run_lock,
 )
 from nanolab.plans.validate import build_validate_plan
-from nanolab.workspace.paths import default_tool_paths, discover_tool_root
+from nanolab.workspace.paths import ToolPaths, default_tool_paths, discover_tool_root
 from nanolab.workspace.provenance import git_provenance
 
 
@@ -335,6 +335,336 @@ def _write_run_metadata(
     (run_dir / "run-metadata.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
 
 
+def _default_run_dir(run_dir: Path | None, workflow: str, runs_dir: Path) -> Path | None:
+    if run_dir is None and workflow in ("loadtest", "offload-loadtest"):
+        return runs_dir / "latest"
+    return run_dir
+
+
+def _run_teardown(
+    scenario_config: ScenarioConfig,
+    environment_config: EnvironmentConfig,
+    run_dir: Path | None,
+    *,
+    resume: bool,
+    keep: bool,
+    only: str | None,
+    start: str | None,
+    until: str | None,
+    release_config: Path | None,
+) -> None:
+    if resume or keep or only or start or until:
+        raise typer.BadParameter(
+            "--teardown releases what a kept run held and runs nothing else; it "
+            "cannot be combined with --resume, --keep, --only, --from or --until"
+        )
+    if release_config is not None:
+        typer.echo("--teardown ignores --release-config; it releases resources only")
+    try:
+        _teardown_release(scenario_config, environment_config, run_dir)
+    except ReleaseRunInProgressError as error:
+        raise typer.BadParameter(str(error)) from None
+
+
+def _prepare_run(
+    lifetime: ExitStack,
+    *,
+    release: bool,
+    scenario: Path,
+    environment: Path | None,
+    release_config: Path | None,
+    run_dir: Path | None,
+    resume: bool,
+    scenario_config: ScenarioConfig,
+    environment_config: EnvironmentConfig,
+    paths: ToolPaths,
+    effective_run_dir: Path | None,
+) -> tuple[
+    ConsoleProgressSink,
+    datetime,
+    dict[str, object],
+    Path | None,
+    ReleaseRequest | None,
+    object | None,
+    JournalConfig | None,
+]:
+    """Enter the release lock and scratch tree, then start the run clock.
+
+    Everything acquired here lives on `lifetime`; the caller closes it on every
+    exit path, so a preflight rejection cannot leak the extracted tree.
+    """
+    release_request: ReleaseRequest | None = None
+    release_provider: object | None = None
+    release_journal: JournalConfig | None = None
+    if release:
+        lifetime.enter_context(release_run_lock(release_lock_path(environment_config)))
+        source_tree = Path(
+            lifetime.enter_context(
+                tempfile.TemporaryDirectory(prefix="nanofaas-release-")
+            )
+        )
+        release_request, release_provider = _release_request(
+            scenario,
+            environment,
+            release_config,
+            run_dir,
+            executable=True,
+            source_tree=source_tree,
+        )
+        release_journal = release_journal_config(release_request)
+        # Evidence, receipts and metadata all live beside the journal, one
+        # directory per prepared version -- never a reused `latest`.
+        effective_run_dir = release_journal.path.parent
+        if resume and not release_journal.path.is_file():
+            # Outside the raised message on purpose: Rich hard-wraps a long
+            # path inside its error box and splits it across the borders.
+            typer.echo(f"no release journal at: {release_journal.path}")
+            raise typer.BadParameter("--resume requires an existing release journal")
+        if not resume:
+            superseded = _supersede_release_run(effective_run_dir)
+            if superseded is not None:
+                typer.echo(f"previous release run moved aside: {superseded}")
+    sink = ConsoleProgressSink()
+    started_at = datetime.now(UTC)
+    provenance = git_provenance(paths.nanofaas_root)
+    return (
+        sink,
+        started_at,
+        provenance,
+        effective_run_dir,
+        release_request,
+        release_provider,
+        release_journal,
+    )
+
+
+def _provisioning_context(
+    scenario_config: ScenarioConfig,
+    environment_config: EnvironmentConfig,
+    paths: ToolPaths,
+    keep: bool,
+):
+    if (
+        scenario_config.workflow != "release"
+        and environment_config.provider != "local"
+        and not (
+            scenario_config.workflow == "cli" and scenario_config.backend == "k8s"
+        )
+    ):
+        return provision_environment(
+            scenario_config,
+            environment_config,
+            repo_root=paths.nanofaas_root,
+            keep=keep,
+        )
+    return nullcontext()
+
+
+def _forward_loadtest_urls(
+    environment_config: EnvironmentConfig,
+    scenario_config: ScenarioConfig,
+    control_plane_url: str | None,
+    prometheus_url: str | None,
+    forwarding: ExitStack,
+) -> tuple[str | None, str | None]:
+    chosen_prometheus_url = prometheus_url
+    control_plane_url, prometheus_url = resolve_loadtest_urls(
+        environment_config,
+        backend=scenario_config.backend or "k8s",
+        control_plane_url=control_plane_url,
+        prometheus_url=prometheus_url,
+    )
+    prometheus_url = forwarding.enter_context(
+        prometheus_over_ssh(
+            environment_config,
+            prometheus_url,
+            enabled=chosen_prometheus_url is None,
+        )
+    )
+    return control_plane_url, prometheus_url
+
+
+def _build_run_workflow(
+    *,
+    release_request: ReleaseRequest | None,
+    release_provider: object | None,
+    scenario_config: ScenarioConfig,
+    environment_config: EnvironmentConfig,
+    control_plane_url: str | None,
+    prometheus_url: str | None,
+    effective_run_dir: Path | None,
+) -> SonataWorkflow:
+    if release_request is not None:
+        return build_release_workflow(release_request, provider=release_provider)
+    return cast(
+        SonataWorkflow,
+        _workflow(
+            scenario_config,
+            environment_config,
+            control_plane_url=control_plane_url,
+            prometheus_url=prometheus_url or _LOCAL_PROMETHEUS_URL,
+            run_dir=effective_run_dir,
+        ),
+    )
+
+
+def _run_selected_workflow(
+    sonata_workflow: SonataWorkflow,
+    *,
+    release_request: ReleaseRequest | None,
+    release_provider: object | None,
+    release_journal: JournalConfig | None,
+    resume: bool,
+    selection: Selection,
+    observers: tuple[WorkflowObserver, ...],
+) -> None:
+    if release_request is not None:
+        verifiers = release_verifiers(release_request, release_provider)
+        if observers:
+            sonata_workflow.run(
+                journal=release_journal,
+                resume=resume,
+                verifiers=verifiers,
+                select=selection,
+                observers=observers,
+            )
+        else:
+            sonata_workflow.run(
+                journal=release_journal,
+                resume=resume,
+                verifiers=verifiers,
+                select=selection,
+            )
+    elif observers:
+        sonata_workflow.run(select=selection, observers=observers)
+    else:
+        sonata_workflow.run(select=selection)
+
+
+def _execute_workflow(
+    *,
+    sink: ConsoleProgressSink,
+    scenario_config: ScenarioConfig,
+    environment_config: EnvironmentConfig,
+    paths: ToolPaths,
+    keep: bool,
+    control_plane_url: str | None,
+    prometheus_url: str | None,
+    effective_run_dir: Path | None,
+    only: str | None,
+    start: str | None,
+    until: str | None,
+    scenario: Path,
+    release_request: ReleaseRequest | None,
+    release_provider: object | None,
+    release_journal: JournalConfig | None,
+    resume: bool,
+) -> None:
+    # Command output routing (SubprocessShell._emit_output) reads the
+    # same contextvar, so one bind covers the whole execution layer.
+    with bind_workflow_sink(sink):
+        provisioning = _provisioning_context(
+            scenario_config,
+            environment_config,
+            paths,
+            keep,
+        )
+        with provisioning, ExitStack() as forwarding:
+            if scenario_config.workflow == "loadtest":
+                control_plane_url, prometheus_url = _forward_loadtest_urls(
+                    environment_config,
+                    scenario_config,
+                    control_plane_url,
+                    prometheus_url,
+                    forwarding,
+                )
+            sonata_workflow = _build_run_workflow(
+                release_request=release_request,
+                release_provider=release_provider,
+                scenario_config=scenario_config,
+                environment_config=environment_config,
+                control_plane_url=control_plane_url,
+                prometheus_url=prometheus_url,
+                effective_run_dir=effective_run_dir,
+            )
+            sonata_workflow.keep = keep
+            selection = Selection(only=only, start=start, until=until)
+            observers = _workflow_observers(scenario)
+            try:
+                _run_selected_workflow(
+                    sonata_workflow,
+                    release_request=release_request,
+                    release_provider=release_provider,
+                    release_journal=release_journal,
+                    resume=resume,
+                    selection=selection,
+                    observers=observers,
+                )
+                if (
+                    scenario_config.workflow == "offload-loadtest"
+                    and effective_run_dir is not None
+                ):
+                    _print_offload_summary(effective_run_dir)
+            except SelectionError as error:
+                raise typer.BadParameter(str(error)) from None
+
+
+def _write_failure_metadata(
+    effective_run_dir: Path | None,
+    exc: BaseException,
+    *,
+    started_at: datetime,
+    scenario_path: Path,
+    scenario: ScenarioConfig,
+    environment_path: Path | None,
+    environment: EnvironmentConfig,
+    sink: ConsoleProgressSink,
+    provenance: dict[str, object],
+) -> None:
+    if effective_run_dir is not None:
+        try:
+            _write_run_metadata(
+                effective_run_dir,
+                status="failed",
+                error=str(exc),
+                started_at=started_at,
+                scenario_path=scenario_path,
+                scenario=scenario,
+                environment_path=environment_path,
+                environment=environment,
+                sink=sink,
+                provenance=provenance,
+            )
+        except OSError:
+            pass
+
+
+def _write_success_metadata(
+    effective_run_dir: Path | None,
+    *,
+    started_at: datetime,
+    scenario_path: Path,
+    scenario: ScenarioConfig,
+    environment_path: Path | None,
+    environment: EnvironmentConfig,
+    sink: ConsoleProgressSink,
+    provenance: dict[str, object],
+) -> None:
+    if effective_run_dir is not None:
+        _write_run_metadata(
+            effective_run_dir,
+            status="passed",
+            error=None,
+            started_at=started_at,
+            scenario_path=scenario_path,
+            scenario=scenario,
+            environment_path=environment_path,
+            environment=environment,
+            sink=sink,
+            provenance=provenance,
+        )
+
+
 def install_product_commands(app: typer.Typer) -> None:
     @app.command("run")
     def run_command(
@@ -383,17 +713,17 @@ def install_product_commands(app: typer.Typer) -> None:
         if release and environment is None:
             raise typer.BadParameter("release workflow requires --environment")
         if teardown:
-            if resume or keep or only or start or until:
-                raise typer.BadParameter(
-                    "--teardown releases what a kept run held and runs nothing else; it "
-                    "cannot be combined with --resume, --keep, --only, --from or --until"
-                )
-            if release_config is not None:
-                typer.echo("--teardown ignores --release-config; it releases resources only")
-            try:
-                _teardown_release(scenario_config, environment_config, run_dir)
-            except ReleaseRunInProgressError as error:
-                raise typer.BadParameter(str(error)) from None
+            _run_teardown(
+                scenario_config,
+                environment_config,
+                run_dir,
+                resume=resume,
+                keep=keep,
+                only=only,
+                start=start,
+                until=until,
+                release_config=release_config,
+            )
             return
         if resume and not release:
             raise typer.BadParameter("--resume is only supported for release workflows")
@@ -405,15 +735,7 @@ def install_product_commands(app: typer.Typer) -> None:
         _require_local_loadtest_tools(scenario_config, environment_config)
         _require_cli_endpoint(scenario_config, environment_config, control_plane_url)
         paths = default_tool_paths()
-        effective_run_dir = run_dir
-        if effective_run_dir is None and scenario_config.workflow in (
-            "loadtest",
-            "offload-loadtest",
-        ):
-            effective_run_dir = paths.runs_dir / "latest"
-        release_request: ReleaseRequest | None = None
-        release_provider: object | None = None
-        release_journal = None
+        effective_run_dir = _default_run_dir(run_dir, scenario_config.workflow, paths.runs_dir)
         # The extracted tree is throwaway, but the `finally` below only closes
         # it once the whole release run finishes, so it is held (~15 MB) for
         # the run's entire duration, not just through workflow compilation.
@@ -425,34 +747,27 @@ def install_product_commands(app: typer.Typer) -> None:
         # try below, together close the stack on every exit path from here on.
         lifetime = ExitStack()
         try:
-            if release:
-                lifetime.enter_context(release_run_lock(release_lock_path(environment_config)))
-                source_tree = Path(
-                    lifetime.enter_context(
-                        tempfile.TemporaryDirectory(prefix="nanofaas-release-")
-                    )
-                )
-                release_request, release_provider = _release_request(
-                    scenario, environment, release_config, run_dir,
-                    executable=True,
-                    source_tree=source_tree,
-                )
-                release_journal = release_journal_config(release_request)
-                # Evidence, receipts and metadata all live beside the journal, one
-                # directory per prepared version -- never a reused `latest`.
-                effective_run_dir = release_journal.path.parent
-                if resume and not release_journal.path.is_file():
-                    # Outside the raised message on purpose: Rich hard-wraps a long
-                    # path inside its error box and splits it across the borders.
-                    typer.echo(f"no release journal at: {release_journal.path}")
-                    raise typer.BadParameter("--resume requires an existing release journal")
-                if not resume:
-                    superseded = _supersede_release_run(effective_run_dir)
-                    if superseded is not None:
-                        typer.echo(f"previous release run moved aside: {superseded}")
-            sink = ConsoleProgressSink()
-            started_at = datetime.now(UTC)
-            provenance = git_provenance(paths.nanofaas_root)
+            (
+                sink,
+                started_at,
+                provenance,
+                effective_run_dir,
+                release_request,
+                release_provider,
+                release_journal,
+            ) = _prepare_run(
+                lifetime,
+                release=release,
+                scenario=scenario,
+                environment=environment,
+                release_config=release_config,
+                run_dir=run_dir,
+                resume=resume,
+                scenario_config=scenario_config,
+                environment_config=environment_config,
+                paths=paths,
+                effective_run_dir=effective_run_dir,
+            )
         except ReleaseRunInProgressError as error:
             lifetime.close()
             raise typer.BadParameter(str(error)) from None
@@ -460,123 +775,50 @@ def install_product_commands(app: typer.Typer) -> None:
             lifetime.close()
             raise
         try:
-            # Command output routing (SubprocessShell._emit_output) reads the
-            # same contextvar, so one bind covers the whole execution layer.
-            with bind_workflow_sink(sink):
-                if (
-                    scenario_config.workflow != "release"
-                    and environment_config.provider != "local"
-                    and not (
-                        scenario_config.workflow == "cli" and scenario_config.backend == "k8s"
-                    )
-                ):
-                    provisioning = provision_environment(
-                        scenario_config,
-                        environment_config,
-                        repo_root=paths.nanofaas_root,
-                        keep=keep,
-                    )
-                else:
-                    provisioning = nullcontext()
-                with provisioning, ExitStack() as forwarding:
-                    if scenario_config.workflow == "loadtest":
-                        chosen_prometheus_url = prometheus_url
-                        control_plane_url, prometheus_url = resolve_loadtest_urls(
-                            environment_config,
-                            backend=scenario_config.backend or "k8s",
-                            control_plane_url=control_plane_url,
-                            prometheus_url=prometheus_url,
-                        )
-                        prometheus_url = forwarding.enter_context(
-                            prometheus_over_ssh(
-                                environment_config,
-                                prometheus_url,
-                                enabled=chosen_prometheus_url is None,
-                            )
-                        )
-                    sonata_workflow = (
-                        build_release_workflow(release_request, provider=release_provider)
-                        if release_request is not None
-                        else cast(
-                            SonataWorkflow,
-                            _workflow(
-                                scenario_config,
-                                environment_config,
-                                control_plane_url=control_plane_url,
-                                prometheus_url=prometheus_url or _LOCAL_PROMETHEUS_URL,
-                                run_dir=effective_run_dir,
-                            ),
-                        )
-                    )
-                    sonata_workflow.keep = keep
-                    selection = Selection(only=only, start=start, until=until)
-                    observers = _workflow_observers(scenario)
-                    try:
-                        if release_request is not None:
-                            if observers:
-                                sonata_workflow.run(
-                                    journal=release_journal,
-                                    resume=resume,
-                                    verifiers=release_verifiers(
-                                        release_request, release_provider
-                                    ),
-                                    select=selection,
-                                    observers=observers,
-                                )
-                            else:
-                                sonata_workflow.run(
-                                    journal=release_journal,
-                                    resume=resume,
-                                    verifiers=release_verifiers(
-                                        release_request, release_provider
-                                    ),
-                                    select=selection,
-                                )
-                        elif observers:
-                            sonata_workflow.run(select=selection, observers=observers)
-                        else:
-                            sonata_workflow.run(select=selection)
-                        if (
-                            scenario_config.workflow == "offload-loadtest"
-                            and effective_run_dir is not None
-                        ):
-                            _print_offload_summary(effective_run_dir)
-                    except SelectionError as error:
-                        raise typer.BadParameter(str(error)) from None
+            _execute_workflow(
+                sink=sink,
+                scenario_config=scenario_config,
+                environment_config=environment_config,
+                paths=paths,
+                keep=keep,
+                control_plane_url=control_plane_url,
+                prometheus_url=prometheus_url,
+                effective_run_dir=effective_run_dir,
+                only=only,
+                start=start,
+                until=until,
+                scenario=scenario,
+                release_request=release_request,
+                release_provider=release_provider,
+                release_journal=release_journal,
+                resume=resume,
+            )
         except ReleaseRunInProgressError as error:
             raise typer.BadParameter(str(error)) from None
         except BaseException as exc:
-            if effective_run_dir is not None:
-                try:
-                    _write_run_metadata(
-                        effective_run_dir,
-                        status="failed",
-                        error=str(exc),
-                        started_at=started_at,
-                        scenario_path=scenario,
-                        scenario=scenario_config,
-                        environment_path=environment,
-                        environment=environment_config,
-                        sink=sink,
-                        provenance=provenance,
-                    )
-                except OSError:
-                    pass
+            _write_failure_metadata(
+                effective_run_dir,
+                exc,
+                started_at=started_at,
+                scenario_path=scenario,
+                scenario=scenario_config,
+                environment_path=environment,
+                environment=environment_config,
+                sink=sink,
+                provenance=provenance,
+            )
             raise
         else:
-            if effective_run_dir is not None:
-                _write_run_metadata(
-                    effective_run_dir,
-                    status="passed",
-                    error=None,
-                    started_at=started_at,
-                    scenario_path=scenario,
-                    scenario=scenario_config,
-                    environment_path=environment,
-                    environment=environment_config,
-                    sink=sink,
-                    provenance=provenance,
-                )
+            _write_success_metadata(
+                effective_run_dir,
+                started_at=started_at,
+                scenario_path=scenario,
+                scenario=scenario_config,
+                environment_path=environment,
+                environment=environment_config,
+                sink=sink,
+                provenance=provenance,
+            )
         finally:
             lifetime.close()
 

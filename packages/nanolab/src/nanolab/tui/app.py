@@ -148,6 +148,18 @@ _PROVIDER_GUIDANCE = {
     ),
 }
 
+# Control-flow signals returned by the workflow-selection helpers.
+class _WorkflowBack:
+    """Sentinel: the user backed out to the environment menu."""
+
+
+class _WorkflowAbort:
+    """Sentinel: a configuration error aborts the workflow."""
+
+
+_WORKFLOW_BACK = _WorkflowBack()
+_WORKFLOW_ABORT = _WorkflowAbort()
+
 
 class NanofaasTUI:
     """Navigate the stable product menu and dispatch selected scenarios."""
@@ -296,137 +308,176 @@ class NanofaasTUI:
     def _workflow_menu(self, scenario_name: str) -> None:
         scenario_path = discover_tool_root() / "scenarios-v2" / scenario_name
         title = _SCENARIO_TITLES[scenario_name]
-        state = "environment"
         environment_path: Path | None = None
         scenario: Any = None
         environment: Any = None
         keep = False
 
         while True:
-            if state == "environment":
-                environment_path = self._select_environment()
-                if environment_path is None:
-                    return
-                scenario = None
-                environment = None
-                keep = False
-                state = "action"
+            environment_path = self._select_environment()
+            if environment_path is None:
+                return
+            selected = self._select_action_flow(scenario_path, environment_path, title)
+            if isinstance(selected, _WorkflowBack):
                 continue
-
-            if state == "action":
-                action = self._choose(
-                    "Action",
-                    choices=_ACTION_CHOICES,
-                    include_back=True,
-                    escape_value="back",
-                    title=title,
-                    breadcrumb=f"Main / {title}",
-                )
-                if action == "back":
-                    state = "environment"
-                    continue
-                try:
-                    scenario = _scenario(scenario_path)
-                    environment = _environment(environment_path)
-                    _validate_cli_container_options(scenario, environment)
-                except Exception as exc:
-                    self._show_static(
-                        title="Configuration error",
-                        breadcrumb=f"Main / {title}",
-                        body=str(exc),
-                    )
-                    return
-                if action == "plan":
-                    break
-                state = "cleanup"
-                continue
-
-            cleanup_choice = self._choose(
-                "Cleanup policy",
-                choices=_CLEANUP_CHOICES,
-                include_back=True,
-                escape_value="back",
-                title=title,
-                breadcrumb=f"Main / {title}",
-            )
-            if cleanup_choice == "back":
-                keep = False
-                state = "action"
-                continue
-            keep = cleanup_choice == "keep"
-            try:
-                _validate_cli_container_options(
-                    scenario,
-                    environment,
-                    keep=keep,
-                )
-            except Exception as exc:
-                self._show_static(
-                    title="Configuration error",
-                    breadcrumb=f"Main / {title}",
-                    body=str(exc),
-                )
+            if isinstance(selected, _WorkflowAbort):
+                return
+            action, scenario, environment, keep = selected
+            if action == "plan":
+                self._show_plan(scenario, environment, title)
                 return
             break
 
         assert environment_path is not None
-        if action == "plan":
-            try:
-                workflow = self._build_workflow(
-                    scenario,
-                    environment,
-                    dry_run=True,
-                )
-            except Exception as exc:
-                self._show_static(
-                    title="Preview error",
-                    breadcrumb=f"Main / {title}",
-                    body=str(exc),
-                )
-                return
-            self._render_plan(title=title, workflow=workflow)
+        preview = self._preview_workflow(scenario, environment, title)
+        if preview is None:
             return
+        self._execute_workflow(
+            scenario,
+            environment,
+            scenario_path,
+            environment_path,
+            title,
+            preview,
+            keep,
+        )
 
+    def _select_action_flow(
+        self,
+        scenario_path: Path,
+        environment_path: Path,
+        title: str,
+    ) -> tuple[str, Any, Any, bool] | _WorkflowBack | _WorkflowAbort:
+        """Resolve the scenario's action and cleanup policy.
+
+        Returns a ``(action, scenario, environment, keep)`` tuple on success,
+        ``_WORKFLOW_BACK`` when the user backs out to the environment menu, or
+        ``_WORKFLOW_ABORT`` on a configuration error.
+        """
+        scenario: Any = None
+        environment: Any = None
+        keep: bool = False
+        while True:
+            action = self._select_action(title)
+            if action is None:
+                return _WORKFLOW_BACK
+            loaded = self._load_config(scenario_path, environment_path, title)
+            if loaded is None:
+                return _WORKFLOW_ABORT
+            scenario, environment = loaded
+            if action == "plan":
+                return (action, scenario, environment, keep)
+            cleanup = self._select_cleanup_policy(scenario, environment, title)
+            if isinstance(cleanup, _WorkflowAbort):
+                return _WORKFLOW_ABORT
+            if cleanup is None:
+                continue
+            return (action, scenario, environment, cleanup)
+
+    def _select_action(self, title: str) -> str | None:
+        action = self._choose(
+            "Action",
+            choices=_ACTION_CHOICES,
+            include_back=True,
+            escape_value="back",
+            title=title,
+            breadcrumb=f"Main / {title}",
+        )
+        return None if action == "back" else action
+
+    def _load_config(
+        self,
+        scenario_path: Path,
+        environment_path: Path,
+        title: str,
+    ) -> tuple[Any, Any] | None:
         try:
-            preview = self._build_workflow(
-                scenario,
-                environment,
-                dry_run=True,
+            scenario = _scenario(scenario_path)
+            environment = _environment(environment_path)
+            _validate_cli_container_options(scenario, environment)
+            return scenario, environment
+        except Exception as exc:
+            self._show_static(
+                title="Configuration error",
+                breadcrumb=f"Main / {title}",
+                body=str(exc),
             )
+            return None
+
+    def _select_cleanup_policy(
+        self,
+        scenario: Any,
+        environment: Any,
+        title: str,
+    ) -> bool | None | _WorkflowAbort:
+        """Return the keep policy, ``None`` on "back", ``_WORKFLOW_ABORT`` on error."""
+        cleanup_choice = self._choose(
+            "Cleanup policy",
+            choices=_CLEANUP_CHOICES,
+            include_back=True,
+            escape_value="back",
+            title=title,
+            breadcrumb=f"Main / {title}",
+        )
+        if cleanup_choice == "back":
+            return None
+        keep = cleanup_choice == "keep"
+        if not self._validate_config(scenario, environment, title, keep=keep):
+            return _WORKFLOW_ABORT
+        return keep
+
+    def _validate_config(
+        self,
+        scenario: Any,
+        environment: Any,
+        title: str,
+        *,
+        keep: bool,
+    ) -> bool:
+        try:
+            _validate_cli_container_options(scenario, environment, keep=keep)
+            return True
+        except Exception as exc:
+            self._show_static(
+                title="Configuration error",
+                breadcrumb=f"Main / {title}",
+                body=str(exc),
+            )
+            return False
+
+    def _show_plan(self, scenario: Any, environment: Any, title: str) -> None:
+        workflow = self._preview_workflow(scenario, environment, title)
+        if workflow is None:
+            return
+        self._render_plan(title=title, workflow=workflow)
+
+    def _preview_workflow(
+        self,
+        scenario: Any,
+        environment: Any,
+        title: str,
+    ) -> Any | None:
+        try:
+            return self._build_workflow(scenario, environment, dry_run=True)
         except Exception as exc:
             self._show_static(
                 title="Preview error",
                 breadcrumb=f"Main / {title}",
                 body=str(exc),
             )
-            return
+            return None
 
+    def _execute_workflow(
+        self,
+        scenario: Any,
+        environment: Any,
+        scenario_path: Path,
+        environment_path: Path,
+        title: str,
+        preview: Any,
+        keep: bool,
+    ) -> None:
         try:
-            def run_current_workflow(_dashboard: Any, _sink: Any) -> Any:
-                if (
-                    scenario.workflow != "release"
-                    and environment.provider != "local"
-                    and not (scenario.workflow == "cli" and scenario.backend == "k8s")
-                ):
-                    with provision_environment(
-                        scenario,
-                        environment,
-                        repo_root=default_tool_paths().nanofaas_root,
-                        keep=keep,
-                    ):
-                        workflow = self._build_workflow(
-                            scenario,
-                            environment,
-                            dry_run=False,
-                        )
-                        workflow.keep = keep
-                        observers = _workflow_observers(scenario_path)
-                        return workflow.run(observers=observers) if observers else workflow.run()
-                workflow = self._build_workflow(scenario, environment, dry_run=False)
-                workflow.keep = keep
-                observers = _workflow_observers(scenario_path)
-                return workflow.run(observers=observers) if observers else workflow.run()
-
             self._controller.run_live_workflow(
                 title=title,
                 summary_lines=[
@@ -437,12 +488,48 @@ class NanofaasTUI:
                 planned_steps=[
                     title for _task_id, title in self._plan_rows(preview)
                 ],
-                action=run_current_workflow,
+                action=lambda _dashboard, _sink: self._run_current_workflow(
+                    scenario,
+                    environment,
+                    scenario_path,
+                    keep,
+                ),
             )
         except Exception:
             # The controller preserves and acknowledges the failed final dashboard.
             # Returning keeps the user in the scenario's submenu.
             return
+
+    def _run_current_workflow(
+        self,
+        scenario: Any,
+        environment: Any,
+        scenario_path: Path,
+        keep: bool,
+    ) -> Any:
+        if (
+            scenario.workflow != "release"
+            and environment.provider != "local"
+            and not (scenario.workflow == "cli" and scenario.backend == "k8s")
+        ):
+            with provision_environment(
+                scenario,
+                environment,
+                repo_root=default_tool_paths().nanofaas_root,
+                keep=keep,
+            ):
+                workflow = self._build_workflow(
+                    scenario,
+                    environment,
+                    dry_run=False,
+                )
+                workflow.keep = keep
+                observers = _workflow_observers(scenario_path)
+                return workflow.run(observers=observers) if observers else workflow.run()
+        workflow = self._build_workflow(scenario, environment, dry_run=False)
+        workflow.keep = keep
+        observers = _workflow_observers(scenario_path)
+        return workflow.run(observers=observers) if observers else workflow.run()
 
     @staticmethod
     def _build_workflow(

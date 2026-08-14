@@ -19,7 +19,7 @@ from sonata_tasks.loadtest import (
     build_loadtest_workflow,
     loadtest_composite,
 )
-from sonata_tasks.platform import PlatformRequest
+from sonata_tasks.platform import Backend, Build, PlatformRequest
 from sonata_tasks.components.helm import control_plane_helm_values, helm_set_args
 from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
 from sonata_tasks.execution.roles import ExecutionRole
@@ -174,37 +174,18 @@ class _RoleRunner:
         )
 
 
-def build_loadtest_plan(
-    config: ScenarioConfig,
-    environment: EnvironmentConfig,
-    bindings: RoleBindings,
-    *,
-    control_plane_url: str,
-    prometheus_client: PrometheusClient,
-    run_dir: Path,
-    remote_run_dir: Path | None = None,
-    remote_repo_root: Path | None = None,
-    fetcher: RemoteFileFetcher | object | None = None,
-    repo_root: Path | None = None,
-    tool_root: Path | None = None,
-    stages: tuple[tuple[str, int], ...] | None = None,
-    prebuilt_control_plane_image: str | None = None,
-    prebuilt_function_images: Mapping[str, str] | None = None,
-) -> Workflow:
-    """Compile the loadtest scenario into a Sonata workflow.
-
-    Two halves. The platform — build, push, install the chart, register the
-    functions — is `add_platform`, the same code `validate` uses; the legacy
-    version reached into the validate module for `k8s_deployment_specs` to get
-    it. The load itself is one composite, assembled here because it needs the
-    k6 runner, the Prometheus client and the run directory, none of which
-    belong in the task catalogue.
-    """
+def _validate_loadtest(config: ScenarioConfig, environment: EnvironmentConfig) -> Backend:
     if config.workflow != "loadtest":
         raise ValueError("load-test plan requires a loadtest scenario")
-    backend = config.backend or "k8s"
+    backend: Backend = config.backend or "k8s"
     if backend == "container" and environment.provider != "local":
         raise ValueError("container load-test requires a local environment")
+    return backend
+
+
+def _autoscaling_setup(
+    config: ScenarioConfig,
+) -> tuple[bool, int, dict[str, object] | None]:
     hpa = config.autoscaling_strategy == "HPA"
     hpa_scale_to_zero = hpa and config.hpa_scale_to_zero
     replica_floor = 0 if hpa_scale_to_zero or not hpa else 1
@@ -229,17 +210,30 @@ def build_loadtest_plan(
             # proportional.
             "metrics": [{"type": "rps", "target": "100"}],
         }
-    root = repo_root or Path.cwd()
+    return hpa, replica_floor, scaling_config
+
+
+def _resolve_with_prebuilt_images(
+    config: ScenarioConfig,
+    repo_root: Path | None,
+    tool_root: Path | None,
+    prebuilt_control_plane_image: str | None,
+    prebuilt_function_images: Mapping[str, str] | None,
+) -> tuple[tuple[Any, ...], bool]:
     resolved = tuple(
         resolve_function(config, key, source_root=repo_root, tool_root=tool_root)
         for key in config.functions
     )
-    prebuilt = prebuilt_control_plane_image is not None or prebuilt_function_images is not None
+    prebuilt = prebuilt_control_plane_image is not None or (
+        prebuilt_function_images is not None
+    )
     if prebuilt:
         if prebuilt_function_images is None:
             raise ValueError("prebuilt function images are required in prebuilt mode")
         missing = [
-            function.key for function in resolved if not prebuilt_function_images.get(function.key)
+            function.key
+            for function in resolved
+            if not prebuilt_function_images.get(function.key)
         ]
         if missing:
             raise ValueError("missing prebuilt function images: " + ", ".join(missing))
@@ -247,6 +241,24 @@ def build_loadtest_plan(
             replace(function, image=prebuilt_function_images[function.key])
             for function in resolved
         )
+    return resolved, prebuilt
+
+
+def _resolve_functions(
+    config: ScenarioConfig,
+    repo_root: Path | None,
+    tool_root: Path | None,
+    scaling_config: dict[str, object] | None,
+    prebuilt_control_plane_image: str | None,
+    prebuilt_function_images: Mapping[str, str] | None,
+) -> tuple[tuple[Any, ...], bool]:
+    resolved, prebuilt = _resolve_with_prebuilt_images(
+        config,
+        repo_root,
+        tool_root,
+        prebuilt_control_plane_image,
+        prebuilt_function_images,
+    )
     functions = tuple(sonata_function(function) for function in resolved)
     if scaling_config is not None:
         functions = tuple(
@@ -259,51 +271,81 @@ def build_loadtest_plan(
             )
             for function in functions
         )
-    target = functions[0]
-    dedicated = "loadgen" in environment.roles
-    remote = environment.provider != "local"
+    return functions, prebuilt
+
+
+def _additional_modules(autoscaling: bool, hpa: bool) -> tuple[str, ...]:
+    if not autoscaling:
+        return ()
+    if hpa:
+        return ("async-queue", "sync-queue")
+    return ("autoscaler", "async-queue", "sync-queue")
+
+
+def _validate_remote_run_dir(remote_run_dir: Path | None, home: str) -> None:
+    if remote_run_dir is None:
+        return
+    requested = PurePosixPath(str(remote_run_dir))
+    selected_home = PurePosixPath(home)
+    try:
+        relative = requested.relative_to(selected_home)
+    except ValueError:
+        relative = PurePosixPath()
+    parts = relative.parts
+    run_number = requested.name.removeprefix("run-")
+    if (
+        not requested.is_absolute()
+        or ".." in requested.parts
+        or len(parts) != 4
+        or parts[0] != "nanofaas-release"
+        or not parts[1]
+        or parts[2] != "benchmarks"
+        or not run_number.isdigit()
+        or int(run_number) < 1
+    ):
+        raise ValueError("remote run directory must be an absolute run-N child")
+
+
+def _resolve_script_and_summary(
+    config: ScenarioConfig,
+    environment: EnvironmentConfig,
+    *,
+    remote: bool,
+    dedicated: bool,
+    remote_run_dir: Path | None,
+    run_dir: Path,
+    tool_root: Path | None,
+) -> tuple[Path, Path]:
     script_name = "autoscaling.js" if config.autoscaling else "two-vm-function-invoke.js"
     if remote:
         role_target = environment.target("loadgen" if dedicated else "stack")
         home = role_target.remote_home
         script_path = Path(home) / f"nanolab-assets/k6/{script_name}"
         output_dir = remote_run_dir or Path(home) / "nanofaas-loadtest"
-        if remote_run_dir is not None:
-            requested = PurePosixPath(str(remote_run_dir))
-            selected_home = PurePosixPath(home)
-            try:
-                relative = requested.relative_to(selected_home)
-            except ValueError:
-                relative = PurePosixPath()
-            parts = relative.parts
-            run_number = requested.name.removeprefix("run-")
-            if (
-                not requested.is_absolute()
-                or ".." in requested.parts
-                or len(parts) != 4
-                or parts[0] != "nanofaas-release"
-                or not parts[1]
-                or parts[2] != "benchmarks"
-                or not run_number.isdigit()
-                or int(run_number) < 1
-            ):
-                raise ValueError("remote run directory must be an absolute run-N child")
+        _validate_remote_run_dir(remote_run_dir, home)
         summary_path = output_dir / "k6-summary.json"
     else:
         product_root = tool_root or discover_tool_root()
         script_path = product_root / "assets" / "k6" / script_name
         summary_path = run_dir / "k6-summary.json"
+    return script_path, summary_path
 
-    if not config.autoscaling:
-        additional_modules = ()
-    elif hpa:
-        additional_modules = ("async-queue", "sync-queue")
-    else:
-        additional_modules = ("autoscaler", "async-queue", "sync-queue")
 
+def _build_platform_request(
+    *,
+    backend: Backend,
+    build: Build,
+    functions: tuple[Any, ...],
+    additional_modules: tuple[str, ...],
+    prebuilt: bool,
+    prebuilt_control_plane_image: str | None,
+    root: Path,
+    remote_repo_root: Path | None,
+    hpa: bool,
+) -> PlatformRequest:
     request = PlatformRequest(
         backend=backend,
-        build=config.build,
+        build=build,
         functions=functions,
         additional_modules=additional_modules,
         build_images=not prebuilt,
@@ -338,9 +380,14 @@ def build_loadtest_plan(
             request,
             helm_values=helm_set_args(helm_values),
         )
+    return request
 
-    load_role: ExecutionRole = "loadgen" if dedicated else "stack"
-    executor = RoleBoundCommandTaskExecutor(bindings)
+
+def _build_platform_requires(
+    backend: str,
+    executor: RoleBoundCommandTaskExecutor,
+    root: Path,
+) -> tuple[Any, ...]:
     platform_requires = ()
     if backend == "container":
         registry = docker_registry_resource(executor=executor, role="host")
@@ -364,7 +411,21 @@ def build_loadtest_plan(
             registry,
             compose,
         )
-    run_k6 = K6Task(
+    return platform_requires
+
+
+def _build_run_k6(
+    *,
+    executor: RoleBoundCommandTaskExecutor,
+    load_role: ExecutionRole,
+    control_plane_url: str,
+    script_path: Path,
+    summary_path: Path,
+    target: Any,
+    stages: tuple[tuple[str, int], ...] | None,
+    config: ScenarioConfig,
+) -> K6Task:
+    return K6Task(
         executor=executor,
         role=load_role,
         title="Run k6",
@@ -388,9 +449,18 @@ def build_loadtest_plan(
         remote_dir=_REMOTE_DIR,
     )
 
+
+def _build_replica_watcher(
+    *,
+    config: ScenarioConfig,
+    backend: str,
+    bindings: RoleBindings,
+    control_plane_url: str,
+    target: Any,
+    request: PlatformRequest,
+) -> tuple[ReplicaWatcher | None, ReplicaStatusProbe | None]:
     watcher: ReplicaWatcher | None = None
     replica_probe: ReplicaStatusProbe | None = None
-    after: list[Task[Any]] = []
     if config.autoscaling:
         if backend == "container":
             replica_probe = HttpReplicaProbe(
@@ -405,6 +475,24 @@ def build_loadtest_plan(
                 remote_dir=_REMOTE_DIR,
             )
         watcher = ReplicaWatcher(replica_probe)
+    return watcher, replica_probe
+
+
+def _build_steps_after(
+    *,
+    remote: bool,
+    summary_path: Path,
+    run_dir: Path,
+    fetcher: RemoteFileFetcher | object | None,
+    watcher: ReplicaWatcher | None,
+    replica_probe: ReplicaStatusProbe | None,
+    bindings: RoleBindings,
+    request: PlatformRequest,
+    target: Any,
+    replica_floor: int,
+    prometheus_client: PrometheusClient,
+) -> list[Task[Any]]:
+    after: list[Task[Any]] = []
     if remote:
         after.append(
             FetchResultsTask(
@@ -470,7 +558,12 @@ def build_loadtest_plan(
             EvaluateGateTask(),
         )
     )
+    return after
 
+
+def _prepare_run_directory_argv(
+    summary_path: Path, remote_run_dir: Path | None
+) -> tuple[str, ...]:
     prepare_argv = ("mkdir", "-p", str(summary_path.parent))
     if remote_run_dir is not None:
         prepare_argv = (
@@ -480,20 +573,17 @@ def build_loadtest_plan(
             "clean-loadtest-run",
             str(summary_path.parent),
         )
+    return prepare_argv
 
-    preflight: Task[Any] = CommandTask(
-        title="Check k6 is usable",
-        argv=("k6", "version"),
-        executor=executor,
-        role=load_role,
-    )
-    # Parking at zero is not an HPA speciality: the INTERNAL strategy is given the
-    # same replica floor of 0 and scales down to it too. Without this wait the load
-    # starts against a function that was never at zero, so the wake path — the
-    # interesting half of scale-to-zero — goes unexercised and the run proves less
-    # than it appears to.
-    parks_at_zero = replica_floor == 0
-    park_at_zero = CommandTask(
+
+def _build_park_at_zero_command(
+    *,
+    request: PlatformRequest,
+    target: Any,
+    executor: RoleBoundCommandTaskExecutor,
+    hpa: bool,
+) -> Task[Any]:
+    return CommandTask(
         title="Wait for the autoscaler to park the function at zero",
         argv=(
             "bash",
@@ -521,6 +611,31 @@ def build_loadtest_plan(
         ),
         executor=executor,
         role="stack",
+    )
+
+
+def _build_preflight(
+    *,
+    executor: RoleBoundCommandTaskExecutor,
+    load_role: ExecutionRole,
+    hpa: bool,
+    parks_at_zero: bool,
+    request: PlatformRequest,
+    target: Any,
+) -> Task[Any]:
+    preflight: Task[Any] = CommandTask(
+        title="Check k6 is usable",
+        argv=("k6", "version"),
+        executor=executor,
+        role=load_role,
+    )
+    # Parking at zero is not an HPA speciality: the INTERNAL strategy is given the
+    # same replica floor of 0 and scales down to it too. Without this wait the load
+    # starts against a function that was never at zero, so the wake path — the
+    # interesting half of scale-to-zero — goes unexercised and the run proves less
+    # than it appears to.
+    park_at_zero = _build_park_at_zero_command(
+        request=request, target=target, executor=executor, hpa=hpa
     )
     if hpa:
         control_plane_metrics_path = (
@@ -574,6 +689,113 @@ def build_loadtest_plan(
             title="Check autoscaling prerequisites",
             steps=(park_at_zero, preflight),
         )
+    return preflight
+
+
+def build_loadtest_plan(
+    config: ScenarioConfig,
+    environment: EnvironmentConfig,
+    bindings: RoleBindings,
+    *,
+    control_plane_url: str,
+    prometheus_client: PrometheusClient,
+    run_dir: Path,
+    remote_run_dir: Path | None = None,
+    remote_repo_root: Path | None = None,
+    fetcher: RemoteFileFetcher | object | None = None,
+    repo_root: Path | None = None,
+    tool_root: Path | None = None,
+    stages: tuple[tuple[str, int], ...] | None = None,
+    prebuilt_control_plane_image: str | None = None,
+    prebuilt_function_images: Mapping[str, str] | None = None,
+) -> Workflow:
+    """Compile the loadtest scenario into a Sonata workflow.
+
+    Two halves. The platform — build, push, install the chart, register the
+    functions — is `add_platform`, the same code `validate` uses; the legacy
+    version reached into the validate module for `k8s_deployment_specs` to get
+    it. The load itself is one composite, assembled here because it needs the
+    k6 runner, the Prometheus client and the run directory, none of which
+    belong in the task catalogue.
+    """
+    backend = _validate_loadtest(config, environment)
+    hpa, replica_floor, scaling_config = _autoscaling_setup(config)
+    root = repo_root or Path.cwd()
+    functions, prebuilt = _resolve_functions(
+        config,
+        repo_root,
+        tool_root,
+        scaling_config,
+        prebuilt_control_plane_image,
+        prebuilt_function_images,
+    )
+    target = functions[0]
+    dedicated = "loadgen" in environment.roles
+    remote = environment.provider != "local"
+    script_path, summary_path = _resolve_script_and_summary(
+        config,
+        environment,
+        remote=remote,
+        dedicated=dedicated,
+        remote_run_dir=remote_run_dir,
+        run_dir=run_dir,
+        tool_root=tool_root,
+    )
+    additional_modules = _additional_modules(config.autoscaling, hpa)
+    request = _build_platform_request(
+        backend=backend,
+        build=config.build,
+        functions=functions,
+        additional_modules=additional_modules,
+        prebuilt=prebuilt,
+        prebuilt_control_plane_image=prebuilt_control_plane_image,
+        root=root,
+        remote_repo_root=remote_repo_root,
+        hpa=hpa,
+    )
+    load_role: ExecutionRole = "loadgen" if dedicated else "stack"
+    executor = RoleBoundCommandTaskExecutor(bindings)
+    platform_requires = _build_platform_requires(backend, executor, root)
+    run_k6 = _build_run_k6(
+        executor=executor,
+        load_role=load_role,
+        control_plane_url=control_plane_url,
+        script_path=script_path,
+        summary_path=summary_path,
+        target=target,
+        stages=stages,
+        config=config,
+    )
+    watcher, replica_probe = _build_replica_watcher(
+        config=config,
+        backend=backend,
+        bindings=bindings,
+        control_plane_url=control_plane_url,
+        target=target,
+        request=request,
+    )
+    after = _build_steps_after(
+        remote=remote,
+        summary_path=summary_path,
+        run_dir=run_dir,
+        fetcher=fetcher,
+        watcher=watcher,
+        replica_probe=replica_probe,
+        bindings=bindings,
+        request=request,
+        target=target,
+        replica_floor=replica_floor,
+        prometheus_client=prometheus_client,
+    )
+    prepare_argv = _prepare_run_directory_argv(summary_path, remote_run_dir)
+    preflight = _build_preflight(
+        executor=executor,
+        load_role=load_role,
+        hpa=hpa,
+        parks_at_zero=replica_floor == 0,
+        request=request,
+        target=target,
+    )
 
     return build_loadtest_workflow(
         request,

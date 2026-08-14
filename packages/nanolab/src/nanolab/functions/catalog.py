@@ -129,6 +129,48 @@ def _default_payload(payloads_root: Path, family: str) -> str | None:
     return candidate if (payloads_root / candidate).exists() else None
 
 
+def _record_function_key(seen: set[str], key: str) -> None:
+    if key in seen:
+        raise ValueError(f"Duplicate function key: {key}")
+    seen.add(key)
+
+
+def _discover_example_function(
+    runtime_dir: str,
+    example_dir: Path,
+    payloads_root: Path,
+) -> FunctionDefinition | None:
+    if example_dir.name in _IGNORED_DISCOVERY_DIRS:
+        return None
+
+    manifest_path = example_dir / "function.yaml"
+    manifest = _load_function_manifest(manifest_path)
+    catalog = _catalog_metadata(manifest, manifest_path)
+
+    fallback_runtime = _runtime_from_dir(runtime_dir, example_dir.name)
+    runtime = _catalog_runtime(catalog, manifest_path) or fallback_runtime
+    family = (
+        _catalog_string(catalog, "family", manifest_path)
+        or _family_from_dir(example_dir.name, runtime)
+    )
+    key = f"{family}-{runtime}"
+
+    return FunctionDefinition(
+        key=key,
+        family=family,
+        runtime=runtime,
+        description=_catalog_string(catalog, "description", manifest_path)
+        or f"{family} {runtime} example function.",
+        example_dir=example_dir,
+        default_image=_catalog_string(catalog, "defaultImage", manifest_path)
+        or _default_image(runtime_dir, runtime, family),
+        default_payload_file=_catalog_string(
+            catalog, "defaultPayload", manifest_path
+        )
+        or _default_payload(payloads_root, family),
+    )
+
+
 def _discover_example_functions(
     examples_root: Path,
     payloads_root: Path,
@@ -145,45 +187,12 @@ def _discover_example_functions(
             continue
 
         for example_dir in sorted(path for path in runtime_root.iterdir() if path.is_dir()):
-            if example_dir.name in _IGNORED_DISCOVERY_DIRS:
-                continue
-
-            manifest_path = example_dir / "function.yaml"
-            manifest = _load_function_manifest(manifest_path)
-            catalog = _catalog_metadata(manifest, manifest_path)
-
-            fallback_runtime = _runtime_from_dir(runtime_dir, example_dir.name)
-            runtime = _catalog_runtime(catalog, manifest_path) or fallback_runtime
-            family = (
-                _catalog_string(catalog, "family", manifest_path)
-                or _family_from_dir(example_dir.name, runtime)
+            definition = _discover_example_function(
+                runtime_dir, example_dir, payloads_root
             )
-            key = f"{family}-{runtime}"
-
-            if key in seen:
-                raise ValueError(f"Duplicate function key: {key}")
-            seen.add(key)
-
-            discovered.append(
-                FunctionDefinition(
-                    key=key,
-                    family=family,
-                    runtime=runtime,
-                    description=_catalog_string(
-                        catalog, "description", manifest_path
-                    )
-                    or f"{family} {runtime} example function.",
-                    example_dir=example_dir,
-                    default_image=_catalog_string(
-                        catalog, "defaultImage", manifest_path
-                    )
-                    or _default_image(runtime_dir, runtime, family),
-                    default_payload_file=_catalog_string(
-                        catalog, "defaultPayload", manifest_path
-                    )
-                    or _default_payload(payloads_root, family),
-                )
-            )
+            if definition is not None:
+                _record_function_key(seen, definition.key)
+                discovered.append(definition)
 
     return discovered
 
@@ -212,9 +221,7 @@ def _load_functions(root: Path | None = None) -> tuple[FunctionDefinition, ...]:
     )
     seen: set[str] = set()
     for function in functions:
-        if function.key in seen:
-            raise ValueError(f"Duplicate function key: {function.key}")
-        seen.add(function.key)
+        _record_function_key(seen, function.key)
     return functions
 
 
