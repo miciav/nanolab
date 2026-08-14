@@ -221,7 +221,7 @@ def test_handler_envelope_container_scenario_runs_every_deterministic_function()
 
 
 def test_handler_envelope_container_excludes_only_nondeterministic_catalog_functions(
-    nanofaas_checkout: Path,
+    nanofaas_root: Path,
 ) -> None:
     config = ScenarioConfig.model_validate(
         yaml.safe_load((NANOLAB_ROOT / "scenarios-v2/handler-envelope-container.yaml").read_text())
@@ -229,10 +229,11 @@ def test_handler_envelope_container_excludes_only_nondeterministic_catalog_funct
 
     example_keys = {
         function.key
-        for function in list_functions(nanofaas_checkout)
+        for function in list_functions(nanofaas_root)
         if function.example_dir is not None
     }
 
+    assert EXCLUDED_HANDLER_ENVELOPE_FUNCTIONS <= example_keys
     assert set(config.functions) == example_keys - EXCLUDED_HANDLER_ENVELOPE_FUNCTIONS
 
 
