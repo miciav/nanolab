@@ -230,6 +230,20 @@ def test_http_contract_rejects_a_numeric_status_with_a_non_http_protocol() -> No
         task.run(TaskInputs.empty())
 
 
+def test_http_contract_rejects_http_1_without_a_minor_version() -> None:
+    task, _ = _contract(ENVELOPE_422.replace("HTTP/1.1 422", "HTTP/1 422"))
+
+    with pytest.raises(RuntimeError, match="response carried no HTTP status"):
+        task.run(TaskInputs.empty())
+
+
+@pytest.mark.parametrize("protocol", ["HTTP/2", "HTTP/3"])
+def test_http_contract_accepts_curl_modern_http_status_lines(protocol: str) -> None:
+    task, _ = _contract(ENVELOPE_422.replace("HTTP/1.1 422", f"{protocol} 422"))
+
+    _ = task.run(TaskInputs.empty())
+
+
 def test_http_contract_rejects_a_mismatched_outer_header_value() -> None:
     task, _ = _contract(ENVELOPE_422.replace("X-Caller-Id: real", "X-Caller-Id: spoofed"))
 
