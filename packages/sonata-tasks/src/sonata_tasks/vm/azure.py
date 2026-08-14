@@ -307,7 +307,7 @@ class AzureVmProvider:
 
 
 def _disk_size_gb(disk: str) -> int:
-    match = re.fullmatch(r"([1-9][0-9]*)G", disk)
+    match = re.fullmatch(r"([1-9]\d*)G", disk)
     if match is None:
         raise ValueError(f"Azure disk must use whole gibibytes, got {disk!r}")
     return int(match.group(1))

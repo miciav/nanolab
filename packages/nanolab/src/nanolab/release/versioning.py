@@ -7,7 +7,7 @@ import subprocess
 from pathlib import Path
 
 
-_VERSION_PATTERN = re.compile(r"v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\Z")
+_VERSION_PATTERN = re.compile(r"v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\Z")
 _GRADLE_VERSION_PATTERN = re.compile(r"(?m)^\s*version\s*=\s*'([^']+)'\s*$")
 _CURATED_COUNTS = {
     Path("build.gradle"): 1,

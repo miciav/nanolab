@@ -11,8 +11,11 @@ from sonata_tasks.tasks.models import TaskResult
 from sonata_tasks.command import CommandTask
 from sonata_tasks.http_function import Endpoint
 
-_SAMPLE = re.compile(r"^([A-Za-z_:][A-Za-z0-9_:]*)(?:\{([^}]*)\})?\s+([-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)")
-_LABEL = re.compile(r'([A-Za-z_][A-Za-z0-9_]*)="((?:[^"\\]|\\.)*)"')
+_METRIC_NAME = r"[A-Za-z_:][A-Za-z0-9_:]*"
+_METRIC_LABELS = r"(?:\{([^}]*)\})?"
+_METRIC_VALUE = r"[-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?"
+_SAMPLE = re.compile(rf"^({_METRIC_NAME}){_METRIC_LABELS}\s+({_METRIC_VALUE})")
+_LABEL = re.compile(r'([A-Za-z_]\w*)="((?:[^"\\]|\\.)*)"')
 
 
 def _metric_sum(scrape: str, name: str, labels: Mapping[str, str]) -> tuple[int, float]:
