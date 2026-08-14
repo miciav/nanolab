@@ -207,17 +207,24 @@ def build_offload_loadtest_plan(
             "offload-loadtest requires exactly two functions: [offloadable, control]"
         )
     offloadable_key, control_key = config.functions
+    root = repo_root or Path.cwd()
     # timeout_ms is also the offload gateway's remote-call budget (edge gives up
     # locally once it elapses) — the default 5s is too tight for a cross-VM hop
     # to a function pod that may still be warming up under real load.
     offloadable = replace(
-        sonata_function(resolve_function(config, offloadable_key, tool_root=tool_root)),
+        sonata_function(
+            resolve_function(
+                config, offloadable_key, source_root=repo_root, tool_root=tool_root
+            )
+        ),
         concurrency=2,
         queue_size=8,
         timeout_ms=15000,
     )
     control = replace(
-        sonata_function(resolve_function(config, control_key, tool_root=tool_root)),
+        sonata_function(
+            resolve_function(config, control_key, source_root=repo_root, tool_root=tool_root)
+        ),
         concurrency=2,
         queue_size=8,
         # The control must never be offloaded: if it were, the conservation
@@ -225,7 +232,6 @@ def build_offload_loadtest_plan(
         offload={"enabled": False},
     )
 
-    root = repo_root or Path.cwd()
     edge_host = _role_host(environment, "stack", dry_run=dry_run)
     cloud_host = _role_host(environment, "cloud", dry_run=dry_run)
     edge_url = f"http://{edge_host}:{_CONTROL_PLANE_PORT}"

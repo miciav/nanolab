@@ -229,8 +229,10 @@ def build_loadtest_plan(
             # proportional.
             "metrics": [{"type": "rps", "target": "100"}],
         }
+    root = repo_root or Path.cwd()
     resolved = tuple(
-        resolve_function(config, key, tool_root=tool_root) for key in config.functions
+        resolve_function(config, key, source_root=repo_root, tool_root=tool_root)
+        for key in config.functions
     )
     prebuilt = prebuilt_control_plane_image is not None or prebuilt_function_images is not None
     if prebuilt:
@@ -260,7 +262,6 @@ def build_loadtest_plan(
     target = functions[0]
     dedicated = "loadgen" in environment.roles
     remote = environment.provider != "local"
-    root = repo_root or Path.cwd()
     script_name = "autoscaling.js" if config.autoscaling else "two-vm-function-invoke.js"
     if remote:
         role_target = environment.target("loadgen" if dedicated else "stack")

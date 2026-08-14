@@ -183,7 +183,7 @@ def test_loadtest_defaults_preserve_task_ids_byte_for_byte(tmp_path: Path) -> No
 
 
 def test_container_loadtest_uses_compose_without_kubernetes(
-    tmp_path: Path,
+    tmp_path: Path, nanofaas_root: Path
 ) -> None:
     executor = RecordingExecutor()
 
@@ -194,7 +194,7 @@ def test_container_loadtest_uses_compose_without_kubernetes(
         control_plane_url="http://127.0.0.1:8080",
         prometheus_client=NoopPrometheus(),
         run_dir=tmp_path,
-        repo_root=Path("/nanofaas"),
+        repo_root=nanofaas_root,
     )
 
     assert _ids(workflow) == [
@@ -333,7 +333,9 @@ def test_a_remote_run_dir_must_be_an_absolute_run_child(tmp_path: Path) -> None:
         )
 
 
-def test_local_loadtest_reads_k6_script_from_the_nanolab_package(tmp_path: Path) -> None:
+def test_local_loadtest_reads_k6_script_from_the_nanolab_package(
+    tmp_path: Path, nanofaas_root: Path
+) -> None:
     tool_root = tmp_path / "nanolab"
     executor = RecordingExecutor()
     workflow = build_loadtest_plan(
@@ -343,7 +345,7 @@ def test_local_loadtest_reads_k6_script_from_the_nanolab_package(tmp_path: Path)
         control_plane_url="http://stack:30080",
         prometheus_client=NoopPrometheus(),
         run_dir=tmp_path / "run",
-        repo_root=Path("/nanofaas"),
+        repo_root=nanofaas_root,
         tool_root=tool_root,
     )
 

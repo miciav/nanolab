@@ -412,7 +412,9 @@ def test_validate_plan_propagates_resource_requests_and_limits() -> None:
     assert '"memoryMiB":512' in body
 
 
-def test_validate_plan_reads_payload_from_the_nanolab_package(tmp_path: Path) -> None:
+def test_validate_plan_reads_payload_from_the_nanolab_package(
+    tmp_path: Path, nanofaas_root: Path
+) -> None:
     tool_root = tmp_path / "nanolab"
     payloads = tool_root / "scenarios" / "payloads"
     payloads.mkdir(parents=True)
@@ -428,11 +430,46 @@ def test_validate_plan_reads_payload_from_the_nanolab_package(tmp_path: Path) ->
             functions=["word-stats-java"],
         ),
         RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor()),
-        repo_root=Path("/nanofaas"),
+        repo_root=nanofaas_root,
         tool_root=tool_root,
     )
 
     assert '"text":"owned by nanolab"' in _argv(plan, "Invoke word-stats-java")[-2]
+
+
+def test_validate_plan_resolves_function_manifest_from_its_repo_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    checkout_a = tmp_path / "checkout-a"
+    checkout_b = tmp_path / "checkout-b"
+    for checkout, name, image in (
+        (checkout_a, "from-checkout-a", "registry.example/from-a"),
+        (checkout_b, "from-checkout-b", "registry.example/from-b"),
+    ):
+        (checkout / "build.gradle").parent.mkdir(parents=True)
+        (checkout / "build.gradle").touch()
+        (checkout / "settings.gradle").touch()
+        manifest = checkout / "functions/java/word-stats/function.yaml"
+        manifest.parent.mkdir(parents=True)
+        manifest.write_text(
+            f"name: {name}\ncatalog:\n  defaultImage: {image}\n",
+            encoding="utf-8",
+        )
+    monkeypatch.setenv("NANOFAAS_ROOT", str(checkout_b))
+
+    config = ScenarioConfig(workflow="validate", backend="container", functions=["word-stats-java"])
+    plan = build_validate_plan(
+        config,
+        RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor()),
+        repo_root=checkout_a,
+    )
+    manifest = sonata_function(
+        resolve_function(config, "word-stats-java", source_root=checkout_a)
+    ).manifest().json()
+
+    assert _argv(plan, "Invoke from-checkout-a")
+    assert '"name":"from-checkout-a"' in manifest
+    assert '"image":"registry.example/from-a"' in manifest
 
 
 def test_a_kubernetes_run_installs_the_chart_and_registers_against_the_resolved_address() -> None:

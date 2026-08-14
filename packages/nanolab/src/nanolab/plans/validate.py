@@ -177,7 +177,9 @@ def build_validate_plan(
     root = repo_root or Path.cwd()
     kubernetes = config.backend == "k8s"
     functions = {
-        key: sonata_function(resolve_function(config, key, tool_root=tool_root))
+        key: sonata_function(
+            resolve_function(config, key, source_root=repo_root, tool_root=tool_root)
+        )
         for key in config.functions
     }
     request = ValidateWorkflowRequest(

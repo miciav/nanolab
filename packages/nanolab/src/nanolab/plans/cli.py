@@ -273,7 +273,7 @@ def _build_k8s_plan(
             build_argv=None,
         )
         for key in config.functions
-        for resolved in (resolve_function(config, key),)
+        for resolved in (resolve_function(config, key, source_root=repo_root),)
     )
     request = CliWorkflowRequest(
         functions=functions,
@@ -333,7 +333,7 @@ def build_cli_plan(
             image_build_argv=resolved.image_build_argv if local else None,
         )
         for key in config.functions
-        for resolved in (resolve_function(config, key),)
+        for resolved in (resolve_function(config, key, source_root=repo_root),)
     )
     request = CliWorkflowRequest(
         functions=functions,

@@ -43,22 +43,24 @@ def _build_argv(definition: FunctionDefinition, image: str) -> tuple[str, ...]:
     family = definition.family
     runtime = definition.runtime
     if runtime == "java":
-        return (
+        argv = (
             "./gradlew",
             f":functions:java:{family}:bootJar",
             "--quiet",
         )
-    runtime_dir = {"java-lite": "java", "exec": "bash"}.get(runtime, runtime)
-    suffix = "-lite" if runtime == "java-lite" else ""
-    return (
-        "docker",
-        "build",
-        "-t",
-        image,
-        "-f",
-        f"functions/{runtime_dir}/{family}{suffix}/Dockerfile",
-        ".",
-    )
+    else:
+        runtime_dir = {"java-lite": "java", "exec": "bash"}.get(runtime, runtime)
+        suffix = "-lite" if runtime == "java-lite" else ""
+        argv = (
+            "docker",
+            "build",
+            "-t",
+            image,
+            "-f",
+            f"functions/{runtime_dir}/{family}{suffix}/Dockerfile",
+            ".",
+        )
+    return argv
 
 
 def _image_build_argv(definition: FunctionDefinition, image: str) -> tuple[str, ...] | None:
@@ -96,9 +98,10 @@ def resolve_function(
     config: ScenarioConfig,
     key: str,
     *,
+    source_root: Path | None = None,
     tool_root: Path | None = None,
 ) -> ResolvedFunction:
-    definition = resolve_function_definition(key)
+    definition = resolve_function_definition(key, source_root)
     image = _function_image(definition)
     resource = config.resources.get(key)
     return ResolvedFunction(

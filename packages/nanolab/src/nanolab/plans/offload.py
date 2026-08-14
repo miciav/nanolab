@@ -119,7 +119,7 @@ def build_offload_plan(
                 max_retries=resolved.max_retries,
             )
             for key in config.functions
-            for resolved in (resolve_function(config, key),)
+            for resolved in (resolve_function(config, key, source_root=repo_root),)
         ),
         cloud_endpoint=CLOUD_ENDPOINT,
         edge_endpoint=EDGE_ENDPOINT,
