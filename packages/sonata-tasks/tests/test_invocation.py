@@ -237,6 +237,19 @@ def test_http_contract_rejects_http_1_without_a_minor_version() -> None:
         task.run(TaskInputs.empty())
 
 
+@pytest.mark.parametrize(
+    "status_line",
+    ["HTTP/1.10 422", "HTTP/10.1 422", "HTTP/1.1 42", "HTTP/1.1 4222"],
+)
+def test_http_contract_rejects_out_of_grammar_http_1_status_lines(
+    status_line: str,
+) -> None:
+    task, _ = _contract(ENVELOPE_422.replace("HTTP/1.1 422", status_line))
+
+    with pytest.raises(RuntimeError, match="response carried no HTTP status"):
+        task.run(TaskInputs.empty())
+
+
 @pytest.mark.parametrize("protocol", ["HTTP/2", "HTTP/3"])
 def test_http_contract_accepts_curl_modern_http_status_lines(protocol: str) -> None:
     task, _ = _contract(ENVELOPE_422.replace("HTTP/1.1 422", f"{protocol} 422"))

@@ -327,12 +327,14 @@ def _parse_contract_response(name: str, stdout: str) -> tuple[int, dict[str, str
         protocol, status, *_ = lines[0].split()
         version_parts = protocol.removeprefix("HTTP/").split(".")
         valid_version = (
-            len(version_parts) == 2 and all(part.isdigit() for part in version_parts)
-        ) or version_parts in (["2"], ["3"])
-        if (
-            not protocol.startswith("HTTP/")
-            or not valid_version
-        ):
+            len(version_parts) == 2
+            and version_parts[0] == "1"
+            and len(version_parts[1]) == 1
+            and version_parts[1].isascii()
+            and version_parts[1].isdigit()
+        ) or protocol in {"HTTP/2", "HTTP/3"}
+        valid_status = len(status) == 3 and status.isascii() and status.isdigit()
+        if not valid_version or not valid_status:
             raise ValueError
         actual_status = int(status)
     except (IndexError, ValueError) as error:
