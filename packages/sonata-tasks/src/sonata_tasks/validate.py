@@ -4,6 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from sonata_engine import Resource, Steps, Workflow
 from sonata_tasks.execution.bindings import (
@@ -112,6 +113,7 @@ def build_validate_workflow(
     """
     executor = RoleBoundCommandTaskExecutor(bindings)
     workflow = Workflow(workflow_id=workflow_id)
+    run_id = uuid4().hex
     platform_request = (
         replace(request, functions=(*request.functions, request.queue_probe))
         if request.queue_probe is not None
@@ -218,7 +220,7 @@ def build_validate_workflow(
                     K6Config(
                         script_path=request.queue_burst_script,
                         target_url=platform.endpoint,
-                        summary_output_path=Path(f"{workflow_id}-k8s-queue-burst.json"),
+                        summary_output_path=Path(f"{run_id}-k8s-queue-burst.json"),
                         vus=12,
                         duration="2s",
                         env={
@@ -228,7 +230,6 @@ def build_validate_workflow(
                     ),
                     executor=executor,
                     role=request.role,
-                    remote_dir=str(cwd) if cwd is not None else ".",
                     title="Burst the synchronous queue",
                     cwd=cwd,
                     require_pass=True,
