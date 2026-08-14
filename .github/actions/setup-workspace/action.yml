@@ -26,20 +26,17 @@ runs:
       uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       with:
         repository: miciav/nanofaas
-        # nanofaas main at "feat: publish what the internal autoscaler decided
-        # (#192)". Same Java 25 / GraalVM 25.2.4 and the same java-figlet,
-        # python-mlimage and java-lite image-matrix targets as the previous pin,
-        # plus what the lab's autoscaling scenarios need: the HPA scale-from-zero
-        # fixes, the adapter rules that make nanofaas_rps servable, and the eager
-        # meter registration without which that metric has no Prometheus series
-        # until the function's first request — which is after the preflight that
-        # waits for it. It also carries the kube-state-metrics dependency the
-        # load test enables, without which the four hpa_* snapshot queries have
-        # nothing to read, plus the internal autoscaler's decision gauges that
-        # explain the non-HPA scenario the same way.
+        # nanofaas main at "fix: preserve binary envelope content type". Same
+        # Java 25 / GraalVM 25.2.4 toolchain as the previous pin, plus what the
+        # handler-envelope validation scenarios now need: the qr-code,
+        # roman-numeral, json-transform, handler-envelope and binary-envelope
+        # example functions, and the IPv4 local registry default
+        # (127.0.0.1:5000) the catalog tests assert. It keeps everything the
+        # previous pin carried for the autoscaling scenarios (HPA scale-from-zero,
+        # the adapter rules, kube-state-metrics, the internal autoscaler gauges).
         # Tests read the version and the matrix from this checkout rather than
         # assuming them, so moving the pin needs no test edits.
-        ref: d44b5f95caf3843709475445cb608567ffb15d6d
+        ref: 8c93f3df16f60e138531574841639a689ce371a0
         path: .nanofaas-source
         token: ${{ inputs.nanofaas-token }}
 
