@@ -356,7 +356,6 @@ class NanofaasTUI:
         """
         scenario: Any = None
         environment: Any = None
-        keep: bool = False
         while True:
             action = self._select_action(title)
             if action is None:
@@ -366,7 +365,7 @@ class NanofaasTUI:
                 return _WORKFLOW_ABORT
             scenario, environment = loaded
             if action == "plan":
-                return (action, scenario, environment, keep)
+                return (action, scenario, environment, False)
             cleanup = self._select_cleanup_policy(scenario, environment, title)
             if isinstance(cleanup, _WorkflowAbort):
                 return _WORKFLOW_ABORT

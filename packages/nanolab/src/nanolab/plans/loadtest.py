@@ -274,12 +274,13 @@ def _resolve_functions(
     return functions, prebuilt
 
 
-def _additional_modules(autoscaling: bool, hpa: bool) -> tuple[str, ...]:  # NOSONAR (S8495): module count varies by autoscaling mode
-    if not autoscaling:
-        return ()
-    if hpa:
-        return ("async-queue", "sync-queue")
-    return ("autoscaler", "async-queue", "sync-queue")
+def _additional_modules(autoscaling: bool, hpa: bool) -> tuple[str, ...]:
+    modules: list[str] = []
+    if autoscaling:
+        if not hpa:
+            modules.append("autoscaler")
+        modules.extend(("async-queue", "sync-queue"))
+    return tuple(modules)
 
 
 def _validate_remote_run_dir(remote_run_dir: Path | None, home: str) -> None:
