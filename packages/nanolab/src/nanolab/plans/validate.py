@@ -115,7 +115,6 @@ def _handler_envelope_checks(functions: dict[str, SonataFunction]) -> tuple[Enve
                     status=200,
                     api_status="success",
                     output={"body": "body-sentinel", "header": "header-sentinel"},
-                    status_code=200,
             ),
             headers=("X-E2E-Token: header-sentinel",),
             ) for key in _HEADER_ENVELOPE_PROBES
