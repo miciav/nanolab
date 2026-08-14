@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from sonata_tasks.vm.adapters import AzureVmAdapter, MultipassVmAdapter, VmLifecycleAdapter
+from sonata_tasks.vm.adapters import azure_vm_adapter, multipass_vm_adapter, VmLifecycleAdapter
 from sonata_tasks.vm.models import VmConfig, VmInfo, VmRequest
 
 
@@ -59,7 +59,7 @@ def test_vm_lifecycle_adapter_destroy_calls_teardown() -> None:
 
 def test_multipass_vm_adapter_factory() -> None:
     orch = _make_orchestrator("10.0.0.2")
-    adapter = MultipassVmAdapter(orch)
+    adapter = multipass_vm_adapter(orch)
     config = VmConfig(name="vm1")
 
     info = adapter.ensure_running(config)
@@ -68,7 +68,7 @@ def test_multipass_vm_adapter_factory() -> None:
 
 def test_azure_vm_adapter_factory() -> None:
     orch = _make_orchestrator("4.5.6.7")
-    adapter = AzureVmAdapter(orch)
+    adapter = azure_vm_adapter(orch)
     config = VmConfig(name="azure-vm")
 
     info = adapter.ensure_running(config)
@@ -78,15 +78,15 @@ def test_azure_vm_adapter_factory() -> None:
 def test_proxmox_vm_adapter_factory() -> None:
     from pathlib import Path
     from sonata_tasks.vm.proxmox import ProxmoxVmProvider
-    from sonata_tasks.vm.adapters import ProxmoxVmAdapter
+    from sonata_tasks.vm.adapters import proxmox_vm_adapter
 
     provider = ProxmoxVmProvider(repo_root=Path("/repo"))
-    adapter = ProxmoxVmAdapter(provider)
+    adapter = proxmox_vm_adapter(provider)
     assert adapter._lifecycle == "proxmox"
 
 
 def test_proxmox_vm_adapter_propagates_credentials_to_ensure_running() -> None:
-    from sonata_tasks.vm.adapters import ProxmoxVmAdapter
+    from sonata_tasks.vm.adapters import proxmox_vm_adapter
     from sonata_tasks.vm.models import VmRequest
 
     orch = _make_orchestrator("10.0.0.5")
@@ -98,7 +98,7 @@ def test_proxmox_vm_adapter_propagates_credentials_to_ensure_running() -> None:
         proxmox_password="secret",
         proxmox_template_id=101,
     )
-    adapter = ProxmoxVmAdapter(orch, credentials=credentials)
+    adapter = proxmox_vm_adapter(orch, credentials=credentials)
     config = VmConfig(name="nanofaas-proxmox", cpus=4, memory="8G", disk="30G")
 
     adapter.ensure_running(config)
@@ -113,7 +113,7 @@ def test_proxmox_vm_adapter_propagates_credentials_to_ensure_running() -> None:
 
 
 def test_proxmox_vm_adapter_propagates_credentials_to_destroy() -> None:
-    from sonata_tasks.vm.adapters import ProxmoxVmAdapter
+    from sonata_tasks.vm.adapters import proxmox_vm_adapter
     from sonata_tasks.vm.models import VmRequest
 
     orch = _make_orchestrator()
@@ -123,7 +123,7 @@ def test_proxmox_vm_adapter_propagates_credentials_to_destroy() -> None:
         proxmox_node="pve",
         proxmox_password="secret",
     )
-    adapter = ProxmoxVmAdapter(orch, credentials=credentials)
+    adapter = proxmox_vm_adapter(orch, credentials=credentials)
     info = VmInfo(name="nanofaas-proxmox-loadgen", host="10.0.0.5", user="ubuntu", home="/home/ubuntu")
 
     adapter.destroy(info)

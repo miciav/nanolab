@@ -1,6 +1,6 @@
 """Regression for PR #125: lifecycle adapters must propagate VmRequest credentials.
 
-Without them, AzureVmAdapter rebuilt the request from a bare
+Without them, azure_vm_adapter rebuilt the request from a bare
 VmRequest(lifecycle="azure") and the SDK got resource_group/location = None —
 masked for months by a stale tofu workspace that skipped the launch path.
 """
@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from sonata_tasks.vm.adapters import AzureVmAdapter
+from sonata_tasks.vm.adapters import azure_vm_adapter
 from sonata_tasks.vm.models import VmConfig, VmRequest
 
 
@@ -30,7 +30,7 @@ def test_azure_adapter_propagates_credentials_into_ensure_running() -> None:
         azure_resource_group="maurino-rg",
         azure_location="westeurope",
     )
-    adapter = AzureVmAdapter(orch, credentials=creds)
+    adapter = azure_vm_adapter(orch, credentials=creds)
 
     adapter.ensure_running(VmConfig(name="stack", cpus=4, memory="12G", disk="30G"))
 
@@ -42,7 +42,7 @@ def test_azure_adapter_propagates_credentials_into_ensure_running() -> None:
 
 def test_azure_adapter_without_credentials_yields_bare_request() -> None:
     orch = _RecordingOrchestrator()
-    AzureVmAdapter(orch).ensure_running(VmConfig(name="x", cpus=1, memory="1G", disk="10G"))
+    azure_vm_adapter(orch).ensure_running(VmConfig(name="x", cpus=1, memory="1G", disk="10G"))
     assert orch.requests[0].azure_resource_group is None
 
 
@@ -83,7 +83,7 @@ def test_azure_adapter_vminfo_uses_credentials_user_and_home() -> None:
         azure_resource_group="rg",
         azure_location="westeurope",
     )
-    info = AzureVmAdapter(orch, credentials=creds).ensure_running(
+    info = azure_vm_adapter(orch, credentials=creds).ensure_running(
         VmConfig(name="loadgen", cpus=2, memory="2G", disk="10G")
     )
 
@@ -93,7 +93,7 @@ def test_azure_adapter_vminfo_uses_credentials_user_and_home() -> None:
 
 def test_adapter_without_credentials_keeps_ubuntu_defaults() -> None:
     orch = _RecordingOrchestrator()
-    info = AzureVmAdapter(orch).ensure_running(
+    info = azure_vm_adapter(orch).ensure_running(
         VmConfig(name="x", cpus=1, memory="1G", disk="10G")
     )
     assert info.user == "ubuntu"

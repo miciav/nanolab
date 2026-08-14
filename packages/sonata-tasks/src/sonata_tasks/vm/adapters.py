@@ -56,11 +56,11 @@ class VmLifecycleAdapter:
         self._vm.teardown(request)  # type: ignore[attr-defined]
 
 
-def MultipassVmAdapter(orchestrator: object) -> VmLifecycleAdapter:
+def multipass_vm_adapter(orchestrator: object) -> VmLifecycleAdapter:
     return VmLifecycleAdapter(orchestrator, lifecycle="multipass")
 
 
-def AzureVmAdapter(
+def azure_vm_adapter(
     orchestrator: object,
     *,
     credentials: VmRequest | None = None,
@@ -68,7 +68,7 @@ def AzureVmAdapter(
     return VmLifecycleAdapter(orchestrator, lifecycle="azure", credentials=credentials)
 
 
-def ProxmoxVmAdapter(
+def proxmox_vm_adapter(
     orchestrator: object,
     *,
     credentials: VmRequest | None = None,
