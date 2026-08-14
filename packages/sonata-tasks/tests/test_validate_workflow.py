@@ -10,6 +10,7 @@ from sonata_engine import Resource, TaskInputs, Workflow
 from sonata_engine.workflow.context import bind_workflow_sink
 from sonata_tasks.execution.bindings import RoleBindings
 from sonata_tasks.http_function import HttpFunctionExpectation
+from sonata_tasks.tasks.executors import VmCommandTaskExecutor
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 from sonata_tasks.validate import (
@@ -94,6 +95,32 @@ class ScriptedExecutor:
             if fragment in " ".join(spec.argv):
                 return spec.argv
         raise AssertionError(f"no command matching {fragment!r} in {len(self.seen)} commands")
+
+
+class VmScriptedRunner:
+    def __init__(self) -> None:
+        self.commands: list[tuple[tuple[str, ...], str | None]] = []
+
+    def run_vm_command(
+        self,
+        argv: tuple[str, ...],
+        *,
+        env: dict[str, str],
+        remote_dir: str | None,
+        dry_run: bool,
+    ) -> TaskResult:
+        del env, dry_run
+        self.commands.append((argv, remote_dir))
+        stdout = {
+            "get service control-plane": "10.43.0.7",
+            "get deployment": DEPLOYMENT_AT_DECLARED_LIMITS,
+        }
+        return TaskResult(
+            task_id="",
+            status="passed",
+            return_code=0,
+            stdout=next((value for key, value in stdout.items() if key in " ".join(argv)), '{"status":"success","output":"ok"}'),
+        )
 
 
 def _bindings(executor: ScriptedExecutor) -> RoleBindings:
@@ -223,8 +250,8 @@ def test_k8s_can_add_a_dedicated_queue_probe() -> None:
 
 
 def test_queue_burst_writes_its_summary_in_the_task_directory() -> None:
-    executor = ScriptedExecutor()
-    cwd = Path("run-local")
+    runner = VmScriptedRunner()
+    cwd = Path("/run/queue-123")
 
     build_validate_workflow(
         _request(
@@ -232,13 +259,14 @@ def test_queue_burst_writes_its_summary_in_the_task_directory() -> None:
             queue_probe=QUEUE_PROBE,
             queue_burst_script=Path("assets/k6/k8s-queue-burst.js"),
         ),
-        _bindings(executor),
+        RoleBindings(host=ScriptedExecutor(), stack=VmCommandTaskExecutor(runner)),
         cwd=cwd,
+        workflow_id="queue-123",
     ).run()
 
-    k6 = next(spec for spec in executor.seen if spec.argv[:2] == ("k6", "run"))
-    assert k6.argv[3] == "nanolab-k8s-queue-burst.json"
-    assert k6.cwd == cwd
+    k6_argv, remote_dir = next(command for command in runner.commands if command[0][:2] == ("k6", "run"))
+    assert k6_argv[3] == "queue-123-k8s-queue-burst.json"
+    assert remote_dir == "/run/queue-123"
 
 
 def test_the_teardown_is_compiled_in_rather_than_left_to_the_caller() -> None:
