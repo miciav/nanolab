@@ -10,11 +10,13 @@ from pathlib import Path
 import re
 import shutil
 import stat
-from tempfile import TemporaryDirectory
+from tempfile import mkdtemp
 
 
-_REMOTE_TEMPLATE = "/tmp/nanofaas-release-credentials.XXXXXX"
-_REMOTE_DIRECTORY = re.compile(r"/tmp/nanofaas-release-credentials\.[A-Za-z0-9]+")
+# The remote shell atomically creates this directory with `mktemp -d`.
+_REMOTE_TEMPLATE = "/tmp/nanofaas-release-credentials.XXXXXX"  # NOSONAR (S5443)
+# This accepts only the private directory returned by that `mktemp -d` invocation.
+_REMOTE_DIRECTORY = re.compile(r"/tmp/nanofaas-release-credentials\.[A-Za-z0-9]+")  # NOSONAR (S5443)
 
 
 @dataclass(frozen=True)
@@ -128,14 +130,23 @@ def _transfer(
 
 
 @contextmanager
+def _private_staging_directory() -> Iterator[Path]:
+    directory = Path(mkdtemp(prefix="nanofaas-release-credentials-"))
+    directory.chmod(0o700)
+    try:
+        yield directory
+    finally:
+        shutil.rmtree(directory)
+
+
+@contextmanager
 def _stage_remote_files(
     provider: object,
     request: object,
     files: Mapping[str, Path],
 ) -> Iterator[tuple[str, dict[str, str]]]:
     validated = {name: validate_secret_file(path) for name, path in files.items()}
-    with TemporaryDirectory(prefix="nanofaas-release-credentials-") as local_name:
-        local_dir = Path(local_name)
+    with _private_staging_directory() as local_dir:
         staged: dict[str, Path] = {}
         for name, source in validated.items():
             destination = local_dir / name

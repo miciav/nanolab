@@ -3,6 +3,8 @@ from __future__ import annotations
 import importlib
 from dataclasses import dataclass
 from pathlib import Path
+import stat
+from tempfile import mkdtemp
 import traceback
 
 from typing import Any
@@ -551,6 +553,14 @@ def test_stage_cosign_credentials_exposes_only_remote_paths(
     password.chmod(0o600)
     provider = _Provider()
     module = importlib.import_module("nanolab.release.secrets")
+    local_directories: list[Path] = []
+
+    def create_private_directory(*, prefix: str) -> str:
+        directory = Path(mkdtemp(prefix=prefix))
+        local_directories.append(directory)
+        return str(directory)
+
+    monkeypatch.setattr(module, "mkdtemp", create_private_directory, raising=False)
     monkeypatch.setattr(Path, "read_text", lambda *args, **kwargs: pytest.fail("read_text"))
     monkeypatch.setattr(Path, "read_bytes", lambda *args, **kwargs: pytest.fail("read_bytes"))
 
@@ -568,6 +578,9 @@ def test_stage_cosign_credentials_exposes_only_remote_paths(
         )
         staged_sources = [source for source, _ in provider.transfer_calls]
         assert all(source.exists() for source in staged_sources)
+        assert local_directories == [staged_sources[0].parent]
+        assert stat.S_IMODE(local_directories[0].stat().st_mode) == 0o700
+        assert all(stat.S_IMODE(source.stat().st_mode) == 0o600 for source in staged_sources)
 
     assert all(not source.exists() for source in staged_sources)
     assert all(not source.parent.exists() for source in staged_sources)
