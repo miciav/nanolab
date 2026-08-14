@@ -375,7 +375,6 @@ def _prepare_run(
     release_config: Path | None,
     run_dir: Path | None,
     resume: bool,
-    scenario_config: ScenarioConfig,
     environment_config: EnvironmentConfig,
     paths: ToolPaths,
     effective_run_dir: Path | None,
@@ -542,7 +541,7 @@ def _run_selected_workflow(
 
 
 def _execute_workflow(
-    *,
+    *,  # NOSONAR (S107): keyword-only execution context
     sink: ConsoleProgressSink,
     scenario_config: ScenarioConfig,
     environment_config: EnvironmentConfig,
@@ -665,7 +664,7 @@ def _write_success_metadata(
         )
 
 
-def install_product_commands(app: typer.Typer) -> None:
+def install_product_commands(app: typer.Typer) -> None:  # NOSONAR (S3776): nested typer commands own their teardown/error lifecycle
     @app.command("run")
     def run_command(
         scenario: Path = typer.Argument(..., exists=True),
@@ -763,7 +762,6 @@ def install_product_commands(app: typer.Typer) -> None:
                 release_config=release_config,
                 run_dir=run_dir,
                 resume=resume,
-                scenario_config=scenario_config,
                 environment_config=environment_config,
                 paths=paths,
                 effective_run_dir=effective_run_dir,

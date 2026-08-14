@@ -274,7 +274,7 @@ def _resolve_functions(
     return functions, prebuilt
 
 
-def _additional_modules(autoscaling: bool, hpa: bool) -> tuple[str, ...]:
+def _additional_modules(autoscaling: bool, hpa: bool) -> tuple[str, ...]:  # NOSONAR (S8495): module count varies by autoscaling mode
     if not autoscaling:
         return ()
     if hpa:
@@ -692,8 +692,8 @@ def _build_preflight(
     return preflight
 
 
-def build_loadtest_plan(  # NOSONAR (S107): keyword-only inputs mix config, environment and many optional overrides
-    config: ScenarioConfig,
+def build_loadtest_plan(
+    config: ScenarioConfig,  # NOSONAR (S107): keyword-only inputs mix config, environment and optional overrides
     environment: EnvironmentConfig,
     bindings: RoleBindings,
     *,

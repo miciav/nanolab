@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import yaml
 from sonata_engine import JournalConfig, Verifier, Workflow
@@ -318,12 +318,12 @@ def build_release_workflow(
     # --- Phases 4-6: Benchmarks ---
     benchmark_scenario = _read_yaml(request.settings.scenario)
     benchmark_config = ScenarioConfig.model_validate(benchmark_scenario)
-    benchmark_plan: ReleaseRequest = replace(
+    benchmark_plan = cast(ReleaseRequest, replace(
         request,
         repo_root=Path(source_dir),
         scenario=benchmark_config,
         run_dir=versioned_release_run_dir(request.run_dir, identity.prepared_version),
-    )
+    ))
     benchmark_runs: tuple[ReleasePhaseTask, ...] = build_benchmark_phase(
         identity=identity,
         run_dir=request.run_dir,
