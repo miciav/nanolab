@@ -42,6 +42,8 @@ _INTERRUPT_RESULT = object()
 _SELECTOR_MIN_WIDTH = 48
 _DESCRIPTION_MIN_WIDTH = 40
 _PANEL_WEIGHT = 1
+_TEXT_STYLE = "class:text"
+_EMPTY_CHOICES_ERROR = "choices must not be empty"
 
 
 def _normalize_choice(choice: Any) -> Any:
@@ -86,7 +88,7 @@ def _select_prompt_fragments(message: str) -> list[tuple[str, str]]:
 
 def _description_fragments(control: InquirerControl) -> list[tuple[str, str]]:
     current = control.get_pointed_at()
-    return [("class:text", getattr(current, "description", "") or "")]
+    return [(_TEXT_STYLE, getattr(current, "description", "") or "")]
 
 
 def _checkbox_description_fragments(checkbox_list: CheckboxList, choices: list[Any]) -> list[tuple[str, str]]:
@@ -95,7 +97,7 @@ def _checkbox_description_fragments(checkbox_list: CheckboxList, choices: list[A
     description = getattr(current, "description", "") or ""
     selected_count = len(getattr(checkbox_list, "current_values", []))
     return [
-        ("class:text", description),
+        (_TEXT_STYLE, description),
         ("", "\n\n"),
         ("class:instruction", f"Space toggle | Enter confirm | Selected: {selected_count}"),
     ]
@@ -117,7 +119,7 @@ def _build_header_block(*, message: str, screen_title: str, screen_breadcrumb: s
         height=1,
         content=FormattedTextControl(lambda: [
             ("class:brand", wordmark),
-            ("class:text", f"  {screen_title}" if wordmark else screen_title),
+            (_TEXT_STYLE, f"  {screen_title}" if wordmark else screen_title),
         ]),
     ))
     children.append(Window(
@@ -194,7 +196,7 @@ def _build_select_application(
 
     @bindings.add(Keys.Any)
     def _ignore(event):
-        pass
+        """Swallow unbound keys so they do not reach prompt_toolkit's defaults."""
 
     header_block = _build_header_block(
         message=message, screen_title=screen_title, screen_breadcrumb=screen_breadcrumb,
@@ -248,7 +250,7 @@ def _build_multiselect_application(
     style = to_questionary_style(get_ui().theme)
     normalized = _normalize_choices(choices)
     if not normalized:
-        raise ValueError("choices must not be empty")
+        raise ValueError(_EMPTY_CHOICES_ERROR)
 
     screen_title = title or _screen_title(message)
     screen_breadcrumb = breadcrumb or _screen_breadcrumb(screen_title, brand.default_breadcrumb)
@@ -364,7 +366,7 @@ def select(
     if include_back:
         choices = _with_back(list(choices))
     if not choices:
-        raise ValueError("choices must not be empty")
+        raise ValueError(_EMPTY_CHOICES_ERROR)
 
     style = to_questionary_style(get_ui().theme)
 
@@ -399,7 +401,7 @@ def multiselect(
 ) -> list[str]:
     """Interactive multi-select picker with a description side panel."""
     if not choices:
-        raise ValueError("choices must not be empty")
+        raise ValueError(_EMPTY_CHOICES_ERROR)
 
     style = to_questionary_style(get_ui().theme)
 

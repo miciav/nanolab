@@ -26,7 +26,7 @@ def vm_resource(
     )
 
     def destroy(info: VmInfo) -> None:
-        _ = DestroyVm(
+        DestroyVm(
             task_id=f"{info.name}-destroy",
             title=f"Destroy {info.name}",
             lifecycle=lifecycle,

@@ -69,7 +69,7 @@ def _telegram_sender(token: str, chat_id: str) -> MessageSender:
             headers={"Content-Type": "application/x-www-form-urlencoded"},
             method="POST",
         )
-        with urlopen(request, timeout=10):
-            pass
+        with urlopen(request, timeout=10) as response:
+            response.read()
 
     return send

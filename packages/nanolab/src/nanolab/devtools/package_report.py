@@ -42,9 +42,9 @@ def calculate_metrics(
     packages: Sequence[str],
     edges: Iterable[tuple[str, str]],
 ) -> list[PackageMetrics]:
-    internal_counts = {package: 0 for package in packages}
-    outgoing_counts = {package: 0 for package in packages}
-    incoming_counts = {package: 0 for package in packages}
+    internal_counts = dict.fromkeys(packages, 0)
+    outgoing_counts = dict.fromkeys(packages, 0)
+    incoming_counts = dict.fromkeys(packages, 0)
 
     for importer, imported in edges:
         importer_package = _top_level_package(importer, packages)
