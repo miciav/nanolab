@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from contextlib import AbstractContextManager
 from pathlib import Path, PurePosixPath
-from typing import Any, Callable, Generic, TypeVar
+from typing import Any, Callable, TypeVar
 
 from sonata_engine import Resource, TaskInputs
 from sonata_tasks.provisioning.resources import provisioned_vm
@@ -80,7 +80,7 @@ class BuildInputs:
 
 
 @dataclass(frozen=True, slots=True)
-class CredentialLease(Generic[T]):
+class CredentialLease[T]:
     value: T
     _manager: AbstractContextManager[T]
 

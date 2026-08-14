@@ -17,7 +17,6 @@ from __future__ import annotations
 from collections.abc import Callable
 import sys
 import time
-from typing import TypeVar
 
 # paramiko's "channel closed without an exit status" sentinel.
 CONNECTION_DEAD = -1
@@ -25,10 +24,7 @@ CONNECTION_DEAD = -1
 # Generic so a caller keeps the type it passed in: this hands back whatever the
 # operation produced, and returning `object` made every caller and every test
 # reach for a cast to read a return code.
-T = TypeVar("T")
-
-
-def retry_on_connection_death(
+def retry_on_connection_death[T](
     operation: Callable[[], T],
     *,
     describe: str,
