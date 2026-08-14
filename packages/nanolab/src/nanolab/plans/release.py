@@ -318,7 +318,7 @@ def build_release_workflow(
     # --- Phases 4-6: Benchmarks ---
     benchmark_scenario = _read_yaml(request.settings.scenario)
     benchmark_config = ScenarioConfig.model_validate(benchmark_scenario)
-    benchmark_plan = replace(
+    benchmark_plan: ReleaseRequest = replace(
         request,
         repo_root=Path(source_dir),
         scenario=benchmark_config,

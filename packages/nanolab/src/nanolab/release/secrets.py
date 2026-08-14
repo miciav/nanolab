@@ -170,7 +170,7 @@ def _stage_remote_files(
                 _run(provider, request, ("chmod", "600", destination))
                 remote_files[name] = destination
             yield remote_dir, remote_files
-        except BaseException as error:
+        except BaseException as error:  # NOSONAR (S5754): cleanup must run across the yield boundary
             operation_error = error
             try:
                 _run(provider, request, ("rm", "-rf", "--", remote_dir))

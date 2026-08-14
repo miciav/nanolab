@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 import json
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, cast, Literal
 import urllib.request
 
 from multipass import MultipassClient
@@ -180,7 +180,7 @@ def _platform(
     if offload_target is not None:
         values = _offload_target(values, offload_target)
     helm_args: tuple[str, ...] = helm_set_args(values)
-    return replace(request, helm_values=helm_args)
+    return cast(PlatformRequest, replace(request, helm_values=helm_args))
 
 
 def build_offload_loadtest_plan(

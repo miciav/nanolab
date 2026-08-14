@@ -5,7 +5,7 @@ import shutil
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, replace
-from typing import Generator
+from typing import Generator, cast
 
 from tui_toolkit.brand import AppBrand, DEFAULT_BRAND
 from tui_toolkit.theme import DEFAULT_THEME, Theme
@@ -32,7 +32,7 @@ def init_ui(ctx: UIContext | None = None) -> UIContext:
     global _ctx_shared
     base = ctx or UIContext()
     width = min(shutil.get_terminal_size((80, 24)).columns, base.max_content_cols)
-    resolved: UIContext = replace(base, content_width=width)
+    resolved = cast(UIContext, replace(base, content_width=width))
     _ctx_shared = resolved
     _ctx_var.set(resolved)
     try:

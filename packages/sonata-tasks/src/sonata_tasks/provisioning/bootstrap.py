@@ -111,7 +111,7 @@ def run_bootstrap_operations(
     executor = HostCommandTaskExecutor(runner)
     tasks: list[OperationTask] = [
         operation_task(
-            replace(operation, operation_id=f"provision.{role}.{operation.operation_id}"),
+            cast(RemoteCommandOperation, replace(operation, operation_id=f"provision.{role}.{operation.operation_id}")),
             executor,
         )
         for operation in planned

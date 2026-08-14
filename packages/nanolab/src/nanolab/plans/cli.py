@@ -2,7 +2,7 @@ import json
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from multipass import find_ssh_public_key
 from sonata_engine import Resource, TaskInputs, Workflow
@@ -117,7 +117,7 @@ def _resolved_context(
     resolved_request = context.vm_request.model_copy(
         update={"lifecycle": "external", "host": info.host, "user": info.user, "home": info.home}
     )
-    resolved_context: ScenarioExecutionContext = replace(context, vm_request=resolved_request)
+    resolved_context = cast(ScenarioExecutionContext, replace(context, vm_request=resolved_request))
     return resolved_context
 
 
