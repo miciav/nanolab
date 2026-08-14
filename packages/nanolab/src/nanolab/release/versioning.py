@@ -118,8 +118,14 @@ def _version_pattern(version: str) -> re.Pattern[str]:
     `runtimes/watchdog/Cargo.lock`, because `ring 0.17.14` starts with it.
     Counting that way aborts a correct release; replacing that way would
     silently rewrite the dependency's pin.
+
+    A dependency constraint at the same version as our own collides the same
+    way: `prometheus-client>=0.20.0` must not count as a `0.20.0` occurrence.
+    The lookbehind therefore also rejects version-comparison operators, which
+    a project-version assignment (`version = "0.20.0"`, `version: 0.20.0`)
+    never has immediately before the version.
     """
-    return re.compile(rf"(?<![\d.]){re.escape(version)}(?![\d.])")
+    return re.compile(rf"(?<![\d.=><~!^]){re.escape(version)}(?![\d.])")
 
 
 def _count_version(text: str, version: str) -> int:
