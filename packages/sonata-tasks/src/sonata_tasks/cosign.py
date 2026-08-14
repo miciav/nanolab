@@ -127,12 +127,14 @@ class CosignTask(CommandTask):
             # text, so a value containing `"`, `$`, or a backtick still lands
             # as a literal path, not shell syntax. Redirect instead of exec:
             # public-key writes the key to stdout.
-            script = 'pw=$(cat "$1"); out="$2"; shift 2; COSIGN_PASSWORD="$pw" "$@" > "$out"'
+            # COSIGN_PASSWORD names an environment variable; its value comes from "$1".
+            script = 'pw=$(cat "$1"); out="$2"; shift 2; COSIGN_PASSWORD="$pw" "$@" > "$out"'  # NOSONAR (S2068)
             positional = (password_file, output_file, *run)
         else:
             # ponytail: shell wrapper reads password file, shifts it away,
             # then execs the real command with the password in the env.
-            script = 'pw=$(cat "$1"); shift; COSIGN_PASSWORD="$pw" exec "$@"'
+            # COSIGN_PASSWORD names an environment variable; its value comes from "$1".
+            script = 'pw=$(cat "$1"); shift; COSIGN_PASSWORD="$pw" exec "$@"'  # NOSONAR (S2068)
             positional = (password_file, *run)
 
         super().__init__(
