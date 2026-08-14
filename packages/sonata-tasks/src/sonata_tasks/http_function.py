@@ -6,6 +6,7 @@ from dataclasses import dataclass, replace
 import json
 from pathlib import Path
 from time import monotonic, sleep
+from typing import cast
 
 from sonata_engine import Resource, Task, TaskInputs, TaskOutcome
 from sonata_tasks.execution.bindings import CommandTaskExecutor
@@ -572,7 +573,7 @@ class HttpFunctionInvokeTask(CommandTask):
                     f"{name}: response carried no {require_header} header; "
                     f"got {sorted(name for name in names if name)}"
                 )
-            verify_invocation(replace(result, stdout=body))
+            verify_invocation(cast(TaskResult, replace(result, stdout=body)))
 
         super().__init__(
             title=f"Invoke {name}",

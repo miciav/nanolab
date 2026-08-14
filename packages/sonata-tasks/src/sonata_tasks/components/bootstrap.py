@@ -251,7 +251,7 @@ def retarget_bootstrap_operation(
 ) -> RemoteCommandOperation:
     """Point an Ansible or repository-sync operation at a resolved SSH endpoint."""
     if operation.argv and operation.argv[0] == "ansible-playbook":
-        return replace(operation, argv=tuple(_retarget_ansible_argv(operation.argv, host=host, port=port, private_key=private_key)))
+        return cast(RemoteCommandOperation, replace(operation, argv=tuple(_retarget_ansible_argv(operation.argv, host=host, port=port, private_key=private_key))))
 
     if operation.operation_id in ("repo.sync_to_vm", _ASSETS_SYNC_TO_VM):
         request = context.vm_request
@@ -265,7 +265,7 @@ def retarget_bootstrap_operation(
             destination=remote_assets_dir(request) if assets else _remote_project_dir(request),
             ssh_rsh=repo_sync_ssh_rsh(private_key, port=port),
         )
-        retargeted_sync: RemoteCommandOperation = replace(operation, argv=tuple(argv))
+        retargeted_sync = cast(RemoteCommandOperation, replace(operation, argv=tuple(argv)))
         return retargeted_sync
 
     return operation
