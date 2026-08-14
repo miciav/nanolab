@@ -85,6 +85,22 @@ def test_remote_credential_command_does_not_translate_programming_errors() -> No
         _run(BrokenProvider(), object(), ("true",))
 
 
+def test_credential_lifecycle_cleans_then_propagates_programming_errors(tmp_path: Path) -> None:
+    token = tmp_path / "ghcr-token"
+    token.write_text("token", encoding="utf-8")
+    token.chmod(0o600)
+    provider = _Provider()
+    module = importlib.import_module("nanolab.release.secrets")
+
+    with pytest.raises(ValueError, match="bad workflow contract"):
+        with module.stage_ghcr_credentials(
+            provider, object(), username="release-user", token_file=token
+        ):
+            raise ValueError("bad workflow contract")
+
+    assert provider.exec_calls[-1][0][:3] == ("rm", "-rf", "--")
+
+
 def test_ghcr_resource_validates_before_remote_action_and_always_releases(
     tmp_path: Path,
 ) -> None:

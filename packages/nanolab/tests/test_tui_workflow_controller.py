@@ -357,6 +357,24 @@ def test_controller_stops_listener_when_start_raises() -> None:
     listener.stop.assert_called_once_with()
 
 
+def test_controller_propagates_programming_error_from_listener_start() -> None:
+    console = MagicMock()
+    console.is_terminal = False
+    listener = MagicMock()
+    listener.start.side_effect = ValueError("bad listener contract")
+
+    with (
+        patch("nanolab.tui.workflow_controller.Live", return_value=live_mock()),
+        patch("nanolab.tui.workflow_controller.WorkflowKeyListener", return_value=listener),
+        pytest.raises(ValueError, match="bad listener contract"),
+    ):
+        TuiWorkflowController(console=console).run_live_workflow(
+            title="Test", summary_lines=[], planned_steps=None, action=lambda _dashboard, _sink: None
+        )
+
+    listener.stop.assert_called_once_with()
+
+
 def test_listener_stop_failure_does_not_mask_action_failure() -> None:
     console = MagicMock()
     console.is_terminal = False
@@ -400,4 +418,21 @@ def test_listener_stop_failure_is_raised_after_successful_action() -> None:
             summary_lines=[],
             planned_steps=["Step one"],
             action=lambda _dashboard, _sink: "ok",
+        )
+
+
+def test_controller_propagates_programming_error_from_listener_stop() -> None:
+    console = MagicMock()
+    console.is_terminal = False
+    listener = MagicMock()
+    listener.input_is_tty = False
+    listener.stop.side_effect = ValueError("bad listener contract")
+
+    with (
+        patch("nanolab.tui.workflow_controller.Live", return_value=live_mock()),
+        patch("nanolab.tui.workflow_controller.WorkflowKeyListener", return_value=listener),
+        pytest.raises(ValueError, match="bad listener contract"),
+    ):
+        TuiWorkflowController(console=console).run_live_workflow(
+            title="Test", summary_lines=[], planned_steps=None, action=lambda _dashboard, _sink: None
         )

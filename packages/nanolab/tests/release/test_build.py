@@ -265,6 +265,20 @@ def test_arm64_smoke_server_failures_still_remove_the_container(
     assert not (plan.run_dir / "arm64-smoke.json").exists()
 
 
+def test_arm64_smoke_cleanup_does_not_hide_a_provider_programming_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class BrokenCleanupProvider(_ArmFailureProvider):
+        def exec_argv(self, request, argv, **kwargs):
+            if argv[:3] == ("docker", "rm", "--force"):
+                raise ValueError("bad cleanup contract")
+            return super().exec_argv(request, argv, **kwargs)
+
+    plan = _plan(tmp_path, monkeypatch)
+    with pytest.raises(ValueError, match="bad cleanup contract"):
+        _arm64_build_and_smoke(plan, BrokenCleanupProvider([], "health"), [])
+
+
 def test_arm64_smoke_rejects_a_watchdog_that_fails_the_wrong_way(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

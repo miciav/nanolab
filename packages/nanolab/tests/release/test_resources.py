@@ -390,6 +390,34 @@ def test_arm_build_inputs_transfer_bake_and_buildkit_and_cleanup_on_failure(
     assert not (tmp_path / "buildkitd-arm64.toml").exists()
 
 
+def test_arm_build_inputs_cleanup_propagates_programming_errors(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(release_resources, "render_bake_json", lambda _plan: "{}\n")
+
+    class BrokenProvider:
+        def transfer_to(self, _request, *, source: Path, destination: str):
+            return SimpleNamespace(return_code=1, stderr="transfer failed")
+
+        def exec_argv(self, _request, argv):
+            if argv[0] == "rm":
+                raise ValueError("bad cleanup contract")
+            return SimpleNamespace(return_code=0)
+
+    resource = release_resources.build_inputs_resource(
+        image_plan=cast(ImagePlan, SimpleNamespace(cells=())),
+        max_parallelism=1,
+        run_dir=tmp_path,
+        remote_root="/home/user/nanofaas-release/v1",
+        provider=BrokenProvider(),
+        request=object(),
+        architecture="arm64",
+    )
+
+    with pytest.raises(ValueError, match="bad cleanup contract"):
+        resource.acquire(TaskInputs.empty())
+
+
 @pytest.mark.parametrize(
     ("source", "archive"),
     (
