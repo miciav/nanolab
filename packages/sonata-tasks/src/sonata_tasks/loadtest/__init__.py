@@ -17,6 +17,7 @@ from sonata_tasks.loadtest.concurrency import (
     ConcurrencySummary,
     ConcurrencyWatcher,
     verify_concurrency_cycle,
+    write_series,
 )
 from sonata_tasks.loadtest.models import K6RunResult, TimeWindow
 from sonata_tasks.loadtest.tasks import (
@@ -151,16 +152,23 @@ class VerifyConcurrencyTask(Task[LoadtestOutcome]):
         *,
         watcher: ConcurrencyWatcher,
         function_name: str,
+        series_path: Path | None = None,
         title: str = "Verify concurrency governor",
     ) -> None:
         self.title = title
         self._watcher = watcher
         self._function_name = function_name
+        self._series_path = series_path
 
     @override
     def run(self, inputs: TaskInputs) -> TaskOutcome[LoadtestOutcome]:
         outcome = load_outcome(inputs, self.title)
         summary = self._watcher.summary(self._function_name)
+        # Written before the verdict, on purpose: the readings are most needed
+        # by the run that fails, and a raise here would take them with it.
+        if self._series_path is not None:
+            write_series(summary, self._series_path)
+        print(summary.describe())
         verify_concurrency_cycle(summary)
         return TaskOutcome(value=replace(outcome, concurrency=summary))
 

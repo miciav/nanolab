@@ -15,10 +15,12 @@ profile a MeterFilter denies it and the scrape simply has no such line.
 
 from __future__ import annotations
 
+import json
 import threading
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Protocol
 
 import httpx
@@ -26,18 +28,43 @@ import httpx
 from sonata_tasks.metrics import metric_sum
 
 _EFFECTIVE_CONCURRENCY = "function_effective_concurrency"
+# Micrometer's own suffixes for the timer the governor reads.
+_LATENCY_COUNT = "function_latency_ms_seconds_count"
+_LATENCY_SUM = "function_latency_ms_seconds_sum"
+# What the queue was actually running. Without it the series cannot tell a
+# function that refused to slow down from one the load never made concurrent.
+_IN_FLIGHT = "function_inFlight"
+
+
+@dataclass(frozen=True, slots=True)
+class ConcurrencyReading:
+    """One scrape: the limit, and the cumulative timer the governor decides from."""
+
+    effective: int
+    in_flight: int
+    latency_count: float
+    latency_total_ms: float
 
 
 class EffectiveConcurrencyReader(Protocol):
-    def effective_concurrency(self) -> int: ...
+    def read(self) -> ConcurrencyReading: ...
 
 
 @dataclass(frozen=True, slots=True)
 class ConcurrencySample:
-    """One reading of a function's effective concurrency while load was running."""
+    """One reading of a function's effective concurrency while load was running.
+
+    The service time of the same interval travels with it. Without it a series
+    shows the governor moving but never why, and "why" is the whole question
+    when the thresholds are still being chosen: a limit that falls late is a
+    different problem depending on whether latency rose late or the controller
+    reacted late.
+    """
 
     elapsed_seconds: float
     effective: int
+    in_flight: int = 0
+    mean_latency_ms: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,6 +82,32 @@ class ConcurrencyDip:
     @property
     def ascent(self) -> int:
         return self.recovery_after - self.trough
+
+
+def governed_samples(
+    samples: Sequence[ConcurrencySample],
+) -> tuple[ConcurrencySample, ...]:
+    """Drop the readings taken before the governor's first decision.
+
+    The queue is created at the function's configured `concurrency`, so a series
+    opens on a value nobody decided, and one higher than anything the governor
+    picks while it is still climbing. Leaving it in hands the search a free
+    "peak before", which lets the warm-up masquerade as a reaction to load.
+
+    That is not hypothetical. A real run produced
+    `8x2 5x3 6x4 7x3 8x44 7x5 6x3 5x5 4x5 3x1`: the check passed on the opening
+    8 -> 5 -> 8, which is just the queue's initial value and the governor's first
+    write, while the genuine back-off from 8 down to 3 went unrecognised because
+    it never recovered before the run ended.
+    """
+    if not samples:
+        return ()
+    opening = samples[0].effective
+    first_decision = next(
+        (index for index, sample in enumerate(samples) if sample.effective != opening),
+        None,
+    )
+    return tuple(samples) if first_decision is None else tuple(samples[first_decision:])
 
 
 def find_dip(samples: Sequence[ConcurrencySample]) -> ConcurrencyDip | None:
@@ -119,6 +172,82 @@ class ConcurrencySummary:
     def max_observed(self) -> int:
         return max((sample.effective for sample in self.samples), default=0)
 
+    def describe(self) -> str:
+        """One line naming what the governor did, for the run log.
+
+        Nothing downstream persists the series — the k6 report knows nothing of
+        concurrency — so on a passing run this is the only place the shape
+        survives, and the shape is what threshold tuning needs.
+        """
+        line = f"concurrency governor for {self.function_name!r}: [{self.trajectory()}]"
+        if self.dip is None:
+            return line
+        return (
+            f"{line} peak {self.dip.peak_before} -> trough {self.dip.trough} "
+            f"-> recovery {self.dip.recovery_after}"
+        )
+
+    def trajectory(self) -> str:
+        """The series, run-length encoded with each block's service time.
+
+        For example `8x42@2.0-19.3` — the limit sat at 8 for 42 readings while
+        the mean service time of those intervals ranged from 2.0ms to 19.3ms.
+        Aggregate extremes over the whole run were not enough to explain a run:
+        they said the function had slowed tenfold without saying whether that
+        happened while the limit was still high, which is the difference between
+        a controller that ignored the signal and one that never received it.
+        """
+        blocks: list[tuple[int, int, list[float]]] = []
+        for sample in self.samples:
+            if blocks and blocks[-1][0] == sample.effective:
+                value, count, latencies = blocks[-1]
+                blocks[-1] = (value, count + 1, latencies)
+            else:
+                blocks.append((sample.effective, 1, []))
+            if sample.mean_latency_ms is not None:
+                blocks[-1][2].append(sample.mean_latency_ms)
+
+        parts: list[str] = []
+        for value, count, latencies in blocks:
+            part = f"{value}x{count}"
+            if latencies:
+                part += f"@{min(latencies)}-{max(latencies)}"
+            parts.append(part)
+        return " ".join(parts)
+
+
+def write_series(summary: ConcurrencySummary, path: Path) -> None:
+    """Persist every reading, before anything can raise on the verdict.
+
+    The compressed line in the run log was not enough to explain a run: it says
+    the limit sat at 8 for 146 readings while service time ranged from 2.6ms to
+    10.8ms, without saying which reading was which. Seven runs were spent
+    inferring an ordering that was recorded nowhere, so the series is written
+    out in full and written FIRST — a failing verdict is exactly when it matters.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "function": summary.function_name,
+        "dip": None
+        if summary.dip is None
+        else {
+            "peak_before": summary.dip.peak_before,
+            "trough": summary.dip.trough,
+            "recovery_after": summary.dip.recovery_after,
+        },
+        "errors": list(summary.errors),
+        "samples": [
+            {
+                "elapsed_seconds": sample.elapsed_seconds,
+                "effective_concurrency": sample.effective,
+                "in_flight": sample.in_flight,
+                "mean_latency_ms": sample.mean_latency_ms,
+            }
+            for sample in summary.samples
+        ],
+    }
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
 
 def verify_concurrency_cycle(summary: ConcurrencySummary) -> None:
     """Raise unless the governor lowered the limit under load and raised it after.
@@ -139,21 +268,26 @@ def verify_concurrency_cycle(summary: ConcurrencySummary) -> None:
         raise RuntimeError(
             f"{summary.function_name!r} effective concurrency never fell and "
             f"recovered: {summary.min_observed}..{summary.max_observed} over "
-            f"{len(summary.samples)} readings. Either the load never degraded the "
-            "function's service time, or the function is not in ADAPTIVE_PER_POD "
-            "mode."
+            f"{len(summary.samples)} readings [{summary.trajectory()}]. Either the "
+            "load never degraded the function's service time, or the function is "
+            "not in ADAPTIVE_PER_POD mode."
         )
 
 
 @dataclass(frozen=True)
 class ScrapeConcurrencyProbe:
-    """Reads the effective-concurrency gauge off the control plane's metrics scrape."""
+    """Reads the governor's gauge and its input timer from one metrics scrape.
+
+    Both come from the same response on purpose: read separately they would
+    describe two different moments, and the whole point of carrying the service
+    time is to say what the limit was reacting to.
+    """
 
     management_url: str
     function_name: str
     timeout_seconds: float = 4.0
 
-    def effective_concurrency(self) -> int:
+    def read(self) -> ConcurrencyReading:
         url = f"{self.management_url.rstrip('/')}/actuator/prometheus"
         try:
             response = httpx.get(url, timeout=self.timeout_seconds)
@@ -161,15 +295,25 @@ class ScrapeConcurrencyProbe:
             raise RuntimeError(f"metrics scrape failed for {url}: {exc}") from exc
         if response.status_code != 200:
             raise RuntimeError(f"metrics scrape failed for {url} (HTTP {response.status_code})")
-        matches, total = metric_sum(
-            response.text, _EFFECTIVE_CONCURRENCY, {"function": self.function_name}
-        )
+
+        labels = {"function": self.function_name}
+        matches, effective = metric_sum(response.text, _EFFECTIVE_CONCURRENCY, labels)
+        _, in_flight = metric_sum(response.text, _IN_FLIGHT, labels)
         if not matches:
             raise RuntimeError(
                 f"{url}: no {_EFFECTIVE_CONCURRENCY} sample for "
                 f"function={self.function_name!r}"
             )
-        return int(total)
+        # The timer is absent until the function has served something, which is
+        # normal at the start of a run and must not read as a scrape failure.
+        _, count = metric_sum(response.text, _LATENCY_COUNT, labels)
+        _, total_seconds = metric_sum(response.text, _LATENCY_SUM, labels)
+        return ConcurrencyReading(
+            effective=int(effective),
+            in_flight=int(in_flight),
+            latency_count=count,
+            latency_total_ms=total_seconds * 1000.0,
+        )
 
 
 class ConcurrencyWatcher:
@@ -190,6 +334,7 @@ class ConcurrencyWatcher:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._samples: list[ConcurrencySample] = []
+        self._previous: ConcurrencyReading | None = None
         self._started_at: float | None = None
         self.errors: list[str] = []
 
@@ -201,8 +346,13 @@ class ConcurrencyWatcher:
         samples = self.samples
         return ConcurrencySummary(
             function_name=function_name,
+            # The full series is kept for the log: the warm-up is worth seeing.
             samples=samples,
-            dip=find_dip(samples),
+            # The verdict is not allowed to use it. `governed_samples` is applied
+            # here, at the one boundary where raw readings become governor
+            # decisions, rather than inside `find_dip`, which stays a plain
+            # search for a shape in whatever it is handed.
+            dip=find_dip(governed_samples(samples)),
             errors=tuple(self.errors),
         )
 
@@ -233,7 +383,7 @@ class ConcurrencyWatcher:
 
     def _sample(self) -> None:
         try:
-            effective = self._probe.effective_concurrency()
+            reading = self._probe.read()
         except RuntimeError as exc:
             # A transient scrape failure must not kill the watcher mid-load: the
             # gap it leaves is one missing reading, while a dead watcher loses
@@ -245,6 +395,25 @@ class ConcurrencyWatcher:
                 elapsed_seconds=round(
                     time.monotonic() - (self._started_at or time.monotonic()), 3
                 ),
-                effective=effective,
+                effective=reading.effective,
+                in_flight=reading.in_flight,
+                mean_latency_ms=self._interval_mean_latency(reading),
             )
         )
+        self._previous = reading
+
+    def _interval_mean_latency(self, reading: ConcurrencyReading) -> float | None:
+        """Mean service time of the interval just ended, or None if nothing finished.
+
+        The cumulative timer answers "since startup", which flattens exactly the
+        change the governor is reacting to; the difference between two scrapes is
+        what the controller itself works from.
+        """
+        previous = self._previous
+        if previous is None:
+            return None
+        delta_count = reading.latency_count - previous.latency_count
+        delta_total = reading.latency_total_ms - previous.latency_total_ms
+        if delta_count <= 0 or delta_total <= 0:
+            return None
+        return round(delta_total / delta_count, 2)
