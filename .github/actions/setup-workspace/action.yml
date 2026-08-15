@@ -26,14 +26,16 @@ runs:
       uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       with:
         repository: miciav/nanofaas
-        # nanofaas main at "fix: resolve SonarQube findings in Go and JavaScript
-        # SDKs". Same Java 25 / GraalVM 25.2.4 toolchain as the previous pin,
-        # and it keeps everything that pin carried (the handler-envelope example
+        # nanofaas main at "test: add and correct per-function payload sets".
+        # Same Java 25 / GraalVM 25.2.4 toolchain as the previous pin, and it
+        # keeps everything that pin carried (the handler-envelope example
         # functions, the IPv4 local registry default, the autoscaling scenario
-        # support) plus the 0.19.0 version bump and the Go/JS SDK cleanups.
+        # support) plus the per-function payload sets
+        # (functions/<runtime>/<family>/payloads/) the container async validate
+        # workflow reads.
         # Tests read the version and the matrix from this checkout rather than
         # assuming them, so moving the pin needs no test edits.
-        ref: 7a5a669792b57ef03b8552c4a626491f49138449
+        ref: 7cfffff1cc7c6be65799efb1402aa5297f48965d
         path: .nanofaas-source
         token: ${{ inputs.nanofaas-token }}
 
