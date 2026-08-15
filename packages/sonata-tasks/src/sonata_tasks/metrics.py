@@ -18,7 +18,7 @@ _SAMPLE = re.compile(rf"^({_METRIC_NAME}){_METRIC_LABELS}\s+({_METRIC_VALUE})")
 _LABEL = re.compile(r'([A-Za-z_]\w*)="((?:[^"\\]|\\.)*)"')
 
 
-def _metric_sum(scrape: str, name: str, labels: Mapping[str, str]) -> tuple[int, float]:
+def metric_sum(scrape: str, name: str, labels: Mapping[str, str]) -> tuple[int, float]:
     matches = 0
     total = 0.0
     for line in scrape.splitlines():
@@ -46,7 +46,7 @@ def _require_metric_sum(
     minimum: float,
 ) -> None:
     for name in names:
-        matches, total = _metric_sum(scrape, name, labels)
+        matches, total = metric_sum(scrape, name, labels)
         if matches:
             if total < minimum:
                 raise RuntimeError(f"{url}: {name}{dict(labels)} sum was {total}, expected >= {minimum}")

@@ -9,6 +9,7 @@ from sonata_tasks.command import CommandTask
 from sonata_tasks.compose import DockerComposeProject, docker_compose_resource
 from sonata_tasks.registry import docker_registry_resource
 from sonata_tasks.loadtest import (
+    VerifyConcurrencyTask,
     CapturePrometheusTask,
     EvaluateGateTask,
     FetchResultsTask,
@@ -24,6 +25,10 @@ from sonata_tasks.components.helm import control_plane_helm_values, helm_set_arg
 from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
 from sonata_tasks.execution.roles import ExecutionRole
 from sonata_tasks.k6 import K6Task
+from sonata_tasks.loadtest.concurrency import (
+    ConcurrencyWatcher,
+    ScrapeConcurrencyProbe,
+)
 from sonata_tasks.loadtest.autoscaling import (
     HttpReplicaProbe,
     ReplicaProbe,
@@ -213,6 +218,41 @@ def _autoscaling_setup(
     return hpa, replica_floor, scaling_config
 
 
+# Deliberately short next to the platform defaults of 30s/60s. The governor moves
+# the per-replica target by one step per cooldown, so with production cooldowns a
+# run would need minutes per phase to show a trajectory rather than a single step.
+# The cooldowns themselves are not what this scenario is checking.
+_CONCURRENCY_COOLDOWN_MS = 5000
+# The ceiling the governor works under: FunctionQueueState clamps the effective
+# limit to the function's `concurrency`, so it has to leave room above
+# maxTargetInFlightPerPod or the trajectory is flat by construction.
+_CONCURRENCY_CEILING = 8
+
+
+def _concurrency_control_setup(config: ScenarioConfig) -> dict[str, object] | None:
+    """Fixed replicas, adaptive per-replica concurrency.
+
+    `NONE` rather than `INTERNAL` so nothing moves the replica count even if an
+    autoscaler were present: with one replica pinned, every change in
+    `function_effective_concurrency` is the governor's doing.
+    """
+    if not config.concurrency_control:
+        return None
+    return {
+        "strategy": "NONE",
+        "minReplicas": 1,
+        "maxReplicas": 1,
+        "concurrencyControl": {
+            "mode": "ADAPTIVE_PER_POD",
+            "targetInFlightPerPod": 4,
+            "minTargetInFlightPerPod": 1,
+            "maxTargetInFlightPerPod": _CONCURRENCY_CEILING,
+            "upscaleCooldownMs": _CONCURRENCY_COOLDOWN_MS,
+            "downscaleCooldownMs": _CONCURRENCY_COOLDOWN_MS,
+        },
+    }
+
+
 def _resolve_with_prebuilt_images(
     config: ScenarioConfig,
     repo_root: Path | None,
@@ -251,6 +291,7 @@ def _resolve_functions(
     scaling_config: dict[str, object] | None,
     prebuilt_control_plane_image: str | None,
     prebuilt_function_images: Mapping[str, str] | None,
+    concurrency: int = 4,
 ) -> tuple[tuple[Any, ...], bool]:
     resolved, prebuilt = _resolve_with_prebuilt_images(
         config,
@@ -266,7 +307,7 @@ def _resolve_functions(
                 function,
                 scaling_config=scaling_config,
                 timeout_ms=30000,
-                concurrency=4,
+                concurrency=concurrency,
                 queue_size=100,
             )
             for function in functions
@@ -274,12 +315,22 @@ def _resolve_functions(
     return functions, prebuilt
 
 
-def _additional_modules(autoscaling: bool, hpa: bool) -> tuple[str, ...]:
+def _additional_modules(
+    autoscaling: bool, hpa: bool, concurrency_control: bool = False
+) -> tuple[str, ...]:
     modules: list[str] = []
     if autoscaling:
         if not hpa:
             modules.append("autoscaler")
         modules.extend(("async-queue", "sync-queue"))
+    if concurrency_control:
+        # No autoscaler: the governor has had its own tick loop since nanofaas
+        # #180 and no longer needs ScalingStrategy.INTERNAL. No sync-queue
+        # either - its admission control would reject under the very load the
+        # governor is being watched through, which muddies the reading. The
+        # async queue is what actually enforces the limit
+        # (FunctionQueueState.tryAcquireSlot), so it is required.
+        modules.extend(("concurrency-control", "async-queue"))
     return tuple(modules)
 
 
@@ -384,10 +435,24 @@ def _build_platform_request(
     return request
 
 
+def compose_control_plane_modules(additional_modules: tuple[str, ...]) -> str:
+    """The module set compiled into the control-plane image on the container path.
+
+    This is a build arg, not a runtime toggle, so it decides what the image
+    contains rather than what it enables. The deployment provider is always
+    needed to run functions at all; the rest is whatever the scenario asked for,
+    falling back to the historical autoscaling set for scenarios that ask for
+    nothing.
+    """
+    selected = additional_modules or ("autoscaler", "async-queue", "sync-queue")
+    return ",".join(("container-deployment-provider",) + tuple(selected))
+
+
 def _build_platform_requires(
     backend: str,
     executor: RoleBoundCommandTaskExecutor,
     root: Path,
+    additional_modules: tuple[str, ...] = (),
 ) -> tuple[Any, ...]:
     platform_requires = ()
     if backend == "container":
@@ -398,9 +463,8 @@ def _build_platform_requires(
                 file=Path("deploy/compose/compose.yaml"),
                 ready_url="http://127.0.0.1:8081/actuator/health/readiness",
                 env={
-                    "NANOFAAS_CONTROL_PLANE_MODULES": (
-                        "container-deployment-provider,autoscaler,"
-                        "async-queue,sync-queue"
+                    "NANOFAAS_CONTROL_PLANE_MODULES": compose_control_plane_modules(
+                        additional_modules
                     )
                 },
             ),
@@ -438,17 +502,27 @@ def _build_run_k6(
                 K6Stage(duration=duration, target=count)
                 for duration, count in (
                     stages
-                    or (
-                        (("10s", 10), ("20s", 20), ("90s", 20), ("10s", 0))
-                        if config.autoscaling
-                        else (("15s", 1), ("30s", 3))
-                    )
+                    or _default_stages(config)
                 )
             ),
             env={"NANOFAAS_URL": control_plane_url, "NANOFAAS_FUNCTION": target.name},
         ),
         remote_dir=_REMOTE_DIR,
     )
+
+
+def _default_stages(config: ScenarioConfig) -> tuple[tuple[str, int], ...]:
+    if config.autoscaling:
+        return (("10s", 10), ("20s", 20), ("90s", 20), ("10s", 0))
+    if config.concurrency_control:
+        # Light, then heavy, then light again. The governor raises the limit
+        # while the function answers at its best, backs it off once the service
+        # time degrades, and raises it again on the way out; a run that stopped
+        # at the heavy phase could not tell a governor that recovers from one
+        # stuck at minTargetInFlightPerPod. Each phase outlasts several
+        # cooldowns so the reading is a trajectory rather than a single step.
+        return (("30s", 2), ("15s", 25), ("60s", 25), ("45s", 2))
+    return (("15s", 1), ("30s", 3))
 
 
 def _build_replica_watcher(
@@ -479,6 +553,28 @@ def _build_replica_watcher(
     return watcher, replica_probe
 
 
+def _build_concurrency_watcher(
+    *,
+    config: ScenarioConfig,
+    control_plane_url: str,
+    target: Any,
+) -> ConcurrencyWatcher | None:
+    """Watches the governor's own gauge, which lives on the management port.
+
+    The API port serves no view of the effective limit — there is no endpoint
+    for it, only the `function_effective_concurrency` gauge in the metrics
+    scrape — so the URL is derived the same way sonata_tasks.metrics derives it.
+    """
+    if not config.concurrency_control:
+        return None
+    return ConcurrencyWatcher(
+        ScrapeConcurrencyProbe(
+            management_url=control_plane_url.replace(":8080", ":8081"),
+            function_name=target.name,
+        )
+    )
+
+
 def _build_steps_after(
     *,
     remote: bool,
@@ -486,6 +582,7 @@ def _build_steps_after(
     run_dir: Path,
     fetcher: RemoteFileFetcher | object | None,
     watcher: ReplicaWatcher | None,
+    concurrency_watcher: ConcurrencyWatcher | None = None,
     replica_probe: ReplicaStatusProbe | None,
     bindings: RoleBindings,
     request: PlatformRequest,
@@ -504,6 +601,13 @@ def _build_steps_after(
                     remote_source=str(summary_path),
                     local_dest=run_dir,
                 )
+            )
+        )
+    if concurrency_watcher is not None:
+        after.append(
+            VerifyConcurrencyTask(
+                watcher=concurrency_watcher,
+                function_name=target.name,
             )
         )
     if watcher is not None:
@@ -721,6 +825,7 @@ def build_loadtest_plan(
     """
     backend = _validate_loadtest(config, environment)
     hpa, replica_floor, scaling_config = _autoscaling_setup(config)
+    scaling_config = scaling_config or _concurrency_control_setup(config)
     root = repo_root or Path.cwd()
     functions, prebuilt = _resolve_functions(
         config,
@@ -729,6 +834,7 @@ def build_loadtest_plan(
         scaling_config,
         prebuilt_control_plane_image,
         prebuilt_function_images,
+        concurrency=_CONCURRENCY_CEILING if config.concurrency_control else 4,
     )
     target = functions[0]
     dedicated = "loadgen" in environment.roles
@@ -742,7 +848,9 @@ def build_loadtest_plan(
         run_dir=run_dir,
         tool_root=tool_root,
     )
-    additional_modules = _additional_modules(config.autoscaling, hpa)
+    additional_modules = _additional_modules(
+        config.autoscaling, hpa, config.concurrency_control
+    )
     request = _build_platform_request(
         backend=backend,
         build=config.build,
@@ -756,7 +864,9 @@ def build_loadtest_plan(
     )
     load_role: ExecutionRole = "loadgen" if dedicated else "stack"
     executor = RoleBoundCommandTaskExecutor(bindings)
-    platform_requires = _build_platform_requires(backend, executor, root)
+    platform_requires = _build_platform_requires(
+        backend, executor, root, additional_modules
+    )
     run_k6 = _build_run_k6(
         executor=executor,
         load_role=load_role,
@@ -775,12 +885,18 @@ def build_loadtest_plan(
         target=target,
         request=request,
     )
+    concurrency_watcher = _build_concurrency_watcher(
+        config=config,
+        control_plane_url=control_plane_url,
+        target=target,
+    )
     after = _build_steps_after(
         remote=remote,
         summary_path=summary_path,
         run_dir=run_dir,
         fetcher=fetcher,
         watcher=watcher,
+        concurrency_watcher=concurrency_watcher,
         replica_probe=replica_probe,
         bindings=bindings,
         request=request,
@@ -814,7 +930,10 @@ def build_loadtest_plan(
             ),
             run_k6=RunK6Task(
                 run_k6=run_k6,
-                watcher=watcher,
+                # One sampler slot, and the two never coexist: a concurrency run
+                # pins the replica count, an autoscaling run does not govern
+                # concurrency.
+                watcher=watcher or concurrency_watcher,
                 initial_replicas=(
                     VerifyInitialAutoscalingReplicas(
                         replica_probe, expected_replicas=replica_floor

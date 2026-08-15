@@ -1,0 +1,13 @@
+# Watches the per-function concurrency governor alone: replicas are pinned at 1
+# and the autoscaler is not compiled in, so every move of
+# `function_effective_concurrency` is the governor's.
+#
+# The load runs light, then heavy, then light again. The limit should climb
+# while the function answers at its best, fall back once the service time
+# degrades, and climb again on the way out. A run that only went heavy could not
+# tell a governor that recovers from one stuck at minTargetInFlightPerPod.
+workflow: loadtest
+backend: container
+concurrencyControl: true
+functions:
+  - word-stats-java

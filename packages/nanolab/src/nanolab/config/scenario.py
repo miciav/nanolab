@@ -69,6 +69,11 @@ class ScenarioConfig(BaseModel):
         validation_alias=AliasChoices("asyncLoad", "async_load"),
     )
     autoscaling: bool = False
+    # The concurrency governor is not the autoscaler: it holds the replica count
+    # still and moves the per-replica in-flight limit instead. Running both would
+    # make a change in effective concurrency unattributable, since that value is
+    # replicas x per-replica target.
+    concurrency_control: bool = Field(default=False, alias="concurrencyControl")
     autoscaling_strategy: AutoscalingStrategy = Field(default="INTERNAL", alias="autoscalingStrategy")
     hpa_scale_to_zero: bool = Field(default=False, alias="hpaScaleToZero")
     release: ReleaseConfig | None = None
@@ -83,6 +88,10 @@ class ScenarioConfig(BaseModel):
             raise ValueError("resources must refer to selected functions")
         if self.autoscaling and self.workflow != "loadtest":
             raise ValueError("autoscaling is only supported by the loadtest workflow")
+        if self.concurrency_control and self.workflow != "loadtest":
+            raise ValueError("concurrencyControl is only supported by the loadtest workflow")
+        if self.concurrency_control and self.autoscaling:
+            raise ValueError("concurrencyControl cannot run together with autoscaling")
         if self.autoscaling_strategy == "HPA" and not self.autoscaling:
             raise ValueError("HPA autoscaling requires autoscaling=true")
         if self.autoscaling_strategy == "HPA" and self.backend == "container":
