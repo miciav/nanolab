@@ -26,16 +26,26 @@ runs:
       uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       with:
         repository: miciav/nanofaas
-        # nanofaas main at "test: add and correct per-function payload sets".
+        # nanofaas main at the concurrency-governor merge (nanofaas issue #180).
         # Same Java 25 / GraalVM 25.2.4 toolchain as the previous pin, and it
         # keeps everything that pin carried (the handler-envelope example
         # functions, the IPv4 local registry default, the autoscaling scenario
-        # support) plus the per-function payload sets
-        # (functions/<runtime>/<family>/payloads/) the container async validate
-        # workflow reads.
+        # support, and the per-function payload sets under
+        # functions/<runtime>/<family>/payloads/ that the container async
+        # validate workflow reads). New with this pin:
+        #   - `concurrency-control`, an optional control-plane module holding
+        #     the per-function concurrency governor. It has its own tick loop,
+        #     so it no longer depends on the autoscaler or on
+        #     ScalingStrategy.INTERNAL and can be selected on its own through
+        #     -PcontrolPlaneModules.
+        #   - PATCH /v1/functions/{name}, which changes concurrency, timeoutMs,
+        #     maxRetries and concurrencyControl without re-registering the
+        #     function or touching its deployment.
+        #   - sync-queue declares its beans explicitly instead of scanning its
+        #     own package, which is what unbroke `./gradlew build` upstream.
         # Tests read the version and the matrix from this checkout rather than
         # assuming them, so moving the pin needs no test edits.
-        ref: 7cfffff1cc7c6be65799efb1402aa5297f48965d
+        ref: 4e4c9c37bb3288b3f413b2ca3d6fd8806c051919
         path: .nanofaas-source
         token: ${{ inputs.nanofaas-token }}
 
