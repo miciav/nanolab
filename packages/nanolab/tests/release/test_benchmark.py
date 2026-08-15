@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, replace
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -106,6 +107,60 @@ def test_sonata_benchmarks_use_isolated_dirs_and_exact_registry_digests(
         all("@sha256:" in image for image in call["prebuilt_function_images"].values())
         for call in calls
     )
+
+
+def test_sonata_benchmark_resolves_functions_from_the_local_checkout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The staged source lives on the stack VM, not on the host.
+
+    `repo_root` on the benchmark plan is the remote staged source, so Sonata
+    keeps it alive through the benchmarks. It must not also be the source the
+    loadtest plan resolves function definitions from -- that happens locally and
+    reads the nanoFaaS checkout (`nanofaas_root`). Resolving from the remote path
+    made every benchmark fail with `Unknown function`.
+    """
+    plan = _plan(tmp_path, monkeypatch)
+    receipt = _registry_receipt(plan)
+    staged = Path("/home/azureuser/nanofaas-release/v0.19.0/source")
+    benchmark_plan: Any = SimpleNamespace(
+        repo_root=staged,
+        nanofaas_root=plan.repo_root,
+        run_dir=plan.run_dir,
+        version=plan.version,
+        environment=plan.environment,
+        scenario=plan.scenario,
+        settings=plan.settings,
+        image_plan=plan.image_plan,
+    )
+    calls: list[dict[str, Any]] = []
+
+    class Workflow:
+        def __init__(self, run_dir: Path):
+            self.run_dir = run_dir
+
+        def run(self) -> None:
+            self.run_dir.mkdir(parents=True, exist_ok=True)
+            self.run_dir.joinpath("summary.json").write_text(
+                json.dumps(_summary(100)), encoding="utf-8"
+            )
+
+    def builder(*_args, **kwargs):
+        calls.append(kwargs)
+        return Workflow(kwargs["run_dir"])
+
+    release_benchmark.run_sonata_benchmark(
+        benchmark_plan,
+        1,
+        builder,
+        object(),
+        None,
+        ReleaseEndpoints("http://stack:30080", "http://stack:30090"),
+        receipt,
+    )
+
+    assert calls[0]["repo_root"] == plan.repo_root
+    assert calls[0]["remote_repo_root"] == staged
 
 
 def test_sonata_benchmark_cannot_reuse_a_stale_summary(
