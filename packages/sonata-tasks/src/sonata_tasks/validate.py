@@ -48,6 +48,20 @@ class EnvelopeCheck:
 
 
 @dataclass(frozen=True, slots=True)
+class AsyncCheck:
+    """One async invocation whose execution output must match the function contract.
+
+    `payload_name` distinguishes the payloads a function carries and seeds a
+    stable idempotency key, so two cases of one function never collide.
+    """
+
+    function_name: str
+    payload: str
+    expected_output: object
+    payload_name: str
+
+
+@dataclass(frozen=True, slots=True)
 class ValidateWorkflowRequest(PlatformRequest):
     """The common platform request plus the K8s-only queue probe."""
 
@@ -55,6 +69,7 @@ class ValidateWorkflowRequest(PlatformRequest):
     extended_k8s_checks: bool = False
     queue_burst_script: Path | None = None
     envelope_checks: tuple[EnvelopeCheck, ...] = ()
+    async_checks: tuple[AsyncCheck, ...] = ()
 
 
 def _inspection_task(
@@ -189,6 +204,38 @@ def build_validate_workflow(
                 executor=executor,
                 role=request.role,
                 cwd=cwd,
+            ),
+            requires=(*requires, *platform.resources, registered),
+        )
+    for check in request.async_checks:
+        try:
+            registered = registered_by_name[check.function_name]
+        except KeyError as error:
+            raise ValueError(
+                f"async check references unknown function {check.function_name!r}"
+            ) from error
+        workflow.add(
+            Steps(
+                title=f"Verify async execution of {check.function_name} ({check.payload_name})",
+                steps=(
+                    HttpFunctionEnqueueTask(
+                        check.function_name,
+                        payload=check.payload,
+                        endpoint=platform.endpoint,
+                        executor=executor,
+                        role=request.role,
+                        idempotency_key=f"{check.function_name}-{check.payload_name}",
+                        title=f"Enqueue {check.function_name} ({check.payload_name})",
+                        cwd=cwd,
+                    ),
+                    HttpExecutionSuccessTask(
+                        endpoint=platform.endpoint,
+                        executor=executor,
+                        role=request.role,
+                        expected_output=check.expected_output,
+                        cwd=cwd,
+                    ),
+                ),
             ),
             requires=(*requires, *platform.resources, registered),
         )

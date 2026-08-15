@@ -63,6 +63,11 @@ class ScenarioConfig(BaseModel):
         alias="handlerEnvelope",
         validation_alias=AliasChoices("handlerEnvelope", "handler_envelope"),
     )
+    async_load: bool = Field(
+        default=False,
+        alias="asyncLoad",
+        validation_alias=AliasChoices("asyncLoad", "async_load"),
+    )
     autoscaling: bool = False
     autoscaling_strategy: AutoscalingStrategy = Field(default="INTERNAL", alias="autoscalingStrategy")
     hpa_scale_to_zero: bool = Field(default=False, alias="hpaScaleToZero")
@@ -84,6 +89,8 @@ class ScenarioConfig(BaseModel):
             raise ValueError("HPA autoscaling requires the k8s backend")
         if self.hpa_scale_to_zero and self.autoscaling_strategy != "HPA":
             raise ValueError("HPA scale-to-zero requires autoscalingStrategy=HPA")
+        if self.async_load and (self.workflow != "validate" or self.backend != "container"):
+            raise ValueError("async load requires the validate workflow with the container backend")
         if self.workflow == "release" and self.release is None:
             raise ValueError("release workflow requires a 'release' config block")
         return self

@@ -248,8 +248,20 @@ class HttpFunctionEnqueueTask(Task[str]):
         return TaskOutcome(value=execution_id)
 
 
+class _UnsetType:
+    __slots__ = ()
+
+
+_UNSET = _UnsetType()
+
+
 class HttpExecutionSuccessTask(Task[None]):
-    """Poll the execution id from the preceding enqueue until it succeeds."""
+    """Poll the execution id from the preceding enqueue until it succeeds.
+
+    When `expected_output` or `expected_status_code` is given, the final success
+    response must also carry the matching `output`/`statusCode`, so an async
+    load run proves the function processed its payload, not merely that it ran.
+    """
 
     def __init__(
         self,
@@ -259,6 +271,8 @@ class HttpExecutionSuccessTask(Task[None]):
         role: ExecutionRole,
         timeout_seconds: float = 20,
         poll_seconds: float = 0.5,
+        expected_output: object = _UNSET,
+        expected_status_code: object = _UNSET,
         cwd: Path | None = None,
     ) -> None:
         self.title = "Wait for enqueued execution"
@@ -267,6 +281,8 @@ class HttpExecutionSuccessTask(Task[None]):
         self._role: ExecutionRole = role
         self._timeout_seconds = timeout_seconds
         self._poll_seconds = poll_seconds
+        self._expected_output = expected_output
+        self._expected_status_code = expected_status_code
         self._cwd = cwd
 
     def run(self, inputs: TaskInputs) -> TaskOutcome[None]:
@@ -290,6 +306,22 @@ class HttpExecutionSuccessTask(Task[None]):
             if response.get("executionId") != execution_id:
                 raise RuntimeError(f"{self.title}: response was for {response.get('executionId')!r}")
             if response.get("status") == "success":
+                if (
+                    self._expected_output is not _UNSET
+                    and response.get("output") != self._expected_output
+                ):
+                    raise RuntimeError(
+                        f"{self.title}: output was {response.get('output')!r}, "
+                        f"expected {self._expected_output!r}"
+                    )
+                if (
+                    self._expected_status_code is not _UNSET
+                    and response.get("statusCode") != self._expected_status_code
+                ):
+                    raise RuntimeError(
+                        f"{self.title}: statusCode was {response.get('statusCode')!r}, "
+                        f"expected {self._expected_status_code!r}"
+                    )
                 return TaskOutcome(value=None)
             if response.get("status") in {"error", "timeout"}:
                 raise RuntimeError(f"{self.title}: execution ended {response.get('status')}")
@@ -317,13 +349,6 @@ def _split_final_response(stdout: str) -> tuple[str, str]:
     while body.startswith("HTTP/"):
         headers, body = _split_response(body)
     return headers, body
-
-
-class _UnsetType:
-    __slots__ = ()
-
-
-_UNSET = _UnsetType()
 
 
 @dataclass(frozen=True)

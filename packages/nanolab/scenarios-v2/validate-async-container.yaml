@@ -1,0 +1,28 @@
+# Every deterministic JSON-output function across all six runtimes, driven through
+# the async (enqueue -> execution) path and checked against each function's own
+# payload set under functions/<runtime>/<family>/payloads/. qr-code (binary
+# envelope) and the handler/binary-envelope test functions stay in
+# handler-envelope-container.yaml, which asserts their base64/header contracts.
+workflow: validate
+backend: container
+build: docker
+asyncLoad: true
+functions:
+  - word-stats-exec
+  - word-stats-go
+  - word-stats-java
+  - word-stats-java-lite
+  - word-stats-javascript
+  - word-stats-python
+  - json-transform-exec
+  - json-transform-go
+  - json-transform-java
+  - json-transform-java-lite
+  - json-transform-javascript
+  - json-transform-python
+  - roman-numeral-exec
+  - roman-numeral-go
+  - roman-numeral-java
+  - roman-numeral-java-lite
+  - roman-numeral-javascript
+  - roman-numeral-python

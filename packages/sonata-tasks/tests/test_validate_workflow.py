@@ -14,6 +14,7 @@ from sonata_tasks.tasks.executors import VmCommandTaskExecutor
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 from sonata_tasks.validate import (
+    AsyncCheck,
     EnvelopeCheck,
     ValidateFunction,
     ValidateWorkflowRequest,
@@ -220,6 +221,95 @@ def test_envelope_check_runs_after_registration_and_accepts_expected_422() -> No
         ENVELOPE_CHECK.payload,
         "http://127.0.0.1:18080/v1/functions/word-stats-java:invoke",
     )
+
+
+ASYNC_CHECK = AsyncCheck(
+    function_name=FUNCTION.name,
+    payload='{"input":{"number":4}}',
+    expected_output={"roman": "IV"},
+    payload_name="happy-path",
+)
+
+
+def test_async_check_compiles_after_its_function_registration() -> None:
+    workflow = build_validate_workflow(
+        _request(async_checks=(ASYNC_CHECK,)), _bindings(ScriptedExecutor())
+    )
+
+    titles = _titles(workflow)
+    assert titles.index(
+        "Verify async execution of word-stats-java (happy-path)"
+    ) > titles.index("Acquire word-stats-java")
+
+
+def test_async_check_enqueues_then_verifies_the_execution_output() -> None:
+    executor = ScriptedExecutor(
+        responses={
+            ":enqueue": TaskResult(
+                task_id="",
+                status="passed",
+                return_code=0,
+                stdout='{"executionId":"e-1","status":"queued"}',
+            ),
+            "/v1/executions/": TaskResult(
+                task_id="",
+                status="passed",
+                return_code=0,
+                stdout='{"executionId":"e-1","status":"success","output":{"roman":"IV"}}',
+            ),
+        }
+    )
+
+    build_validate_workflow(
+        _request(async_checks=(ASYNC_CHECK,)), _bindings(executor)
+    ).run()
+
+    enqueue = executor.argv_for(":enqueue")
+    assert enqueue[-1] == "http://127.0.0.1:18080/v1/functions/word-stats-java:enqueue"
+    assert "Idempotency-Key: word-stats-java-happy-path" in enqueue
+    assert ASYNC_CHECK.payload in enqueue
+    assert (
+        executor.argv_for("/v1/executions/")[-1]
+        == "http://127.0.0.1:18080/v1/executions/e-1"
+    )
+
+
+def test_async_check_rejects_a_wrong_execution_output() -> None:
+    executor = ScriptedExecutor(
+        responses={
+            ":enqueue": TaskResult(
+                task_id="",
+                status="passed",
+                return_code=0,
+                stdout='{"executionId":"e-1","status":"queued"}',
+            ),
+            "/v1/executions/": TaskResult(
+                task_id="",
+                status="passed",
+                return_code=0,
+                stdout='{"executionId":"e-1","status":"success","output":{"roman":"V"}}',
+            ),
+        }
+    )
+
+    with pytest.raises(RuntimeError, match="output was"):
+        build_validate_workflow(
+            _request(async_checks=(ASYNC_CHECK,)), _bindings(executor)
+        ).run()
+
+
+def test_async_check_references_an_unknown_function_as_an_error() -> None:
+    unknown = AsyncCheck(
+        function_name="not-registered",
+        payload="{}",
+        expected_output={},
+        payload_name="happy-path",
+    )
+
+    with pytest.raises(ValueError, match="async check references unknown function"):
+        build_validate_workflow(
+            _request(async_checks=(unknown,)), _bindings(ScriptedExecutor())
+        )
 
 
 def test_k8s_adds_the_preflight_the_images_and_the_helm_release() -> None:

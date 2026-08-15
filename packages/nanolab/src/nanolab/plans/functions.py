@@ -33,6 +33,42 @@ class ResolvedFunction:
     max_retries: int = 3
 
 
+@dataclass(frozen=True, slots=True)
+class FunctionPayload:
+    """One payload file a function owns: raw input and the expected output."""
+
+    name: str
+    input: object
+    expected: object
+
+
+def resolve_function_payloads(
+    key: str, source_root: Path | None = None
+) -> tuple[FunctionPayload, ...]:
+    """The payload set a function owns under `functions/<runtime>/<family>/payloads/`.
+
+    Each file is the nanoFaaS function-test shape `{description, input, expected}`.
+    Functions without a payload directory (or none at all) contribute nothing.
+    """
+    definition = resolve_function_definition(key, source_root)
+    if definition.example_dir is None:
+        return ()
+    payload_dir = definition.example_dir / "payloads"
+    if not payload_dir.is_dir():
+        return ()
+    payloads: list[FunctionPayload] = []
+    for path in sorted(payload_dir.glob("*.json")):
+        data = json.loads(path.read_text(encoding="utf-8"))
+        payloads.append(
+            FunctionPayload(
+                name=path.stem,
+                input=data.get("input"),
+                expected=data.get("expected"),
+            )
+        )
+    return tuple(payloads)
+
+
 def _function_image(definition: FunctionDefinition) -> str:
     if definition.default_image is None:
         raise ValueError(f"function {definition.key!r} has no image")

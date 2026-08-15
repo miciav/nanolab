@@ -232,6 +232,78 @@ def test_poll_waits_for_a_successful_execution() -> None:
     assert executor.seen[-1].argv[-1] == "http://cp:8080/v1/executions/e-1"
 
 
+def test_poll_verifies_the_expected_output_when_one_is_declared() -> None:
+    executor = SequencedExecutor(
+        responses=[
+            '{"executionId":"e-1","status":"queued"}',
+            '{"executionId":"e-1","status":"success","output":{"roman":"I"}}',
+        ]
+    )
+
+    _ = HttpExecutionSuccessTask(
+        endpoint="http://cp:8080",
+        executor=executor,
+        role="stack",
+        poll_seconds=0,
+        expected_output={"roman": "I"},
+    ).run(_with_upstream("e-1"))
+
+
+def test_poll_rejects_a_wrong_output() -> None:
+    executor = SequencedExecutor(
+        responses=[
+            '{"executionId":"e-1","status":"queued"}',
+            '{"executionId":"e-1","status":"success","output":{"roman":"V"}}',
+        ]
+    )
+
+    with pytest.raises(RuntimeError, match="output was"):
+        _ = HttpExecutionSuccessTask(
+            endpoint="http://cp:8080",
+            executor=executor,
+            role="stack",
+            poll_seconds=0,
+            expected_output={"roman": "I"},
+        ).run(_with_upstream("e-1"))
+
+
+def test_poll_verifies_the_expected_status_code_and_error_output() -> None:
+    executor = SequencedExecutor(
+        responses=[
+            '{"executionId":"e-1","status":"queued"}',
+            '{"executionId":"e-1","status":"success",'
+            '"output":{"error":"missing required field: number"},"statusCode":422}',
+        ]
+    )
+
+    _ = HttpExecutionSuccessTask(
+        endpoint="http://cp:8080",
+        executor=executor,
+        role="stack",
+        poll_seconds=0,
+        expected_output={"error": "missing required field: number"},
+        expected_status_code=422,
+    ).run(_with_upstream("e-1"))
+
+
+def test_poll_rejects_a_wrong_status_code() -> None:
+    executor = SequencedExecutor(
+        responses=[
+            '{"executionId":"e-1","status":"queued"}',
+            '{"executionId":"e-1","status":"success","statusCode":200}',
+        ]
+    )
+
+    with pytest.raises(RuntimeError, match="statusCode was 200"):
+        _ = HttpExecutionSuccessTask(
+            endpoint="http://cp:8080",
+            executor=executor,
+            role="stack",
+            poll_seconds=0,
+            expected_status_code=422,
+        ).run(_with_upstream("e-1"))
+
+
 def _with_upstream(value: object) -> TaskInputs:
     from dataclasses import replace
 

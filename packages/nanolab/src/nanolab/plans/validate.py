@@ -1,4 +1,5 @@
 from dataclasses import replace
+import json
 from pathlib import Path
 
 from sonata_engine import Workflow
@@ -6,14 +7,14 @@ from sonata_tasks.compose import DockerComposeProject, docker_compose_resource
 from sonata_tasks.deployment import LOCAL_REGISTRY
 from sonata_tasks.registry import docker_registry_resource
 from sonata_tasks.http_function import HttpFunctionExpectation
-from sonata_tasks.validate import EnvelopeCheck, ValidateFunction as SonataFunction
+from sonata_tasks.validate import AsyncCheck, EnvelopeCheck, ValidateFunction as SonataFunction
 from sonata_tasks.validate import ValidateWorkflowRequest, build_validate_workflow
 from sonata_tasks.components.helm import control_plane_helm_values, helm_set_args
 from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
 
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.config.environment import EnvironmentConfig
-from nanolab.plans.functions import resolve_function, sonata_function
+from nanolab.plans.functions import resolve_function, resolve_function_payloads, sonata_function
 from nanolab.workspace.paths import discover_tool_root
 from nanolab.workspace.provenance import source_fingerprint
 
@@ -47,6 +48,7 @@ _HANDLER_ENVELOPE_TARGETS = (
     _BINARY_ENVELOPE_PROBE, "word-stats-java",
 )
 _EMPTY_INPUT_PAYLOAD = '{"input":{}}'
+_ASYNC_CONTROL_PLANE_MODULES = "container-deployment-provider,async-queue,sync-queue"
 
 
 def _handler_envelope_checks(functions: dict[str, SonataFunction]) -> tuple[EnvelopeCheck, ...]:
@@ -156,6 +158,29 @@ def _handler_envelope_checks(functions: dict[str, SonataFunction]) -> tuple[Enve
     )
 
 
+def _async_checks(
+    functions: dict[str, SonataFunction], config: ScenarioConfig, repo_root: Path | None
+) -> tuple[AsyncCheck, ...]:
+    """One async check per payload file each selected function owns.
+
+    Reads the payload set from the nanoFaaS checkout (`functions/<runtime>/<family>/payloads/`),
+    wrapping each raw input in the `{"input": ...}` envelope the control plane expects.
+    """
+    checks: list[AsyncCheck] = []
+    for key in config.functions:
+        name = functions[key].name
+        for payload in resolve_function_payloads(key, source_root=repo_root):
+            checks.append(
+                AsyncCheck(
+                    function_name=name,
+                    payload=json.dumps({"input": payload.input}, separators=(",", ":")),
+                    expected_output=payload.expected,
+                    payload_name=payload.name,
+                )
+            )
+    return tuple(checks)
+
+
 def build_validate_plan(
     config: ScenarioConfig,
     bindings: RoleBindings,
@@ -188,6 +213,7 @@ def build_validate_plan(
         build=config.build,
         functions=tuple(functions.values()),
         envelope_checks=_handler_envelope_checks(functions) if config.handler_envelope else (),
+        async_checks=_async_checks(functions, config, repo_root) if config.async_load else (),
         additional_modules=("async-queue", "sync-queue") if kubernetes else (),
         source_fingerprint=source_fingerprint(root),
         build_control_plane=kubernetes,
@@ -239,6 +265,11 @@ def build_validate_plan(
                 name="nanofaas-validate",
                 file=Path("deploy/compose/compose.yaml"),
                 ready_url="http://127.0.0.1:8081/actuator/health/readiness",
+                env=(
+                    {"NANOFAAS_CONTROL_PLANE_MODULES": _ASYNC_CONTROL_PLANE_MODULES}
+                    if config.async_load
+                    else {}
+                ),
             ),
             executor=RoleBoundCommandTaskExecutor(bindings),
             cwd=root,

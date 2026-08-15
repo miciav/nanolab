@@ -382,6 +382,107 @@ def test_container_validation_owns_an_isolated_compose_project(
     )
 
 
+def test_async_load_enables_async_modules_on_the_compose_control_plane(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(
+        "nanolab.plans.validate.docker_registry_resource",
+        lambda **kwargs: docker_registry_resource(**kwargs, ready=lambda: True),
+    )
+    # A checkout with no payloads/ directory keeps the run offline-friendly:
+    # async_load still enables the modules on the control plane, but there is
+    # nothing to enqueue, so the fake executor never has to answer a verify.
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    (checkout / "build.gradle").touch()
+    (checkout / "settings.gradle").touch()
+    function_dir = checkout / "functions/java/word-stats"
+    function_dir.mkdir(parents=True)
+    (function_dir / "function.yaml").write_text(
+        "name: word-stats-java\ncatalog:\n  defaultImage: registry.example/ws\n",
+        encoding="utf-8",
+    )
+
+    host = RecordingExecutor()
+    plan = build_validate_plan(
+        ScenarioConfig.model_validate(
+            {
+                "workflow": "validate",
+                "backend": "container",
+                "functions": ["word-stats-java"],
+                "async_load": True,
+            }
+        ),
+        RoleBindings(host=host, stack=RecordingExecutor()),
+        repo_root=checkout,
+    )
+
+    plan.run()
+
+    compose = next(spec for spec in host.seen if spec.argv[:2] == ("docker", "compose"))
+    assert compose.env["NANOFAAS_CONTROL_PLANE_MODULES"] == (
+        "container-deployment-provider,async-queue,sync-queue"
+    )
+
+
+def test_async_load_builds_an_async_check_for_every_payload_file(
+    tmp_path: Path,
+) -> None:
+    checkout = tmp_path / "checkout"
+    checkout.mkdir(parents=True)
+    (checkout / "build.gradle").touch()
+    (checkout / "settings.gradle").touch()
+    function_dir = checkout / "functions/java/word-stats"
+    function_dir.mkdir(parents=True)
+    (function_dir / "function.yaml").write_text(
+        "name: word-stats-java\ncatalog:\n  defaultImage: registry.example/ws\n",
+        encoding="utf-8",
+    )
+    payloads = function_dir / "payloads"
+    payloads.mkdir()
+    (payloads / "happy-path.json").write_text(
+        '{"description":"d","input":{"text":"a b","topN":1},"expected":{"wordCount":2}}',
+        encoding="utf-8",
+    )
+    (payloads / "missing-input.json").write_text(
+        '{"description":"d","input":{},"expected":{"error":"missing"}}',
+        encoding="utf-8",
+    )
+
+    plan = build_validate_plan(
+        ScenarioConfig.model_validate(
+            {
+                "workflow": "validate",
+                "backend": "container",
+                "functions": ["word-stats-java"],
+                "async_load": True,
+            }
+        ),
+        RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor()),
+        repo_root=checkout,
+    )
+
+    titles = [task.task.title for task in plan.compile().tasks]
+    assert "Verify async execution of word-stats-java (happy-path)" in titles
+    assert "Verify async execution of word-stats-java (missing-input)" in titles
+
+
+def test_async_container_scenario_selects_every_json_output_function() -> None:
+    config = ScenarioConfig.model_validate(
+        yaml.safe_load(
+            (NANOLAB_ROOT / "scenarios-v2/validate-async-container.yaml").read_text()
+        )
+    )
+
+    assert config.backend == "container"
+    assert config.async_load is True
+    assert set(config.functions) == {
+        f"{family}-{runtime}"
+        for family in ("word-stats", "json-transform", "roman-numeral")
+        for runtime in ("exec", "go", "java", "java-lite", "javascript", "python")
+    }
+
+
 def test_validate_plan_resolves_build_from_the_function_catalog() -> None:
     artifact_build = _argv(_plan("container"), "Build application artifact: word-stats-java")
     image_build = _argv(_plan("container"), "Build image word-stats-java")

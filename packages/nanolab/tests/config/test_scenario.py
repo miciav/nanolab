@@ -126,6 +126,31 @@ def test_autoscaling_is_rejected_outside_loadtest() -> None:
         )
 
 
+def test_async_load_is_opt_in_for_container_validation() -> None:
+    config = ScenarioConfig.model_validate(
+        {
+            "workflow": "validate",
+            "backend": "container",
+            "functions": ["word-stats-java"],
+            "asyncLoad": True,
+        }
+    )
+
+    assert config.async_load is True
+
+
+def test_async_load_requires_container_validation() -> None:
+    with pytest.raises(ValidationError, match="async load requires the validate workflow"):
+        ScenarioConfig.model_validate(
+            {
+                "workflow": "validate",
+                "backend": "k8s",
+                "functions": ["word-stats-java"],
+                "asyncLoad": True,
+            }
+        )
+
+
 def test_rejects_legacy_fields() -> None:
     with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
         ScenarioConfig.model_validate(
