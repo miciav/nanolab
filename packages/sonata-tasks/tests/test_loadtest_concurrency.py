@@ -11,14 +11,33 @@ from sonata_tasks.loadtest.concurrency import (
     ConcurrencyWatcher,
     find_dip,
     governed_samples,
+    measure_response,
     verify_concurrency_cycle,
 )
 
 
 def series(*values: int) -> tuple[ConcurrencySample, ...]:
+    """A series with no load recorded: enough for shape questions."""
     return tuple(
         ConcurrencySample(elapsed_seconds=float(index), effective=value)
         for index, value in enumerate(values)
+    )
+
+
+def loaded_series(*pairs: tuple[int, int]) -> tuple[ConcurrencySample, ...]:
+    """`(limit, in_flight)` per reading — what the verdict actually judges."""
+    return tuple(
+        ConcurrencySample(elapsed_seconds=float(index), effective=limit, in_flight=busy)
+        for index, (limit, busy) in enumerate(pairs)
+    )
+
+
+def summarise(samples: tuple[ConcurrencySample, ...]) -> ConcurrencySummary:
+    return ConcurrencySummary(
+        function_name="fn",
+        samples=samples,
+        dip=find_dip(samples),
+        response=measure_response(samples),
     )
 
 
@@ -72,20 +91,32 @@ def test_verify_rejects_a_run_with_no_readings() -> None:
 
 
 def test_verify_rejects_a_limit_that_never_moved() -> None:
-    samples = series(4, 4, 4)
-    summary = ConcurrencySummary(
-        function_name="word-stats-java", samples=samples, dip=find_dip(samples)
+    summary = summarise(loaded_series((4, 0), (4, 4), (4, 4)))
+
+    with pytest.raises(RuntimeError, match="never gave concurrency back"):
+        verify_concurrency_cycle(summary)
+
+
+def test_verify_accepts_a_governor_that_converged_and_held() -> None:
+    """The shape a sustained load actually produces. Demanding a climb back made
+    the verdict depend on the tail relaxing, and failed a run that descended
+    8 -> 2 and held there for 146 readings."""
+    summary = summarise(
+        loaded_series((8, 0), (8, 1), (6, 6), (4, 4), (2, 2), (2, 2), (2, 2))
     )
 
-    with pytest.raises(RuntimeError, match="never fell and recovered"):
+    verify_concurrency_cycle(summary)
+
+
+def test_verify_rejects_a_run_that_never_saw_the_function_busy() -> None:
+    summary = summarise(loaded_series((8, 0), (6, 1), (4, 0)))
+
+    with pytest.raises(RuntimeError, match="never observed both idle and concurrent"):
         verify_concurrency_cycle(summary)
 
 
 def test_verify_accepts_a_full_cycle() -> None:
-    samples = series(6, 6, 2, 2, 6)
-    summary = ConcurrencySummary(
-        function_name="word-stats-java", samples=samples, dip=find_dip(samples)
-    )
+    summary = summarise(loaded_series((6, 0), (6, 1), (2, 5), (2, 5), (6, 0)))
 
     verify_concurrency_cycle(summary)
 
@@ -158,13 +189,11 @@ def test_trajectory_survives_the_failure_that_discards_the_summary() -> None:
 def test_describe_names_the_shape_for_the_run_log() -> None:
     """A green run is otherwise silent about what the governor did, and nothing
     downstream persists the series."""
-    samples = series(6, 6, 2, 2, 6)
-    summary = ConcurrencySummary(function_name="fn", samples=samples, dip=find_dip(samples))
-
-    described = summary.describe()
+    described = summarise(loaded_series((6, 0), (6, 1), (2, 5), (2, 5), (6, 0))).describe()
 
     assert "[6x2 2x2 6x1]" in described
-    assert "peak 6 -> trough 2 -> recovery 6" in described
+    assert "idle peak 6 -> busy floor 2" in described
+    assert "recovered 6 -> 2 -> 6" in described
 
 
 def test_the_trajectory_pairs_each_block_with_its_service_time() -> None:
@@ -265,3 +294,13 @@ def test_the_scrape_records_what_the_queue_was_actually_running() -> None:
     )
 
     assert reading.in_flight == 1
+
+
+def test_a_governor_converged_to_one_still_counts_as_loaded() -> None:
+    """With a limit of 1 the function can never show two requests in flight, so a
+    fixed threshold filed its converged state as idle and reported a floor it had
+    already left."""
+    response = measure_response(loaded_series((8, 0), (8, 2), (1, 1), (1, 1)))
+
+    assert response is not None
+    assert (response.idle_peak, response.loaded_floor) == (8, 1)

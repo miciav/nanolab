@@ -228,15 +228,21 @@ _CONCURRENCY_COOLDOWN_MS = 5000
 # maxTargetInFlightPerPod or the trajectory is flat by construction.
 _CONCURRENCY_CEILING = 8
 # The governor only reacts to a function that gets slower under concurrency, and
-# on an unconstrained multi-core host word-stats-java does not: the first real
-# run climbed to the ceiling and stayed there, correctly, because eight parallel
-# requests never contended for anything. Capping the container at one CPU makes
-# the contention exist at the concurrency the governor can actually reach. This
-# is controlling the variable, not arranging the answer - the run still has to
-# show that the governor notices and recovers.
+# on an unconstrained multi-core host word-stats-java does not: an early run
+# climbed to the ceiling and stayed there, correctly, because eight parallel
+# requests never contended for anything. The cap creates the contention at a
+# concurrency the governor can reach. This is controlling the variable, not
+# arranging the answer - the run still has to show that it notices and recovers.
+#
+# Four cores rather than one, because one flattens the very comparison the
+# scenarios exist for: with a single core the optimum is 1-2 for every runtime,
+# so a JVM and a GIL-bound interpreter look identical. With four, a runtime that
+# can use them should settle near four while one that serialises CPU work should
+# still settle near one. The ceiling stays above that, or the governor would be
+# clamped rather than converging.
 _CONCURRENCY_FUNCTION_RESOURCES: dict[str, object] = {
-    "requests": {"cpu": 0.5, "memoryMiB": 256},
-    "limits": {"cpu": 1.0, "memoryMiB": 512},
+    "requests": {"cpu": 2.0, "memoryMiB": 256},
+    "limits": {"cpu": 4.0, "memoryMiB": 512},
 }
 
 

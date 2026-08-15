@@ -161,7 +161,11 @@ class ConcurrencySummary:
     # min and max produces the same min/max pair as one that made a single
     # deliberate excursion, and only the series tells them apart.
     samples: tuple[ConcurrencySample, ...] = ()
+    # Kept as an observation, not a verdict: a recovery is worth reporting when
+    # it happens, but demanding one asks the load profile a question about the
+    # controller.
     dip: ConcurrencyDip | None = None
+    response: ConcurrencyResponse | None = None
     errors: tuple[str, ...] = ()
 
     @property
@@ -180,11 +184,16 @@ class ConcurrencySummary:
         survives, and the shape is what threshold tuning needs.
         """
         line = f"concurrency governor for {self.function_name!r}: [{self.trajectory()}]"
+        if self.response is not None:
+            line += (
+                f" idle peak {self.response.idle_peak} -> "
+                f"busy floor {self.response.loaded_floor}"
+            )
         if self.dip is None:
             return line
         return (
-            f"{line} peak {self.dip.peak_before} -> trough {self.dip.trough} "
-            f"-> recovery {self.dip.recovery_after}"
+            f"{line}; recovered {self.dip.peak_before} -> {self.dip.trough} "
+            f"-> {self.dip.recovery_after}"
         )
 
     def trajectory(self) -> str:
@@ -249,8 +258,52 @@ def write_series(summary: ConcurrencySummary, path: Path) -> None:
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
+@dataclass(frozen=True, slots=True)
+class ConcurrencyResponse:
+    """How the limit differed between the function being busy and being idle."""
+
+    idle_peak: int
+    loaded_floor: int
+
+    @property
+    def gave_ground(self) -> bool:
+        return self.loaded_floor < self.idle_peak
+
+
+def measure_response(samples: Sequence[ConcurrencySample]) -> ConcurrencyResponse | None:
+    """Compare the limit while the function was concurrent against while it was not.
+
+    Partitioned by observed saturation rather than by the load profile's clock.
+    The governor moves on its own poll interval and honours cooldowns, so it
+    always trails the schedule by an amount the scenario does not control;
+    what it cannot lag behind is the load it actually saw.
+
+    This replaced a check for a down-then-up excursion. That shape was wrong: a
+    governor under sustained load converges and holds, which is the behaviour
+    wanted, and requiring it to climb back made the verdict depend on the tail
+    phase relaxing enough - a property of the load profile, not of the
+    controller. A real run descended 8 -> 2 and held there for 146 readings, and
+    was marked a failure for it.
+
+    Requiring an idle peak strictly above the loaded floor keeps what the cycle
+    check was protecting against: a governor pinned at its minimum never
+    explores upwards, so it has no idle peak to fall from.
+    """
+    # Saturation, not a fixed number of requests: the reading counts as loaded
+    # when in-flight has reached the limit, which is the only time the limit is
+    # the binding constraint. A fixed threshold of two got this wrong in the
+    # direction that matters — a governor converged to 1 can never show two in
+    # flight, so its converged state was filed as idle and the floor it reported
+    # was a value it had already left.
+    idle = [s.effective for s in samples if s.in_flight < s.effective]
+    loaded = [s.effective for s in samples if s.effective >= 1 and s.in_flight >= s.effective]
+    if not idle or not loaded:
+        return None
+    return ConcurrencyResponse(idle_peak=max(idle), loaded_floor=min(loaded))
+
+
 def verify_concurrency_cycle(summary: ConcurrencySummary) -> None:
-    """Raise unless the governor lowered the limit under load and raised it after.
+    """Raise unless the governor took concurrency back while the function was busy.
 
     A constant series is the common failure and has several causes worth telling
     apart in the message: the module absent from the build, the function left in
@@ -264,13 +317,24 @@ def verify_concurrency_cycle(summary: ConcurrencySummary) -> None:
             "control plane may be running the basic metrics profile, which denies "
             "this gauge"
         )
-    if summary.dip is None:
+    response = summary.response
+    if response is None:
         raise RuntimeError(
-            f"{summary.function_name!r} effective concurrency never fell and "
-            f"recovered: {summary.min_observed}..{summary.max_observed} over "
-            f"{len(summary.samples)} readings [{summary.trajectory()}]. Either the "
-            "load never degraded the function's service time, or the function is "
-            "not in ADAPTIVE_PER_POD mode."
+            f"{summary.function_name!r} was never observed both idle and "
+            f"concurrent, so the limit cannot be attributed to load: "
+            f"{summary.min_observed}..{summary.max_observed} over "
+            f"{len(summary.samples)} readings [{summary.trajectory()}]. The load "
+            "profile has to leave the function idle at some point and press at "
+            "least two requests on it at another."
+        )
+    if not response.gave_ground:
+        raise RuntimeError(
+            f"{summary.function_name!r} never gave concurrency back under load: "
+            f"floor while busy was {response.loaded_floor}, peak while idle was "
+            f"{response.idle_peak}, over {len(summary.samples)} readings "
+            f"[{summary.trajectory()}]. Either the load never degraded the "
+            "function's service time, or the function is not in ADAPTIVE_PER_POD "
+            "mode."
         )
 
 
@@ -353,6 +417,7 @@ class ConcurrencyWatcher:
             # decisions, rather than inside `find_dip`, which stays a plain
             # search for a shape in whatever it is handed.
             dip=find_dip(governed_samples(samples)),
+            response=measure_response(governed_samples(samples)),
             errors=tuple(self.errors),
         )
 
