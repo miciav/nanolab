@@ -27,6 +27,7 @@ from nanolab.plans.loadtest import (
     waits_for_parking,
 )
 from sonata_tasks.execution.bindings import RoleBindings
+from sonata_tasks.platform import Backend
 
 from .test_loadtest import NoopPrometheus, RecordingExecutor
 
@@ -201,7 +202,7 @@ def test_the_plan_still_compiles_for_the_governor_scenario(
     ],
 )
 def test_only_an_autoscaling_kubernetes_run_waits_for_parking(
-    scenario: ScenarioConfig, backend: str, expected: bool
+    scenario: ScenarioConfig, backend: Backend, expected: bool
 ) -> None:
     """The park-at-zero wait shells out to kubectl and waits for an autoscaler.
 
