@@ -149,6 +149,11 @@ def run_sonata_benchmark(
     role = plan.environment.target("loadgen" if "loadgen" in plan.environment.roles else "stack")
     home = role.remote_home
     remote_run_dir = Path(home) / "nanofaas-release" / plan.version / "benchmarks" / f"run-{index}"
+    # `repo_root` is the staged source on the stack VM (a path that only exists
+    # remotely); the loadtest plan resolves function definitions from `repo_root`
+    # locally, so it must point at the nanoFaaS checkout instead. `remote_repo_root`
+    # stays the staged source for the remote helm chart and build context.
+    local_source: Path = getattr(plan, "nanofaas_root", None) or plan.repo_root
     workflow = loadtest_builder(
         plan.scenario,
         plan.environment,
@@ -159,7 +164,7 @@ def run_sonata_benchmark(
         remote_run_dir=remote_run_dir,
         remote_repo_root=plan.repo_root,
         fetcher=fetcher,
-        repo_root=plan.repo_root,
+        repo_root=local_source,
         prebuilt_control_plane_image=_pinned_native_image_from_evidence(
             plan, "control-plane", digests
         ),
