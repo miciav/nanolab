@@ -13,6 +13,11 @@ from sonata_tasks.loadtest.autoscaling import (
     Sampling,
     VerifyAutoscalingReplicas,
 )
+from sonata_tasks.loadtest.concurrency import (
+    ConcurrencySummary,
+    ConcurrencyWatcher,
+    verify_concurrency_cycle,
+)
 from sonata_tasks.loadtest.models import K6RunResult, TimeWindow
 from sonata_tasks.loadtest.tasks import (
     CapturePrometheusSnapshot,
@@ -46,6 +51,7 @@ class LoadtestOutcome:
 
     k6: K6RunResult
     autoscaling: AutoscalingSummary | None = None
+    concurrency: ConcurrencySummary | None = None
     prometheus_snapshot: Path | None = None
     report: Path | None = None
     summary: Path | None = None
@@ -129,6 +135,34 @@ class VerifyAutoscalingTask(Task[LoadtestOutcome]):
     def run(self, inputs: TaskInputs) -> TaskOutcome[LoadtestOutcome]:
         outcome = load_outcome(inputs, self.title)
         return TaskOutcome(value=replace(outcome, autoscaling=self._verifier.run()))
+
+
+class VerifyConcurrencyTask(Task[LoadtestOutcome]):
+    """Assert the governor lowered the per-replica limit under load and raised it after.
+
+    The counterpart of VerifyAutoscalingTask for runs that hold the replica count
+    still. It has nothing to poll after the fact: the excursion only exists in
+    the series the watcher took while k6 was running, because the governor
+    restores the limit once the function speeds back up.
+    """
+
+    def __init__(
+        self,
+        *,
+        watcher: ConcurrencyWatcher,
+        function_name: str,
+        title: str = "Verify concurrency governor",
+    ) -> None:
+        self.title = title
+        self._watcher = watcher
+        self._function_name = function_name
+
+    @override
+    def run(self, inputs: TaskInputs) -> TaskOutcome[LoadtestOutcome]:
+        outcome = load_outcome(inputs, self.title)
+        summary = self._watcher.summary(self._function_name)
+        verify_concurrency_cycle(summary)
+        return TaskOutcome(value=replace(outcome, concurrency=summary))
 
 
 class CapturePrometheusTask(Task[LoadtestOutcome]):
