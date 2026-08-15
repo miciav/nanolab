@@ -1,0 +1,12 @@
+# Same governor probe as concurrency-cycle-container.yaml, on the python runtime.
+#
+# The runtime, more than the workload, decides how much concurrency is useful.
+# With four cores available, a runtime with real parallelism should converge
+# near four, while one that serialises CPU work should still converge near one.
+# A governor that reports the same optimum for every runtime is not measuring
+# anything.
+workflow: loadtest
+backend: container
+concurrencyControl: true
+functions:
+  - word-stats-python

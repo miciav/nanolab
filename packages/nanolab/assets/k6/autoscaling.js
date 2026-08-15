@@ -3,6 +3,12 @@ import { check, sleep } from 'k6';
 
 const BASE_URL = __ENV.NANOFAAS_URL || 'http://localhost:30080';
 const FN = __ENV.NANOFAAS_FUNCTION || __ENV.FUNCTION_NAME || 'word-stats-java';
+// Think time between iterations. It decides how much concurrency a VU actually
+// offers: by Little's law a closed-loop VU keeps S/(S+Z) of a request in flight,
+// so with the 50ms default and a 2.5ms function, 25 VUs offer ~1.2 concurrent
+// requests however many VUs are added. Runs that need to press against a
+// concurrency limit set this to 0, which makes in-flight equal the VU count.
+const THINK_SECONDS = Number(__ENV.K6_THINK_SECONDS ?? 0.05);
 
 export const options = {
     // Load profile is injected by the workflow via `k6 run --stage ...` (see
@@ -37,5 +43,7 @@ export default function () {
         'status is 200': (r) => r.status === 200,
     });
 
-    sleep(0.05);
+    if (THINK_SECONDS > 0) {
+        sleep(THINK_SECONDS);
+    }
 }

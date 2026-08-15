@@ -22,10 +22,26 @@ from nanolab.plans.loadtest import (
     _concurrency_control_setup,
     _default_stages,
     build_loadtest_plan,
+    k6_environment,
+    load_script_name,
+    waits_for_parking,
 )
 from sonata_tasks.execution.bindings import RoleBindings
 
 from .test_loadtest import NoopPrometheus, RecordingExecutor
+
+PLAIN_SCENARIO = ScenarioConfig.model_validate(
+    {"workflow": "loadtest", "backend": "container", "functions": ["word-stats-java"]}
+)
+
+AUTOSCALING_SCENARIO = ScenarioConfig.model_validate(
+    {
+        "workflow": "loadtest",
+        "backend": "container",
+        "autoscaling": True,
+        "functions": ["word-stats-java"],
+    }
+)
 
 CONCURRENCY_SCENARIO = ScenarioConfig.model_validate(
     {
@@ -172,3 +188,58 @@ def test_the_plan_still_compiles_for_the_governor_scenario(
     )
 
     assert workflow is not None
+
+
+@pytest.mark.parametrize(
+    ("scenario", "backend", "expected"),
+    [
+        (CONCURRENCY_SCENARIO, "container", False),
+        (CONCURRENCY_SCENARIO, "k8s", False),
+        (AUTOSCALING_SCENARIO, "container", False),
+        (AUTOSCALING_SCENARIO, "k8s", True),
+        (PLAIN_SCENARIO, "k8s", False),
+    ],
+)
+def test_only_an_autoscaling_kubernetes_run_waits_for_parking(
+    scenario: ScenarioConfig, backend: str, expected: bool
+) -> None:
+    """The park-at-zero wait shells out to kubectl and waits for an autoscaler.
+
+    It was gated on the replica floor alone, which is 0 whenever HPA is off, so
+    it ran on runs with no autoscaler and on the container backend, where there
+    is no cluster to ask. The first real run of the governor scenario spent 182s
+    waiting for a parking that could never happen, then failed on sudo.
+
+    This checks the decision, not the wiring: the preflight is assembled inside a
+    composite that a recording executor never reaches, so a plan-level assertion
+    passes whether the gate is right or wrong.
+    """
+    assert waits_for_parking(scenario, backend, replica_floor=0) is expected
+
+
+def test_the_governor_run_offers_real_concurrency() -> None:
+    """Little's law decides whether the experiment is valid at all.
+
+    A closed-loop VU keeps S/(S+Z) of a request in flight, so the script's
+    default 50ms think time against a 2.5ms function offers roughly one
+    concurrent request however many VUs are added. A measured run confirmed it:
+    180s at 25 VUs held a mean of 1.0 in flight against a limit of 8, so the
+    function was never concurrent and the governor had nothing to react to.
+    """
+    env = k6_environment(CONCURRENCY_SCENARIO, "http://cp:8080", "word-stats-java")
+
+    assert env["K6_THINK_SECONDS"] == "0"
+
+
+def test_other_runs_keep_the_scripts_own_think_time() -> None:
+    for scenario in (AUTOSCALING_SCENARIO, PLAIN_SCENARIO):
+        assert "K6_THINK_SECONDS" not in k6_environment(scenario, "http://cp:8080", "fn")
+
+
+def test_the_governor_run_uses_the_single_function_load_script() -> None:
+    """`autoscaling.js` is the script that hammers one function with the given
+    stages; the default one carries a 100ms think time that held offered
+    concurrency near 2 against a limit of 8, so the run measured nothing."""
+    assert load_script_name(CONCURRENCY_SCENARIO) == "autoscaling.js"
+    assert load_script_name(AUTOSCALING_SCENARIO) == "autoscaling.js"
+    assert load_script_name(PLAIN_SCENARIO) == "two-vm-function-invoke.js"

@@ -227,6 +227,23 @@ _CONCURRENCY_COOLDOWN_MS = 5000
 # limit to the function's `concurrency`, so it has to leave room above
 # maxTargetInFlightPerPod or the trajectory is flat by construction.
 _CONCURRENCY_CEILING = 8
+# The governor only reacts to a function that gets slower under concurrency, and
+# on an unconstrained multi-core host word-stats-java does not: an early run
+# climbed to the ceiling and stayed there, correctly, because eight parallel
+# requests never contended for anything. The cap creates the contention at a
+# concurrency the governor can reach. This is controlling the variable, not
+# arranging the answer - the run still has to show that it notices and recovers.
+#
+# Four cores rather than one, because one flattens the very comparison the
+# scenarios exist for: with a single core the optimum is 1-2 for every runtime,
+# so a JVM and a GIL-bound interpreter look identical. With four, a runtime that
+# can use them should settle near four while one that serialises CPU work should
+# still settle near one. The ceiling stays above that, or the governor would be
+# clamped rather than converging.
+_CONCURRENCY_FUNCTION_RESOURCES: dict[str, object] = {
+    "requests": {"cpu": 2.0, "memoryMiB": 256},
+    "limits": {"cpu": 4.0, "memoryMiB": 512},
+}
 
 
 def _concurrency_control_setup(config: ScenarioConfig) -> dict[str, object] | None:
@@ -292,6 +309,7 @@ def _resolve_functions(
     prebuilt_control_plane_image: str | None,
     prebuilt_function_images: Mapping[str, str] | None,
     concurrency: int = 4,
+    resources: dict[str, object] | None = None,
 ) -> tuple[tuple[Any, ...], bool]:
     resolved, prebuilt = _resolve_with_prebuilt_images(
         config,
@@ -309,6 +327,7 @@ def _resolve_functions(
                 timeout_ms=30000,
                 concurrency=concurrency,
                 queue_size=100,
+                **({"resources": resources} if resources is not None else {}),
             )
             for function in functions
         )
@@ -358,6 +377,22 @@ def _validate_remote_run_dir(remote_run_dir: Path | None, home: str) -> None:
         raise ValueError("remote run directory must be an absolute run-N child")
 
 
+def load_script_name(config: ScenarioConfig) -> str:
+    """Which k6 script drives the function.
+
+    `autoscaling.js` is not about autoscaling: it is the one that hammers a
+    single function with whatever stages the plan supplies, which is exactly
+    what a concurrency run needs. Selecting it by `config.autoscaling` alone
+    silently gave the governor scenario `two-vm-function-invoke.js` instead,
+    whose 100ms think time holds offered concurrency near 2 against a limit of
+    8 — so the function was never concurrent, the governor had nothing to react
+    to, and a think-time override aimed at the other script changed nothing.
+    """
+    if config.autoscaling or config.concurrency_control:
+        return "autoscaling.js"
+    return "two-vm-function-invoke.js"
+
+
 def _resolve_script_and_summary(
     config: ScenarioConfig,
     environment: EnvironmentConfig,
@@ -368,7 +403,7 @@ def _resolve_script_and_summary(
     run_dir: Path,
     tool_root: Path | None,
 ) -> tuple[Path, Path]:
-    script_name = "autoscaling.js" if config.autoscaling else "two-vm-function-invoke.js"
+    script_name = load_script_name(config)
     if remote:
         role_target = environment.target("loadgen" if dedicated else "stack")
         home = role_target.remote_home
@@ -479,6 +514,24 @@ def _build_platform_requires(
     return platform_requires
 
 
+def k6_environment(
+    config: ScenarioConfig, control_plane_url: str, function_name: str
+) -> dict[str, str]:
+    """What the load generator is told, including how much concurrency to offer.
+
+    Measured, not assumed: with the script's default 50ms think time, a 180s
+    phase at 25 VUs held a mean of 1.0 requests in flight against a limit of 8.
+    A closed-loop VU keeps only S/(S+Z) of a request in flight, so for a 2.5ms
+    function that think time caps the offered concurrency near 1 however many
+    VUs are added — the function never became concurrent and the governor had
+    nothing to react to. Zero think time makes in-flight equal the VU count.
+    """
+    env = {"NANOFAAS_URL": control_plane_url, "NANOFAAS_FUNCTION": function_name}
+    if config.concurrency_control:
+        env["K6_THINK_SECONDS"] = "0"
+    return env
+
+
 def _build_run_k6(
     *,
     executor: RoleBoundCommandTaskExecutor,
@@ -505,7 +558,7 @@ def _build_run_k6(
                     or _default_stages(config)
                 )
             ),
-            env={"NANOFAAS_URL": control_plane_url, "NANOFAAS_FUNCTION": target.name},
+            env=k6_environment(config, control_plane_url, target.name),
         ),
         remote_dir=_REMOTE_DIR,
     )
@@ -519,9 +572,23 @@ def _default_stages(config: ScenarioConfig) -> tuple[tuple[str, int], ...]:
         # while the function answers at its best, backs it off once the service
         # time degrades, and raises it again on the way out; a run that stopped
         # at the heavy phase could not tell a governor that recovers from one
-        # stuck at minTargetInFlightPerPod. Each phase outlasts several
-        # cooldowns so the reading is a trajectory rather than a single step.
-        return (("30s", 2), ("15s", 25), ("60s", 25), ("45s", 2))
+        # stuck at minTargetInFlightPerPod.
+        #
+        # The phases are long because a 150s version was not conclusive: the
+        # limit held at its ceiling for the whole 60s of heavy load and only
+        # began falling as the load receded, which reads the same whether the
+        # controller reacts slowly or ignores the signal outright. Three minutes
+        # of sustained load is some thirty downscale cooldowns, so a controller
+        # that reacts at all has to show it; and two minutes of tail leaves room
+        # for the climb back, which needs a step per cooldown.
+        #
+        # 50 VUs in the heavy phase, with the think time zeroed: in a closed loop
+        # each VU holds one outstanding request, so in-flight is the VU count
+        # until the limit intervenes, and 50 against a ceiling of 8 keeps the
+        # limit saturated even after the governor has cut it. More would not add
+        # load: delivered throughput is capped at limit/service-time whatever the
+        # VU count, and the surplus only deepens a queue that rejects past 100.
+        return (("60s", 2), ("30s", 50), ("180s", 50), ("120s", 2))
     return (("15s", 1), ("30s", 3))
 
 
@@ -608,6 +675,7 @@ def _build_steps_after(
             VerifyConcurrencyTask(
                 watcher=concurrency_watcher,
                 function_name=target.name,
+                series_path=run_dir / "concurrency-series.json",
             )
         )
     if watcher is not None:
@@ -717,6 +785,22 @@ def _build_park_at_zero_command(
         executor=executor,
         role="stack",
     )
+
+
+def waits_for_parking(
+    config: ScenarioConfig, backend: Backend, replica_floor: int
+) -> bool:
+    """Whether the run should wait for the function to be parked at zero first.
+
+    Three conditions, and the first two used to be missing. The wait shells out
+    to `kubectl`, so it means nothing off Kubernetes; and it waits for an
+    autoscaler to do the parking, so it can never be satisfied on a run that has
+    none. Gating on the replica floor alone was not enough because that floor is
+    0 whenever HPA is off — true for plain runs and for the concurrency governor
+    scenario, which is what finally tripped it: 182 seconds waiting for a
+    parking that could not happen, then a failure on sudo.
+    """
+    return config.autoscaling and backend == "k8s" and replica_floor == 0
 
 
 def _build_preflight(
@@ -835,6 +919,7 @@ def build_loadtest_plan(
         prebuilt_control_plane_image,
         prebuilt_function_images,
         concurrency=_CONCURRENCY_CEILING if config.concurrency_control else 4,
+        resources=_CONCURRENCY_FUNCTION_RESOURCES if config.concurrency_control else None,
     )
     target = functions[0]
     dedicated = "loadgen" in environment.roles
@@ -909,7 +994,7 @@ def build_loadtest_plan(
         executor=executor,
         load_role=load_role,
         hpa=hpa,
-        parks_at_zero=replica_floor == 0,
+        parks_at_zero=waits_for_parking(config, backend, replica_floor),
         request=request,
         target=target,
     )
