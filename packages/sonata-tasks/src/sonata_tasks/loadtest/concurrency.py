@@ -34,6 +34,14 @@ _LATENCY_SUM = "function_latency_ms_seconds_sum"
 # What the queue was actually running. Without it the series cannot tell a
 # function that refused to slow down from one the load never made concurrent.
 _IN_FLIGHT = "function_inFlight"
+# The buffer in front of the limit. A concurrency limit does not make work
+# disappear, it moves it here, so a run that reports only the limit and the
+# service time is hiding the cost it imposed: the queue is where the caller's
+# wait actually accumulates, and where load is finally refused when it fills.
+_QUEUE_DEPTH = "function_queue_depth"
+_QUEUE_WAIT_COUNT = "function_queue_wait_ms_seconds_count"
+_QUEUE_WAIT_SUM = "function_queue_wait_ms_seconds_sum"
+_REJECTED = "function_queue_rejected_total"
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,6 +52,10 @@ class ConcurrencyReading:
     in_flight: int
     latency_count: float
     latency_total_ms: float
+    queue_depth: int = 0
+    queue_wait_count: float = 0.0
+    queue_wait_total_ms: float = 0.0
+    rejected: float = 0.0
 
 
 class EffectiveConcurrencyReader(Protocol):
@@ -66,6 +78,9 @@ class ConcurrencySample:
     in_flight: int = 0
     mean_latency_ms: float | None = None
     throughput_rps: float | None = None
+    queue_depth: int = 0
+    mean_queue_wait_ms: float | None = None
+    rejected: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -253,6 +268,9 @@ def write_series(summary: ConcurrencySummary, path: Path) -> None:
                 "in_flight": sample.in_flight,
                 "mean_latency_ms": sample.mean_latency_ms,
                 "throughput_rps": sample.throughput_rps,
+                "queue_depth": sample.queue_depth,
+                "mean_queue_wait_ms": sample.mean_queue_wait_ms,
+                "rejected": sample.rejected,
             }
             for sample in summary.samples
         ],
@@ -387,11 +405,19 @@ class ScrapeConcurrencyProbe:
         # normal at the start of a run and must not read as a scrape failure.
         _, count = metric_sum(response.text, _LATENCY_COUNT, labels)
         _, total_seconds = metric_sum(response.text, _LATENCY_SUM, labels)
+        _, queue_depth = metric_sum(response.text, _QUEUE_DEPTH, labels)
+        _, wait_count = metric_sum(response.text, _QUEUE_WAIT_COUNT, labels)
+        _, wait_seconds = metric_sum(response.text, _QUEUE_WAIT_SUM, labels)
+        _, rejected = metric_sum(response.text, _REJECTED, labels)
         return ConcurrencyReading(
             effective=int(effective),
             in_flight=int(in_flight),
             latency_count=count,
             latency_total_ms=total_seconds * 1000.0,
+            queue_depth=int(queue_depth),
+            queue_wait_count=wait_count,
+            queue_wait_total_ms=wait_seconds * 1000.0,
+            rejected=rejected,
         )
 
 
@@ -501,6 +527,8 @@ class ConcurrencyWatcher:
                 elapsed_seconds=round(now - (self._started_at or now), 3),
                 effective=reading.effective,
                 in_flight=reading.in_flight,
+                queue_depth=reading.queue_depth,
+                rejected=self._rejected_since_previous(reading),
                 **self._interval(reading, now),
             )
         )
@@ -521,14 +549,39 @@ class ConcurrencyWatcher:
         objective, and about whether co-tenancy wastes capacity, is judged on.
         """
         previous = self._previous
+        idle: dict[str, float | None] = {
+            "mean_latency_ms": None,
+            "throughput_rps": None,
+            "mean_queue_wait_ms": None,
+        }
         if previous is None or self._previous_at is None:
-            return {"mean_latency_ms": None, "throughput_rps": None}
+            return idle
+        elapsed = now - self._previous_at
         delta_count = reading.latency_count - previous.latency_count
         delta_total = reading.latency_total_ms - previous.latency_total_ms
-        elapsed = now - self._previous_at
         if delta_count <= 0 or delta_total <= 0 or elapsed <= 0:
-            return {"mean_latency_ms": None, "throughput_rps": None}
+            return idle
         return {
             "mean_latency_ms": round(delta_total / delta_count, 2),
             "throughput_rps": round(delta_count / elapsed, 1),
+            "mean_queue_wait_ms": self._mean_queue_wait(previous, reading),
         }
+
+    def _rejected_since_previous(self, reading: ConcurrencyReading) -> float:
+        """Counted outside `_interval` on purpose: an interval that completed
+        nothing because the queue was full is exactly the one worth recording,
+        and sharing the latency timer's guard would have discarded it."""
+        previous = self._previous
+        if previous is None:
+            return 0.0
+        return max(0.0, reading.rejected - previous.rejected)
+
+    @staticmethod
+    def _mean_queue_wait(
+        previous: ConcurrencyReading, reading: ConcurrencyReading
+    ) -> float | None:
+        waited = reading.queue_wait_count - previous.queue_wait_count
+        total = reading.queue_wait_total_ms - previous.queue_wait_total_ms
+        if waited <= 0 or total < 0:
+            return None
+        return round(total / waited, 2)

@@ -284,7 +284,75 @@ def test_the_series_is_written_before_the_verdict_can_raise(tmp_path) -> None:  
         "in_flight": 7,
         "mean_latency_ms": 19.3,
         "throughput_rps": None,
+        "queue_depth": 0,
+        "mean_queue_wait_ms": None,
+        "rejected": 0.0,
     }
+
+
+def test_the_series_carries_what_the_limit_cost_the_caller() -> None:
+    """A limit does not delete work, it moves it into the buffer. A series with
+    the limit and the service time but no queue depth and no queue wait reports
+    the decision while hiding its price."""
+    watcher = ConcurrencyWatcher(
+        _StubProbe(
+            ConcurrencyReading(
+                effective=8,
+                in_flight=8,
+                latency_count=10,
+                latency_total_ms=50,
+                queue_depth=4,
+                queue_wait_count=10,
+                queue_wait_total_ms=20,
+            ),
+            ConcurrencyReading(
+                effective=8,
+                in_flight=8,
+                latency_count=20,
+                latency_total_ms=250,
+                queue_depth=97,
+                queue_wait_count=20,
+                queue_wait_total_ms=1020,
+            ),
+        ),
+        poll_interval_seconds=60,
+    )
+    watcher.start()
+    try:
+        watcher._sample()
+    finally:
+        watcher.stop()
+
+    latest = watcher.samples[-1]
+    assert latest.queue_depth == 97
+    # Cumulatively the wait is 51ms; the ten requests of THIS interval waited
+    # 100ms each, and the interval is what the burst actually did.
+    assert latest.mean_queue_wait_ms == 100.0
+
+
+def test_an_interval_that_completed_nothing_still_reports_its_rejections() -> None:
+    """The interval where the queue was full is the one worth recording, and it
+    is exactly the one where no request completed to feed the latency timer."""
+    watcher = ConcurrencyWatcher(
+        _StubProbe(
+            ConcurrencyReading(
+                effective=1, in_flight=1, latency_count=10, latency_total_ms=50, rejected=0
+            ),
+            ConcurrencyReading(
+                effective=1, in_flight=1, latency_count=10, latency_total_ms=50, rejected=430
+            ),
+        ),
+        poll_interval_seconds=60,
+    )
+    watcher.start()
+    try:
+        watcher._sample()
+    finally:
+        watcher.stop()
+
+    latest = watcher.samples[-1]
+    assert latest.mean_latency_ms is None, "nothing completed, so there is no service time"
+    assert latest.rejected == 430
 
 
 def test_the_scrape_records_what_the_queue_was_actually_running() -> None:
