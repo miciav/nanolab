@@ -22,6 +22,8 @@ from sonata_tasks.loadtest.concurrency import (
     write_series,
 )
 from sonata_tasks.loadtest.models import K6RunResult, TimeWindow
+from sonata_tasks.loadtest.report import ReportPhase as ReportPhase
+from sonata_tasks.loadtest.report import WriteConcurrencyReport as WriteConcurrencyReport
 from sonata_tasks.loadtest.tasks import (
     CapturePrometheusSnapshot,
     FetchVmResults,
@@ -250,6 +252,29 @@ class WriteReportTask(Task[LoadtestOutcome]):
     def run(self, inputs: TaskInputs) -> TaskOutcome[LoadtestOutcome]:
         outcome = load_outcome(inputs, self.title)
         return TaskOutcome(value=replace(outcome, report=self._report.run()))
+
+
+class WriteConcurrencyReportTask(Task[LoadtestOutcome]):
+    """Render the charted experiment report from the raw series on disk.
+
+    Runs last and reads only files, so it cannot disturb the measurement it
+    describes, and a failure to draw a chart never costs the run its data.
+    """
+
+    def __init__(
+        self,
+        *,
+        report: WriteConcurrencyReport,
+        title: str = "Write the concurrency report",
+    ) -> None:
+        self.title = title
+        self._report = report
+
+    @override
+    def run(self, inputs: TaskInputs) -> TaskOutcome[LoadtestOutcome]:
+        outcome = load_outcome(inputs, self.title)
+        self._report.run()
+        return TaskOutcome(value=outcome)
 
 
 class WriteSummaryTask(Task[LoadtestOutcome]):
