@@ -9,6 +9,7 @@ from sonata_tasks.command import CommandTask
 from sonata_tasks.compose import DockerComposeProject, docker_compose_resource
 from sonata_tasks.registry import docker_registry_resource
 from sonata_tasks.loadtest import (
+    ReportCoTenancyTask,
     VerifyConcurrencyTask,
     CapturePrometheusTask,
     EvaluateGateTask,
@@ -27,6 +28,7 @@ from sonata_tasks.execution.roles import ExecutionRole
 from sonata_tasks.k6 import K6Task
 from sonata_tasks.loadtest.concurrency import (
     ConcurrencyWatcher,
+    ConcurrencyWatcherGroup,
     ScrapeConcurrencyProbe,
 )
 from sonata_tasks.loadtest.autoscaling import (
@@ -377,6 +379,16 @@ def _validate_remote_run_dir(remote_run_dir: Path | None, home: str) -> None:
         raise ValueError("remote run directory must be an absolute run-N child")
 
 
+def is_co_tenancy(config: ScenarioConfig) -> bool:
+    """Whether this run puts two functions on one control plane on purpose.
+
+    Read from the function list rather than a new flag: declaring a second
+    function under concurrencyControl is the intent, and a flag that had to
+    agree with the list would be one more thing to contradict it.
+    """
+    return config.concurrency_control and len(config.functions) >= 2
+
+
 def load_script_name(config: ScenarioConfig) -> str:
     """Which k6 script drives the function.
 
@@ -388,6 +400,10 @@ def load_script_name(config: ScenarioConfig) -> str:
     8 — so the function was never concurrent, the governor had nothing to react
     to, and a think-time override aimed at the other script changed nothing.
     """
+    if is_co_tenancy(config):
+        # Staggered phases, which one global stage list cannot express, so this
+        # script carries its own k6 scenarios.
+        return "co-tenancy.js"
     if config.autoscaling or config.concurrency_control:
         return "autoscaling.js"
     return "two-vm-function-invoke.js"
@@ -529,7 +545,14 @@ def k6_environment(
     env = {"NANOFAAS_URL": control_plane_url, "NANOFAAS_FUNCTION": function_name}
     if config.concurrency_control:
         env["K6_THINK_SECONDS"] = "0"
+    if is_co_tenancy(config):
+        env["NANOFAAS_NEIGHBOUR"] = neighbour_name(config)
     return env
+
+
+def neighbour_name(config: ScenarioConfig) -> str:
+    """The function that comes and goes while the first one holds steady."""
+    return config.functions[1]
 
 
 def _build_run_k6(
@@ -565,6 +588,10 @@ def _build_run_k6(
 
 
 def _default_stages(config: ScenarioConfig) -> tuple[tuple[str, int], ...]:
+    if is_co_tenancy(config):
+        # None: the phases live in the script, and a --stage flag would override
+        # the scenarios that stagger them.
+        return ()
     if config.autoscaling:
         return (("10s", 10), ("20s", 20), ("90s", 20), ("10s", 0))
     if config.concurrency_control:
@@ -634,11 +661,30 @@ def _build_concurrency_watcher(
     """
     if not config.concurrency_control:
         return None
+    management_url = control_plane_url.replace(":8080", ":8081")
     return ConcurrencyWatcher(
-        ScrapeConcurrencyProbe(
-            management_url=control_plane_url.replace(":8080", ":8081"),
-            function_name=target.name,
-        )
+        ScrapeConcurrencyProbe(management_url=management_url, function_name=target.name)
+    )
+
+
+def _build_concurrency_watchers(
+    *,
+    config: ScenarioConfig,
+    control_plane_url: str,
+    functions: tuple[Any, ...],
+) -> ConcurrencyWatcherGroup | None:
+    if not is_co_tenancy(config):
+        return None
+    management_url = control_plane_url.replace(":8080", ":8081")
+    return ConcurrencyWatcherGroup(
+        {
+            function.name: ConcurrencyWatcher(
+                ScrapeConcurrencyProbe(
+                    management_url=management_url, function_name=function.name
+                )
+            )
+            for function in functions
+        }
     )
 
 
@@ -650,6 +696,7 @@ def _build_steps_after(
     fetcher: RemoteFileFetcher | object | None,
     watcher: ReplicaWatcher | None,
     concurrency_watcher: ConcurrencyWatcher | None = None,
+    concurrency_watchers: ConcurrencyWatcherGroup | None = None,
     replica_probe: ReplicaStatusProbe | None,
     bindings: RoleBindings,
     request: PlatformRequest,
@@ -670,7 +717,11 @@ def _build_steps_after(
                 )
             )
         )
-    if concurrency_watcher is not None:
+    if concurrency_watchers is not None:
+        after.append(
+            ReportCoTenancyTask(watchers=concurrency_watchers, series_dir=run_dir)
+        )
+    elif concurrency_watcher is not None:
         after.append(
             VerifyConcurrencyTask(
                 watcher=concurrency_watcher,
@@ -975,6 +1026,11 @@ def build_loadtest_plan(
         control_plane_url=control_plane_url,
         target=target,
     )
+    concurrency_watchers = _build_concurrency_watchers(
+        config=config,
+        control_plane_url=control_plane_url,
+        functions=functions,
+    )
     after = _build_steps_after(
         remote=remote,
         summary_path=summary_path,
@@ -982,6 +1038,7 @@ def build_loadtest_plan(
         fetcher=fetcher,
         watcher=watcher,
         concurrency_watcher=concurrency_watcher,
+        concurrency_watchers=concurrency_watchers,
         replica_probe=replica_probe,
         bindings=bindings,
         request=request,
@@ -1018,7 +1075,7 @@ def build_loadtest_plan(
                 # One sampler slot, and the two never coexist: a concurrency run
                 # pins the replica count, an autoscaling run does not govern
                 # concurrency.
-                watcher=watcher or concurrency_watcher,
+                watcher=watcher or concurrency_watchers or concurrency_watcher,
                 initial_replicas=(
                     VerifyInitialAutoscalingReplicas(
                         replica_probe, expected_replicas=replica_floor

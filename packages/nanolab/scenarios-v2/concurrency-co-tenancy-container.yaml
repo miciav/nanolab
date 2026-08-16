@@ -1,0 +1,16 @@
+# Two functions on one control plane, to see whether either governor reacts to
+# the other's load.
+#
+# The first function carries the same load for the whole run while the second
+# comes and goes, so any movement in the first one's limit is attributable to
+# its neighbour. Same workload and same runtime family on both sides, so
+# co-tenancy is the only variable.
+#
+# This run reports rather than asserts: it exists to find out whether the effect
+# is there, and asserting it beforehand would assume the answer.
+workflow: loadtest
+backend: container
+concurrencyControl: true
+functions:
+  - word-stats-java
+  - word-stats-java-lite

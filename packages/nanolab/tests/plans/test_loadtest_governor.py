@@ -22,6 +22,7 @@ from nanolab.plans.loadtest import (
     _concurrency_control_setup,
     _default_stages,
     build_loadtest_plan,
+    is_co_tenancy,
     k6_environment,
     load_script_name,
     waits_for_parking,
@@ -244,3 +245,37 @@ def test_the_governor_run_uses_the_single_function_load_script() -> None:
     assert load_script_name(CONCURRENCY_SCENARIO) == "autoscaling.js"
     assert load_script_name(AUTOSCALING_SCENARIO) == "autoscaling.js"
     assert load_script_name(PLAIN_SCENARIO) == "two-vm-function-invoke.js"
+
+
+CO_TENANCY_SCENARIO = ScenarioConfig.model_validate(
+    {
+        "workflow": "loadtest",
+        "backend": "container",
+        "concurrencyControl": True,
+        "functions": ["word-stats-java", "word-stats-java-lite"],
+    }
+)
+
+
+def test_a_second_function_is_what_makes_a_run_co_tenant() -> None:
+    """Read from the function list rather than a flag: declaring a neighbour is
+    the intent, and a flag that had to agree with the list would be one more
+    thing able to contradict it."""
+    assert is_co_tenancy(CO_TENANCY_SCENARIO)
+    assert not is_co_tenancy(CONCURRENCY_SCENARIO)
+    assert not is_co_tenancy(PLAIN_SCENARIO)
+
+
+def test_co_tenancy_drives_its_own_staggered_script() -> None:
+    """The neighbour has to arrive partway through, which one global stage list
+    cannot express, so the phases live in the script as k6 scenarios."""
+    assert load_script_name(CO_TENANCY_SCENARIO) == "co-tenancy.js"
+    assert _default_stages(CO_TENANCY_SCENARIO) == ()
+
+
+def test_the_load_generator_is_told_which_function_is_the_neighbour() -> None:
+    env = k6_environment(CO_TENANCY_SCENARIO, "http://cp:8080", "word-stats-java")
+
+    assert env["NANOFAAS_FUNCTION"] == "word-stats-java"
+    assert env["NANOFAAS_NEIGHBOUR"] == "word-stats-java-lite"
+    assert env["K6_THINK_SECONDS"] == "0"

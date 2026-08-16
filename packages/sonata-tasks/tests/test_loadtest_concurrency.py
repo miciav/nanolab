@@ -283,6 +283,7 @@ def test_the_series_is_written_before_the_verdict_can_raise(tmp_path) -> None:  
         "effective_concurrency": 8,
         "in_flight": 7,
         "mean_latency_ms": 19.3,
+        "throughput_rps": None,
     }
 
 
@@ -304,3 +305,61 @@ def test_a_governor_converged_to_one_still_counts_as_loaded() -> None:
 
     assert response is not None
     assert (response.idle_peak, response.loaded_floor) == (8, 1)
+
+
+def test_a_group_starts_and_stops_its_watchers_together() -> None:
+    """Both series have to cover the same window, or "the neighbour arrived here"
+    is not a statement about both."""
+    from sonata_tasks.loadtest.concurrency import ConcurrencyWatcherGroup
+
+    group = ConcurrencyWatcherGroup(
+        {
+            "a": ConcurrencyWatcher(_StubProbe(8), poll_interval_seconds=60),
+            "b": ConcurrencyWatcher(_StubProbe(4), poll_interval_seconds=60),
+        }
+    )
+
+    group.start()
+    try:
+        summaries = group.summaries()
+    finally:
+        group.stop()
+
+    assert sorted(summaries) == ["a", "b"]
+    assert summaries["a"].samples[0].effective == 8
+    assert summaries["b"].samples[0].effective == 4
+
+
+def test_an_exploratory_run_still_has_to_prove_it_measured_something() -> None:
+    """A silent run and a run that disproved the effect must not look alike."""
+    from sonata_tasks.loadtest.concurrency import verify_observable
+
+    verify_observable(summarise(loaded_series((8, 0), (8, 8), (2, 2))))
+
+    with pytest.raises(RuntimeError, match="never observed both idle and concurrent"):
+        verify_observable(summarise(loaded_series((8, 0), (6, 1), (4, 0))))
+
+
+def test_the_interval_carries_throughput_as_well_as_latency() -> None:
+    """Latency alone cannot say whether the concurrency was worth having: service
+    time rises with concurrency on any shared resource, so a limit that costs
+    latency is only wrong if it bought no completions."""
+    import time as _time
+
+    watcher = ConcurrencyWatcher(
+        _StubProbe(
+            ConcurrencyReading(effective=8, in_flight=6, latency_count=100, latency_total_ms=200),
+            ConcurrencyReading(effective=8, in_flight=7, latency_count=140, latency_total_ms=360),
+        ),
+        poll_interval_seconds=60,
+    )
+    watcher.start()
+    try:
+        _time.sleep(0.05)
+        watcher._sample()
+    finally:
+        watcher.stop()
+
+    second = watcher.samples[1]
+    assert second.mean_latency_ms == 4.0  # 160ms over 40 completions
+    assert second.throughput_rps is not None and second.throughput_rps > 0

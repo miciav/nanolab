@@ -65,6 +65,7 @@ class ConcurrencySample:
     effective: int
     in_flight: int = 0
     mean_latency_ms: float | None = None
+    throughput_rps: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -251,6 +252,7 @@ def write_series(summary: ConcurrencySummary, path: Path) -> None:
                 "effective_concurrency": sample.effective,
                 "in_flight": sample.in_flight,
                 "mean_latency_ms": sample.mean_latency_ms,
+                "throughput_rps": sample.throughput_rps,
             }
             for sample in summary.samples
         ],
@@ -302,13 +304,13 @@ def measure_response(samples: Sequence[ConcurrencySample]) -> ConcurrencyRespons
     return ConcurrencyResponse(idle_peak=max(idle), loaded_floor=min(loaded))
 
 
-def verify_concurrency_cycle(summary: ConcurrencySummary) -> None:
-    """Raise unless the governor took concurrency back while the function was busy.
+def verify_observable(summary: ConcurrencySummary) -> None:
+    """Raise unless the run produced readings that can say anything at all.
 
-    A constant series is the common failure and has several causes worth telling
-    apart in the message: the module absent from the build, the function left in
-    `FIXED` mode, or the load never slowing the function enough to register as
-    degradation.
+    Split from the verdict because an exploratory run has no business asserting
+    the behaviour it exists to discover, but every run has to prove it measured
+    something: no readings, or a function never seen both idle and saturated,
+    means the answer would be about the harness rather than the governor.
     """
     if not summary.samples:
         raise RuntimeError(
@@ -327,6 +329,19 @@ def verify_concurrency_cycle(summary: ConcurrencySummary) -> None:
             "profile has to leave the function idle at some point and press at "
             "least two requests on it at another."
         )
+
+
+def verify_concurrency_cycle(summary: ConcurrencySummary) -> None:
+    """Raise unless the governor took concurrency back while the function was busy.
+
+    A constant series is the common failure and has several causes worth telling
+    apart in the message: the module absent from the build, the function left in
+    `FIXED` mode, or the load never slowing the function enough to register as
+    degradation.
+    """
+    verify_observable(summary)
+    response = summary.response
+    assert response is not None  # verify_observable has just established this
     if not response.gave_ground:
         raise RuntimeError(
             f"{summary.function_name!r} never gave concurrency back under load: "
@@ -380,6 +395,30 @@ class ScrapeConcurrencyProbe:
         )
 
 
+class ConcurrencyWatcherGroup:
+    """Several watchers driven as one, for a run with more than one function.
+
+    `RunK6Task` starts and stops a single sampler, and the question a co-tenancy
+    run asks is about the relationship between two series, so they have to cover
+    the same window. Starting them together is what makes "the neighbour arrived
+    here" a statement about both.
+    """
+
+    def __init__(self, watchers: dict[str, "ConcurrencyWatcher"]) -> None:
+        self._watchers = dict(watchers)
+
+    def start(self) -> None:
+        for watcher in self._watchers.values():
+            watcher.start()
+
+    def stop(self) -> None:
+        for watcher in self._watchers.values():
+            watcher.stop()
+
+    def summaries(self) -> dict[str, ConcurrencySummary]:
+        return {name: watcher.summary(name) for name, watcher in self._watchers.items()}
+
+
 class ConcurrencyWatcher:
     """Samples the effective concurrency on a background thread while load runs.
 
@@ -399,6 +438,7 @@ class ConcurrencyWatcher:
         self._thread: threading.Thread | None = None
         self._samples: list[ConcurrencySample] = []
         self._previous: ConcurrencyReading | None = None
+        self._previous_at: float | None = None
         self._started_at: float | None = None
         self.errors: list[str] = []
 
@@ -447,6 +487,7 @@ class ConcurrencyWatcher:
             self._sample()
 
     def _sample(self) -> None:
+        now = time.monotonic()
         try:
             reading = self._probe.read()
         except RuntimeError as exc:
@@ -457,28 +498,37 @@ class ConcurrencyWatcher:
             return
         self._samples.append(
             ConcurrencySample(
-                elapsed_seconds=round(
-                    time.monotonic() - (self._started_at or time.monotonic()), 3
-                ),
+                elapsed_seconds=round(now - (self._started_at or now), 3),
                 effective=reading.effective,
                 in_flight=reading.in_flight,
-                mean_latency_ms=self._interval_mean_latency(reading),
+                **self._interval(reading, now),
             )
         )
         self._previous = reading
+        self._previous_at = now
 
-    def _interval_mean_latency(self, reading: ConcurrencyReading) -> float | None:
-        """Mean service time of the interval just ended, or None if nothing finished.
+    def _interval(self, reading: ConcurrencyReading, now: float) -> dict[str, float | None]:
+        """What the interval just ended looked like: mean service time and throughput.
 
         The cumulative timer answers "since startup", which flattens exactly the
         change the governor is reacting to; the difference between two scrapes is
         what the controller itself works from.
+
+        Throughput is here because latency alone cannot say whether concurrency
+        was worth having. Service time rises with concurrency on any shared
+        resource, so a limit that costs latency is only wrong if it bought no
+        completions - and that is the quantity every question about the
+        objective, and about whether co-tenancy wastes capacity, is judged on.
         """
         previous = self._previous
-        if previous is None:
-            return None
+        if previous is None or self._previous_at is None:
+            return {"mean_latency_ms": None, "throughput_rps": None}
         delta_count = reading.latency_count - previous.latency_count
         delta_total = reading.latency_total_ms - previous.latency_total_ms
-        if delta_count <= 0 or delta_total <= 0:
-            return None
-        return round(delta_total / delta_count, 2)
+        elapsed = now - self._previous_at
+        if delta_count <= 0 or delta_total <= 0 or elapsed <= 0:
+            return {"mean_latency_ms": None, "throughput_rps": None}
+        return {
+            "mean_latency_ms": round(delta_total / delta_count, 2),
+            "throughput_rps": round(delta_count / elapsed, 1),
+        }

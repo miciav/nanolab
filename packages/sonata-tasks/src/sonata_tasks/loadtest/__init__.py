@@ -16,7 +16,9 @@ from sonata_tasks.loadtest.autoscaling import (
 from sonata_tasks.loadtest.concurrency import (
     ConcurrencySummary,
     ConcurrencyWatcher,
+    ConcurrencyWatcherGroup,
     verify_concurrency_cycle,
+    verify_observable,
     write_series,
 )
 from sonata_tasks.loadtest.models import K6RunResult, TimeWindow
@@ -171,6 +173,44 @@ class VerifyConcurrencyTask(Task[LoadtestOutcome]):
         print(summary.describe())
         verify_concurrency_cycle(summary)
         return TaskOutcome(value=replace(outcome, concurrency=summary))
+
+
+class ReportCoTenancyTask(Task[LoadtestOutcome]):
+    """Record what each governor did while sharing a control plane with the other.
+
+    Reports rather than judges. The run exists to find out whether one function's
+    load moves its neighbour's limit, and asserting that before measuring it
+    would be assuming the answer. What it does assert is that the run could have
+    answered: both functions produced readings, and both were seen idle and
+    saturated. A silent run and a run that disproved the effect must not look
+    alike.
+    """
+
+    def __init__(
+        self,
+        *,
+        watchers: ConcurrencyWatcherGroup,
+        series_dir: Path | None = None,
+        title: str = "Report co-tenancy",
+    ) -> None:
+        self.title = title
+        self._watchers = watchers
+        self._series_dir = series_dir
+
+    @override
+    def run(self, inputs: TaskInputs) -> TaskOutcome[LoadtestOutcome]:
+        outcome = load_outcome(inputs, self.title)
+        summaries = self._watchers.summaries()
+        for name, summary in summaries.items():
+            if self._series_dir is not None:
+                write_series(summary, self._series_dir / f"concurrency-series-{name}.json")
+            print(summary.describe())
+        for summary in summaries.values():
+            verify_observable(summary)
+        # The neighbour's series is the point, so the outcome keeps the function
+        # the run was built around and the files keep the rest.
+        first = next(iter(summaries.values()), None)
+        return TaskOutcome(value=replace(outcome, concurrency=first))
 
 
 class CapturePrometheusTask(Task[LoadtestOutcome]):
