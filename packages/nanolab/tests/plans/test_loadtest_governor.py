@@ -16,8 +16,12 @@ import pytest
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.plans.loadtest import (
+    _BURST_TOTAL_BUDGET,
     _CONCURRENCY_CEILING,
+    _CONCURRENCY_QUEUE_SIZE,
+    burst_peak_vus,
     compose_control_plane_modules,
+    concurrency_budget,
     _additional_modules,
     _concurrency_control_setup,
     _default_stages,
@@ -25,6 +29,7 @@ from nanolab.plans.loadtest import (
     is_co_tenancy,
     k6_environment,
     load_script_name,
+    shared_cpuset,
     waits_for_parking,
 )
 from sonata_tasks.execution.bindings import RoleBindings
@@ -257,6 +262,75 @@ CO_TENANCY_SCENARIO = ScenarioConfig.model_validate(
 )
 
 
+BURST_SCENARIO = ScenarioConfig.model_validate(
+    {
+        "workflow": "loadtest",
+        "backend": "container",
+        "concurrencyControl": True,
+        "concurrencyMode": "BUDGETED",
+        "loadProfile": "burst",
+        "functions": ["word-stats-java", "word-stats-java-lite"],
+    }
+)
+
+
+ADAPTIVE_BURST_SCENARIO = BURST_SCENARIO.model_copy(
+    update={"concurrency_mode": "ADAPTIVE_PER_POD"}
+)
+
+
+def test_the_burst_peak_is_calibrated_against_the_tightest_limit_on_offer() -> None:
+    """The first run of this profile set the peak from the per-function ceiling
+    of 8 while BUDGETED constrains the SUM: under contention each function held
+    about 4 of 104 places against 105 arrivals, so one mode overflowed by
+    arithmetic and the other did not, and the 86,302 rejections that followed
+    said nothing about the controller."""
+    env = k6_environment(BURST_SCENARIO, "http://cp:8080", "fn")
+
+    # 12 shared by two, plus the queue, three short of overflowing.
+    assert env["K6_PEAK_VUS"] == "103"
+    share = _BURST_TOTAL_BUDGET // len(BURST_SCENARIO.functions)
+    assert int(env["K6_PEAK_VUS"]) < share + _CONCURRENCY_QUEUE_SIZE
+
+
+def test_both_modes_are_offered_exactly_the_same_load() -> None:
+    """A peak that moved with the mode would make the two runs incomparable."""
+    assert burst_peak_vus(ADAPTIVE_BURST_SCENARIO) == burst_peak_vus(BURST_SCENARIO)
+
+
+def test_the_budget_stays_inside_the_window_that_makes_it_mean_anything() -> None:
+    """Above `functions x ceiling` nothing is ever scarce; below
+    `functions x (peak - queue)` the rejections are manufactured by arithmetic."""
+    functions = len(BURST_SCENARIO.functions)
+    peak = burst_peak_vus(BURST_SCENARIO)
+
+    assert _BURST_TOTAL_BUDGET < functions * _CONCURRENCY_CEILING
+    assert _BURST_TOTAL_BUDGET >= functions * (peak - _CONCURRENCY_QUEUE_SIZE)
+
+
+def test_the_burst_profile_drives_the_two_function_script() -> None:
+    assert load_script_name(BURST_SCENARIO) == "co-tenancy-burst.js"
+    assert load_script_name(CO_TENANCY_SCENARIO) == "co-tenancy.js"
+
+
+def test_the_budget_is_only_pinned_where_it_can_bind() -> None:
+    """Left alone it scales with the control plane's cores — 44 on this host — so
+    two functions capped at 8 each could never exhaust it, every ask would be
+    granted in full, and BUDGETED would be an expensive way to be per-function."""
+    assert concurrency_budget(BURST_SCENARIO) == "12"
+    # ADAPTIVE never consults it, and a single function has nobody to share with.
+    assert concurrency_budget(CO_TENANCY_SCENARIO) == ""
+    assert concurrency_budget(CONCURRENCY_SCENARIO) == ""
+
+
+def test_the_control_plane_runtime_defaults_to_the_jvm_build() -> None:
+    """Only a scenario that says so runs the native image, because that image is
+    compiled out of band and would otherwise have to exist for every run."""
+    assert BURST_SCENARIO.control_plane_runtime == "jvm"
+    native = BURST_SCENARIO.model_copy(update={"control_plane_runtime": "native"})
+    assert native.control_plane_runtime == "native"
+
+
 def test_a_second_function_is_what_makes_a_run_co_tenant() -> None:
     """Read from the function list rather than a flag: declaring a neighbour is
     the intent, and a flag that had to agree with the list would be one more
@@ -264,6 +338,15 @@ def test_a_second_function_is_what_makes_a_run_co_tenant() -> None:
     assert is_co_tenancy(CO_TENANCY_SCENARIO)
     assert not is_co_tenancy(CONCURRENCY_SCENARIO)
     assert not is_co_tenancy(PLAIN_SCENARIO)
+
+
+def test_co_tenant_functions_are_pinned_to_the_same_cores() -> None:
+    """Otherwise each gets its own four-CPU quota and on an eleven-core machine they never
+    compete — which is what the first co-tenancy run actually measured, and why the cross-talk
+    it found was so weak. Only the co-tenancy run pins: a single-function run has nobody to
+    share with, and pinning it would cap it instead."""
+    assert shared_cpuset(CO_TENANCY_SCENARIO) == "0-3"
+    assert shared_cpuset(CONCURRENCY_SCENARIO) == ""
 
 
 def test_co_tenancy_drives_its_own_staggered_script() -> None:
@@ -279,3 +362,39 @@ def test_the_load_generator_is_told_which_function_is_the_neighbour() -> None:
     assert env["NANOFAAS_FUNCTION"] == "word-stats-java"
     assert env["NANOFAAS_NEIGHBOUR"] == "word-stats-java-lite"
     assert env["K6_THINK_SECONDS"] == "0"
+
+
+SATURATION_SCENARIO = ScenarioConfig.model_validate(
+    {
+        "workflow": "loadtest",
+        "backend": "container",
+        "concurrencyControl": True,
+        "loadProfile": "saturation",
+        "functions": ["word-stats-java"],
+    }
+)
+
+
+def test_the_slo_is_checked_as_a_percentile_of_what_the_caller_experiences() -> None:
+    """The controller works from the mean of service time, which is the right input for a control
+    loop and the wrong thing to promise anyone: a run held its mean inside a 10ms target while the
+    tail reached 24ms. k6 checks the quantity a caller would state — a percentile, end to end."""
+    env = k6_environment(CONCURRENCY_SCENARIO, "http://cp:8080", "fn")
+
+    assert env["K6_MAX_P95_MS"] == "50"
+
+
+def test_a_saturation_run_is_not_marked_red_for_shedding_load() -> None:
+    """Overload is the profile's purpose. Holding it to the ordinary failure budget would fail
+    every such run for succeeding, which only teaches people to ignore the colour."""
+    env = k6_environment(SATURATION_SCENARIO, "http://cp:8080", "fn")
+
+    assert env["K6_MAX_FAILED_RATE"] == "0.99"
+    assert "K6_MAX_P95_MS" not in env
+
+
+def test_the_saturation_profile_offers_more_than_the_queue_can_hold() -> None:
+    targets = [target for _, target in _default_stages(SATURATION_SCENARIO)]
+
+    # The queue holds 100; anything past limit + queue has nowhere to go but away.
+    assert max(targets) > 100

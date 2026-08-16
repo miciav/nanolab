@@ -1,0 +1,25 @@
+# The BUDGETED burst run on a natively-compiled control plane.
+#
+# Same load, same cores, same budget as its JVM twin, so the only difference is
+# how the control plane itself was built. Measured at rest before this scenario
+# existed: 212 MiB resident and a 1.59s start for the JVM build, 31 MiB and
+# 0.14s for the native one.
+#
+# The image is NOT built by this run. Compile it first:
+#
+#   CONTROL_PLANE_MODULES="container-deployment-provider,concurrency-control,async-queue" \
+#     ./scripts/native-java-image.sh control-plane
+#
+# The compose service declares both `image:` and `build:`, so a run that passed
+# `--build` would rebuild from the Dockerfile and quietly tag a JVM image with
+# the native name — which is why `controlPlaneRuntime: native` also turns the
+# build off.
+workflow: loadtest
+backend: container
+concurrencyControl: true
+concurrencyMode: BUDGETED
+loadProfile: burst
+controlPlaneRuntime: native
+functions:
+  - word-stats-java
+  - word-stats-java-lite

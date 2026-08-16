@@ -50,6 +50,19 @@ class ReleaseConfig(BaseModel):
     error_rate_max: float = Field(default=0.30, ge=0, le=1)
 
 
+ConcurrencyMode = Literal["ADAPTIVE_PER_POD", "BUDGETED"]
+# `burst` is the two-function profile: variable closed-loop load calibrated to
+# fill the queue without automatically overflowing it, so queue depth, queue
+# wait and rejections are readings about the controller rather than about how
+# hard the generator was told to push.
+LoadProfile = Literal["cycle", "saturation", "burst"]
+# Which control-plane build to run. `native` uses a GraalVM image compiled
+# beforehand by `scripts/native-java-image.sh control-plane`, so the run does not
+# rebuild it — measured at rest, the JVM build held 212 MiB against the native
+# build's 31 MiB, and started in 1.59s against 0.14s.
+ControlPlaneRuntime = Literal["jvm", "native"]
+
+
 class ScenarioConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -74,6 +87,19 @@ class ScenarioConfig(BaseModel):
     # make a change in effective concurrency unattributable, since that value is
     # replicas x per-replica target.
     concurrency_control: bool = Field(default=False, alias="concurrencyControl")
+    # Which controller the run exercises. Selectable because the question the harness
+    # exists to answer is comparative: whether one mode holds latency or sheds fewer
+    # requests than another is not answerable from a run of either alone.
+    concurrency_mode: ConcurrencyMode = Field(
+        default="ADAPTIVE_PER_POD", alias="concurrencyMode"
+    )
+    # `cycle` exercises the controller's trajectory; `saturation` offers more than the queue can
+    # hold, which is the only condition under which a request is ever rejected. Whether one
+    # controller sheds fewer than another cannot be asked of a run where neither shed any.
+    load_profile: LoadProfile = Field(default="cycle", alias="loadProfile")
+    control_plane_runtime: ControlPlaneRuntime = Field(
+        default="jvm", alias="controlPlaneRuntime"
+    )
     autoscaling_strategy: AutoscalingStrategy = Field(default="INTERNAL", alias="autoscalingStrategy")
     hpa_scale_to_zero: bool = Field(default=False, alias="hpaScaleToZero")
     release: ReleaseConfig | None = None
@@ -90,6 +116,8 @@ class ScenarioConfig(BaseModel):
             raise ValueError("autoscaling is only supported by the loadtest workflow")
         if self.concurrency_control and self.workflow != "loadtest":
             raise ValueError("concurrencyControl is only supported by the loadtest workflow")
+        if self.concurrency_mode != "ADAPTIVE_PER_POD" and not self.concurrency_control:
+            raise ValueError("concurrencyMode requires concurrencyControl=true")
         if self.concurrency_control and self.autoscaling:
             raise ValueError("concurrencyControl cannot run together with autoscaling")
         if self.autoscaling_strategy == "HPA" and not self.autoscaling:

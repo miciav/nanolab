@@ -1,0 +1,30 @@
+# Two functions sharing four cores under variable load, governed per function.
+#
+# The point of the pair (this file and its BUDGETED twin) is the queue, not the
+# limit. A concurrency limit does not make work go away; it moves it into the
+# buffer in front of the function, so the honest cost of a limit is the queue
+# depth and the wait it imposes, and its failure is the rejection when that
+# buffer fills. Earlier co-tenancy runs offered 12 requests against a limit of 8
+# and a queue of 100 - the buffer never held more than two, so they measured the
+# limit while saying nothing about what it charged.
+#
+# The load is calibrated instead of merely heavy: closed-loop VUs peaking three
+# short of limit + queue, so a controller that holds its ceiling brushes the top
+# of the buffer and refuses nothing, while one that collapses to a small limit
+# overflows.
+#
+# Both functions get identical CONTROLLER settings, but they are not identical
+# functions: `word-stats-java` is Spring Boot on a JVM, `word-stats-java-lite` a
+# GraalVM native binary on a different SDK, and they differ by about a factor of
+# two in service time. So an asymmetry in the granted limits is expected and is
+# not evidence of unfairness — a limit sized from Little's law follows the
+# service time. What the comparison between this file and its BUDGETED twin
+# isolates is the ALGORITHM, since both see the same pair of functions.
+workflow: loadtest
+backend: container
+concurrencyControl: true
+concurrencyMode: ADAPTIVE_PER_POD
+loadProfile: burst
+functions:
+  - word-stats-java
+  - word-stats-java-lite

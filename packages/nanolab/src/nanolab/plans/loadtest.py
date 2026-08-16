@@ -8,6 +8,12 @@ from sonata_engine import Steps, Task, Workflow
 from sonata_tasks.command import CommandTask
 from sonata_tasks.compose import DockerComposeProject, docker_compose_resource
 from sonata_tasks.registry import docker_registry_resource
+from sonata_tasks.loadtest.report import ReportPhase, WriteConcurrencyReport
+from sonata_tasks.loadtest.resources import (
+    DockerEngineProbe,
+    ResourceWatcher,
+    ResourceWatcherGroup,
+)
 from sonata_tasks.loadtest import (
     ReportCoTenancyTask,
     VerifyConcurrencyTask,
@@ -16,6 +22,7 @@ from sonata_tasks.loadtest import (
     FetchResultsTask,
     RunK6Task,
     VerifyAutoscalingTask,
+    WriteConcurrencyReportTask,
     WriteReportTask,
     WriteSummaryTask,
     build_loadtest_workflow,
@@ -59,7 +66,9 @@ _REMOTE_DIR = "."
 _HPA_METRIC_WAIT_SECONDS = 180
 
 
-def _default_prometheus_queries(function_name: str) -> tuple[PrometheusQuery, ...]:
+def _default_prometheus_queries(
+    function_name: str, neighbour: str | None = None
+) -> tuple[PrometheusQuery, ...]:
     function = f"{{function={json.dumps(function_name)}}}"
     control_plane = '{app="nanofaas-control-plane"}'
     # kube-state-metrics labels by object name, not by the `function` label the
@@ -94,6 +103,22 @@ def _default_prometheus_queries(function_name: str) -> tuple[PrometheusQuery, ..
         ),
         PrometheusQuery(
             "function_queue_wait_sum", f"function_queue_wait_ms_seconds_sum{function}"
+        ),
+        PrometheusQuery("function_queue_depth", f"function_queue_depth{function}"),
+        # The mean of a wait is the number a queue is least honest about: a
+        # buffer that is empty most of the time and full occasionally reports a
+        # comfortable average while the callers who arrived during the burst
+        # waited for the whole of it. The timer runs with a percentile histogram
+        # under the advanced metrics profile, so the tail is recoverable.
+        PrometheusQuery(
+            "function_queue_wait_p95_ms",
+            "histogram_quantile(0.95, sum by (le) "
+            f"(rate(function_queue_wait_ms_seconds_bucket{function}[30s]))) * 1000",
+        ),
+        PrometheusQuery(
+            "function_e2e_latency_p95_ms",
+            "histogram_quantile(0.95, sum by (le) "
+            f"(rate(function_e2e_latency_ms_seconds_bucket{function}[30s]))) * 1000",
         ),
         PrometheusQuery(
             "function_e2e_latency_count", f"function_e2e_latency_ms_seconds_count{function}"
@@ -150,6 +175,50 @@ def _default_prometheus_queries(function_name: str) -> tuple[PrometheusQuery, ..
         ),
         PrometheusQuery("internal_scaling_limited", f"function_scaling_limited{function}"),
         PrometheusQuery("internal_scaling_ratio_milli", f"function_scaling_ratio_milli{function}"),
+    ) + _neighbour_prometheus_queries(neighbour)
+
+
+def _neighbour_prometheus_queries(neighbour: str | None) -> tuple[PrometheusQuery, ...]:
+    """The same queue readings for the second function of a co-tenancy run.
+
+    Kept under suffixed names so the primary series stay exactly where every
+    existing reader looks for them. Without these a two-function run records one
+    side of a question that is entirely about the relationship between two.
+    """
+    if neighbour is None:
+        return ()
+    selector = f"{{function={json.dumps(neighbour)}}}"
+    return (
+        PrometheusQuery(f"function_dispatch_total@{neighbour}", f"function_dispatch_total{selector}"),
+        PrometheusQuery(
+            f"function_queue_rejected_total@{neighbour}",
+            f"function_queue_rejected_total{selector}",
+        ),
+        PrometheusQuery(f"function_queue_depth@{neighbour}", f"function_queue_depth{selector}"),
+        PrometheusQuery(
+            f"function_queue_wait_count@{neighbour}",
+            f"function_queue_wait_ms_seconds_count{selector}",
+        ),
+        PrometheusQuery(
+            f"function_queue_wait_sum@{neighbour}",
+            f"function_queue_wait_ms_seconds_sum{selector}",
+        ),
+        PrometheusQuery(
+            f"function_queue_wait_p95_ms@{neighbour}",
+            "histogram_quantile(0.95, sum by (le) "
+            f"(rate(function_queue_wait_ms_seconds_bucket{selector}[30s]))) * 1000",
+        ),
+        PrometheusQuery(
+            f"function_latency_count@{neighbour}", f"function_latency_ms_seconds_count{selector}"
+        ),
+        PrometheusQuery(
+            f"function_latency_sum@{neighbour}", f"function_latency_ms_seconds_sum{selector}"
+        ),
+        PrometheusQuery(
+            f"function_e2e_latency_p95_ms@{neighbour}",
+            "histogram_quantile(0.95, sum by (le) "
+            f"(rate(function_e2e_latency_ms_seconds_bucket{selector}[30s]))) * 1000",
+        ),
     )
 
 
@@ -229,6 +298,14 @@ _CONCURRENCY_COOLDOWN_MS = 5000
 # limit to the function's `concurrency`, so it has to leave room above
 # maxTargetInFlightPerPod or the trajectory is flat by construction.
 _CONCURRENCY_CEILING = 8
+# The buffer in front of that ceiling, registered on every function a concurrency
+# run creates. It is named rather than repeated because the burst profile's peak
+# is derived from it: the two have to agree or the load stops being calibrated
+# against the queue it is meant to fill.
+_CONCURRENCY_QUEUE_SIZE = 100
+# What every BUDGETED function may hold between them. See `concurrency_budget`
+# for why it is neither the per-function ceiling nor the sum of them.
+_BURST_TOTAL_BUDGET = 12
 # The governor only reacts to a function that gets slower under concurrency, and
 # on an unconstrained multi-core host word-stats-java does not: an early run
 # climbed to the ceiling and stayed there, correctly, because eight parallel
@@ -242,9 +319,10 @@ _CONCURRENCY_CEILING = 8
 # can use them should settle near four while one that serialises CPU work should
 # still settle near one. The ceiling stays above that, or the governor would be
 # clamped rather than converging.
+_CONCURRENCY_FUNCTION_CPUS = 4
 _CONCURRENCY_FUNCTION_RESOURCES: dict[str, object] = {
-    "requests": {"cpu": 2.0, "memoryMiB": 256},
-    "limits": {"cpu": 4.0, "memoryMiB": 512},
+    "requests": {"cpu": _CONCURRENCY_FUNCTION_CPUS / 2, "memoryMiB": 256},
+    "limits": {"cpu": float(_CONCURRENCY_FUNCTION_CPUS), "memoryMiB": 512},
 }
 
 
@@ -261,14 +339,39 @@ def _concurrency_control_setup(config: ScenarioConfig) -> dict[str, object] | No
         "strategy": "NONE",
         "minReplicas": 1,
         "maxReplicas": 1,
-        "concurrencyControl": {
-            "mode": "ADAPTIVE_PER_POD",
-            "targetInFlightPerPod": 4,
+        "concurrencyControl": _controller_settings(config),
+    }
+
+
+# The SLO the BUDGETED run is held to. Set from the measured uncontended service time of the
+# functions in the catalogue — around 1ms warm — with room for the queueing that concurrency
+# legitimately buys, so the target is reachable but not free.
+_TARGET_LATENCY_MS = 10
+
+# What a caller is promised, end to end. Larger than the service-time SLO on purpose: the queue is
+# where a concurrency limit puts the wait it saves, so the two numbers cannot be equal without
+# either forbidding queueing altogether or lying about one of them.
+_END_TO_END_P95_BUDGET_MS = 50
+
+
+def _controller_settings(config: ScenarioConfig) -> dict[str, object]:
+    if config.concurrency_mode == "BUDGETED":
+        # No per-replica target and no gradient thresholds: this controller is told what the
+        # function must deliver, not how its limit should step.
+        return {
+            "mode": "BUDGETED",
             "minTargetInFlightPerPod": 1,
             "maxTargetInFlightPerPod": _CONCURRENCY_CEILING,
-            "upscaleCooldownMs": _CONCURRENCY_COOLDOWN_MS,
-            "downscaleCooldownMs": _CONCURRENCY_COOLDOWN_MS,
-        },
+            "targetLatencyMs": _TARGET_LATENCY_MS,
+            "weight": 1.0,
+        }
+    return {
+        "mode": "ADAPTIVE_PER_POD",
+        "targetInFlightPerPod": 4,
+        "minTargetInFlightPerPod": 1,
+        "maxTargetInFlightPerPod": _CONCURRENCY_CEILING,
+        "upscaleCooldownMs": _CONCURRENCY_COOLDOWN_MS,
+        "downscaleCooldownMs": _CONCURRENCY_COOLDOWN_MS,
     }
 
 
@@ -328,7 +431,7 @@ def _resolve_functions(
                 scaling_config=scaling_config,
                 timeout_ms=30000,
                 concurrency=concurrency,
-                queue_size=100,
+                queue_size=_CONCURRENCY_QUEUE_SIZE,
                 **({"resources": resources} if resources is not None else {}),
             )
             for function in functions
@@ -401,9 +504,9 @@ def load_script_name(config: ScenarioConfig) -> str:
     to, and a think-time override aimed at the other script changed nothing.
     """
     if is_co_tenancy(config):
-        # Staggered phases, which one global stage list cannot express, so this
-        # script carries its own k6 scenarios.
-        return "co-tenancy.js"
+        # Staggered phases, which one global stage list cannot express, so these
+        # scripts carry their own k6 scenarios.
+        return "co-tenancy-burst.js" if config.load_profile == "burst" else "co-tenancy.js"
     if config.autoscaling or config.concurrency_control:
         return "autoscaling.js"
     return "two-vm-function-invoke.js"
@@ -499,25 +602,87 @@ def compose_control_plane_modules(additional_modules: tuple[str, ...]) -> str:
     return ",".join(("container-deployment-provider",) + tuple(selected))
 
 
+def shared_cpuset(config: ScenarioConfig) -> str:
+    """The cores every function container is pinned to, or "" to leave them unpinned.
+
+    Only the co-tenancy run asks for this, and it is the whole point of that run.
+    Without it each function gets its own `--cpus` quota, so on an eleven-core
+    machine two functions capped at four each never touch: the first co-tenancy
+    measurement found cross-talk so weak precisely because the neighbours shared
+    a control plane and nothing else. Pinning both to the same four cores makes
+    the budget the governors divide a quantity that actually exists.
+
+    The set matches the per-function CPU limit, so the pair together get what one
+    of them would have had alone.
+    """
+    if not is_co_tenancy(config):
+        return ""
+    return f"0-{_CONCURRENCY_FUNCTION_CPUS - 1}"
+
+
+def concurrency_budget(config: ScenarioConfig) -> str:
+    """The platform-wide BUDGETED allowance, or "" to leave the default alone.
+
+    It has to sit in a window with a floor and a ceiling, and the first run of
+    this profile missed the floor.
+
+    The ceiling is `functions x per-function ceiling` (16 here): at or above it
+    the sum of the asks can never reach the budget, nothing is ever scarce, and
+    BUDGETED becomes an expensive way to be per-function. The platform default
+    is worse still — it scales with the control plane's cores, 44 on this host.
+
+    The floor is what the offered load needs. Under contention each function
+    gets `budget / functions`, and anything beyond `share + queue` has nowhere
+    to go, so a budget below `functions x (peak - queue)` manufactures
+    rejections out of the arithmetic. The first run set the budget to 8 while
+    the load peaked at 105 against a queue of 100: each function held 4 of 104
+    places against 105 arrivals, and the 86,302 rejections that followed said
+    nothing about the controller.
+
+    12 sits between the two, and it is also close to the measured truth: the
+    shared four cores carried 14 in flight at full throughput, so 12 is a real
+    capacity statement rather than an artificial squeeze.
+    """
+    if not is_co_tenancy(config) or config.concurrency_mode != "BUDGETED":
+        return ""
+    return str(_BURST_TOTAL_BUDGET)
+
+
+NATIVE_CONTROL_PLANE_IMAGE = "nanofaas/control-plane:native"
+
+
 def _build_platform_requires(
     backend: str,
     executor: RoleBoundCommandTaskExecutor,
     root: Path,
     additional_modules: tuple[str, ...] = (),
+    cpuset: str = "",
+    budget: str = "",
+    native_control_plane: bool = False,
 ) -> tuple[Any, ...]:
     platform_requires = ()
     if backend == "container":
         registry = docker_registry_resource(executor=executor, role="host")
+        env = {
+            "NANOFAAS_CONTROL_PLANE_MODULES": compose_control_plane_modules(
+                additional_modules
+            ),
+            "NANOFAAS_CONTAINER_LOCAL_CPUSET": cpuset,
+            "NANOFAAS_CONCURRENCY_CONTROL_TOTAL_BUDGET": budget,
+        }
+        if native_control_plane:
+            env["NANOFAAS_CONTROL_PLANE_IMAGE"] = NATIVE_CONTROL_PLANE_IMAGE
         compose = docker_compose_resource(
             DockerComposeProject(
                 name="nanofaas-loadtest",
                 file=Path("deploy/compose/compose.yaml"),
                 ready_url="http://127.0.0.1:8081/actuator/health/readiness",
-                env={
-                    "NANOFAAS_CONTROL_PLANE_MODULES": compose_control_plane_modules(
-                        additional_modules
-                    )
-                },
+                env=env,
+                # A native image is compiled beforehand and must be used as it
+                # is: the compose service declares both `image:` and `build:`,
+                # so `--build` would rebuild from the Dockerfile and tag the JVM
+                # result with the native image's name.
+                build=not native_control_plane,
             ),
             executor=executor,
             cwd=root,
@@ -545,9 +710,46 @@ def k6_environment(
     env = {"NANOFAAS_URL": control_plane_url, "NANOFAAS_FUNCTION": function_name}
     if config.concurrency_control:
         env["K6_THINK_SECONDS"] = "0"
+        # The SLO as a caller would state it: a percentile of end-to-end latency, not a mean of
+        # service time. The controller works from the mean of what the function itself took, which
+        # is the right input for a control loop and the wrong thing to promise anyone — a run
+        # measured a mean inside its 10ms target while the tail reached 24ms.
+        env["K6_MAX_P95_MS"] = str(_END_TO_END_P95_BUDGET_MS)
+    if config.load_profile == "saturation":
+        # Shedding load is what this profile is for. Holding it to the ordinary failure budget
+        # would mark every saturation run red for doing its job.
+        env["K6_MAX_FAILED_RATE"] = "0.99"
+        env.pop("K6_MAX_P95_MS", None)
+    if config.load_profile == "burst":
+        # Closed-loop VUs each hold one request, in service or queued, so the peak
+        # VU count IS the queue fill: depth = VUs - limit. Sitting just under
+        # limit + queue means a controller brushes the top of the buffer and
+        # refuses nothing, so a rejection is a verdict on the controller rather
+        # than a property of how hard the generator was told to push.
+        env["K6_PEAK_VUS"] = str(burst_peak_vus(config))
+        env.pop("K6_MAX_P95_MS", None)
     if is_co_tenancy(config):
         env["NANOFAAS_NEIGHBOUR"] = neighbour_name(config)
     return env
+
+
+def burst_peak_vus(config: ScenarioConfig) -> int:
+    """Offered concurrency at the top of a burst: three short of overflowing.
+
+    Derived from the SMALLEST limit any mode under comparison will grant, not
+    from the per-function ceiling. That was the flaw in the first run of this
+    profile: the peak was calibrated against a ceiling of 8, while BUDGETED
+    constrains the SUM, so under contention each function held about 4 and the
+    load overflowed the queue by construction in one mode and not the other.
+    The two runs were then not measuring the same thing.
+
+    The same number has to be used for every mode or the runs stop being
+    comparable, so the tighter constraint sets it for all of them.
+    """
+    limit = _CONCURRENCY_CEILING
+    if is_co_tenancy(config):
+        limit = min(limit, _BURST_TOTAL_BUDGET // len(config.functions))
+    return limit + _CONCURRENCY_QUEUE_SIZE - 3
 
 
 def neighbour_name(config: ScenarioConfig) -> str:
@@ -594,6 +796,13 @@ def _default_stages(config: ScenarioConfig) -> tuple[tuple[str, int], ...]:
         return ()
     if config.autoscaling:
         return (("10s", 10), ("20s", 20), ("90s", 20), ("10s", 0))
+    if config.concurrency_control and config.load_profile == "saturation":
+        # Deliberately past what the queue can absorb. With no think time each VU holds one
+        # request, so 200 VUs offer 200 concurrent against a limit in the single digits and a
+        # queue of 100: the surplus has nowhere to go and is rejected, which is the only way to
+        # compare controllers on the requests they shed. The light phases either side keep the
+        # baseline honest and show whether the controller recovers.
+        return (("45s", 10), ("15s", 200), ("180s", 200), ("60s", 10))
     if config.concurrency_control:
         # Light, then heavy, then light again. The governor raises the limit
         # while the function answers at its best, backs it off once the service
@@ -703,6 +912,8 @@ def _build_steps_after(
     target: Any,
     replica_floor: int,
     prometheus_client: PrometheusClient,
+    neighbour: str | None = None,
+    concurrency_report: WriteConcurrencyReport | None = None,
 ) -> list[Task[Any]]:
     after: list[Task[Any]] = []
     if remote:
@@ -752,7 +963,7 @@ def _build_steps_after(
                     task_id="",
                     title="Capture Prometheus snapshot",
                     client=prometheus_client,
-                    queries=_default_prometheus_queries(target.name),
+                    queries=_default_prometheus_queries(target.name, neighbour),
                     window=window,
                     output_dir=run_dir,
                 )
@@ -782,7 +993,68 @@ def _build_steps_after(
             EvaluateGateTask(),
         )
     )
+    if concurrency_report is not None:
+        # Last, and reading only files: a chart that fails to draw must not cost
+        # the run the measurement it was going to describe.
+        after.append(WriteConcurrencyReportTask(report=concurrency_report))
     return after
+
+
+def _sampler(config: ScenarioConfig, run_dir: Path, inner: Any) -> Any:
+    """Wraps whatever samples the run so container memory and CPU are sampled too.
+
+    Only for concurrency runs, which are the ones whose report has somewhere to
+    put it. Wrapped rather than added as a second slot because `RunK6Task` has
+    one start/stop bracket, and both samplers have to cover exactly the window
+    the load ran in.
+    """
+    if not config.concurrency_control:
+        return inner
+    return ResourceWatcherGroup(
+        watcher=ResourceWatcher(DockerEngineProbe()),
+        series_path=run_dir / "resource-series.json",
+        inner=inner,
+    )
+
+
+def burst_report_phases() -> tuple[ReportPhase, ...]:
+    """The windows the burst script is built around, named for what each asks.
+
+    Kept beside the plan that chooses the script rather than inside the report,
+    which should not have to know the shape of a particular k6 file.
+    """
+    return (
+        ReportPhase("A alone", 0, 120),
+        ReportPhase("antiphase", 120, 240),
+        ReportPhase("in phase", 240, 360),
+    )
+
+
+def _build_concurrency_report(
+    config: ScenarioConfig, run_dir: Path
+) -> WriteConcurrencyReport | None:
+    """Only concurrency runs produce the series this reads, so only they get one."""
+    if not config.concurrency_control:
+        return None
+    mode = config.concurrency_mode
+    budget = concurrency_budget(config)
+    cores = shared_cpuset(config)
+    conditions = [f"mode {mode}", f"ceiling {_CONCURRENCY_CEILING}", f"queue {_CONCURRENCY_QUEUE_SIZE}"]
+    if budget:
+        conditions.append(f"shared budget {budget}")
+    if cores:
+        conditions.append(f"cores {cores} shared")
+    if config.load_profile == "burst":
+        conditions.append(f"peak {burst_peak_vus(config)} offered per function")
+    return WriteConcurrencyReport(
+        task_id="",
+        title=f"Concurrency governor — {mode}",
+        data_dir=run_dir,
+        output_dir=run_dir,
+        queue_size=_CONCURRENCY_QUEUE_SIZE,
+        phases=burst_report_phases() if config.load_profile == "burst" else (),
+        subtitle=" · ".join(conditions),
+    )
 
 
 def _prepare_run_directory_argv(
@@ -1001,7 +1273,13 @@ def build_loadtest_plan(
     load_role: ExecutionRole = "loadgen" if dedicated else "stack"
     executor = RoleBoundCommandTaskExecutor(bindings)
     platform_requires = _build_platform_requires(
-        backend, executor, root, additional_modules
+        backend,
+        executor,
+        root,
+        additional_modules,
+        shared_cpuset(config),
+        concurrency_budget(config),
+        config.control_plane_runtime == "native",
     )
     run_k6 = _build_run_k6(
         executor=executor,
@@ -1045,6 +1323,8 @@ def build_loadtest_plan(
         target=target,
         replica_floor=replica_floor,
         prometheus_client=prometheus_client,
+        neighbour=neighbour_name(config) if is_co_tenancy(config) else None,
+        concurrency_report=_build_concurrency_report(config, run_dir),
     )
     prepare_argv = _prepare_run_directory_argv(summary_path, remote_run_dir)
     preflight = _build_preflight(
@@ -1075,7 +1355,11 @@ def build_loadtest_plan(
                 # One sampler slot, and the two never coexist: a concurrency run
                 # pins the replica count, an autoscaling run does not govern
                 # concurrency.
-                watcher=watcher or concurrency_watchers or concurrency_watcher,
+                watcher=_sampler(
+                    config,
+                    run_dir,
+                    watcher or concurrency_watchers or concurrency_watcher,
+                ),
                 initial_replicas=(
                     VerifyInitialAutoscalingReplicas(
                         replica_probe, expected_replicas=replica_floor

@@ -1,0 +1,17 @@
+# The BUDGETED twin of concurrency-burst-cotenancy-adaptive.yaml: same load,
+# same shared cores, same queues, one allocation deciding both limits.
+#
+# The staggered phase is what separates the two modes. While one function sits
+# in its trough its share of the budget is there to be lent, and only a
+# controller that sees both functions can lend it; a per-function controller has
+# no way to know there is anything to take. If that difference is real it should
+# show up as a shorter queue and a shorter wait for whichever function is
+# peaking, not merely as a different limit.
+workflow: loadtest
+backend: container
+concurrencyControl: true
+concurrencyMode: BUDGETED
+loadProfile: burst
+functions:
+  - word-stats-java
+  - word-stats-java-lite

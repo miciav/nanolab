@@ -10,15 +10,31 @@ const FN = __ENV.NANOFAAS_FUNCTION || __ENV.FUNCTION_NAME || 'word-stats-java';
 // concurrency limit set this to 0, which makes in-flight equal the VU count.
 const THINK_SECONDS = Number(__ENV.K6_THINK_SECONDS ?? 0.05);
 
+// The share of requests allowed to fail. Generous by default because scale-from-zero means the
+// first wave hits cold starts; a saturation run raises it further, because shedding load is what
+// that profile is built to do and a run that reports failure for succeeding at its purpose only
+// teaches people to ignore red.
+const MAX_FAILED_RATE = Number(__ENV.K6_MAX_FAILED_RATE ?? 0.30);
+
+// End-to-end p95 budget, when the scenario states one. This is the latency a caller experiences —
+// queue wait included — and so it is NOT the same quantity as the controller's service-time SLO:
+// a governor can hold service time at its target while callers wait behind the limit it set. That
+// difference is the point of checking here rather than trusting the controller's own view.
+const MAX_P95_MS = __ENV.K6_MAX_P95_MS ? Number(__ENV.K6_MAX_P95_MS) : null;
+
+function thresholds() {
+    const limits = { http_req_failed: [`rate<${MAX_FAILED_RATE}`] };
+    if (MAX_P95_MS !== null) {
+        limits.http_req_duration = [`p(95)<${MAX_P95_MS}`];
+    }
+    return limits;
+}
+
 export const options = {
     // Load profile is injected by the workflow via `k6 run --stage ...` (see
     // K6Config in one_vm_loadtest_adapter.py); CLI flags override script
     // options, so it is deliberately NOT duplicated here.
-    thresholds: {
-        // Generous on purpose: scale-from-zero means the first wave of requests
-        // hits cold starts and may time out before replicas come up.
-        http_req_failed: ['rate<0.30'],
-    },
+    thresholds: thresholds(),
 };
 
 const TEXTS = [

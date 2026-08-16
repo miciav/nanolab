@@ -1,0 +1,11 @@
+# Overload on purpose: 200 concurrent offered against a queue of 100 and a limit in the single
+# digits, so the surplus is rejected. Paired with concurrency-saturation-* for the other
+# controller, differing in one field, because "sheds fewer requests" is a comparison and cannot
+# be read off a single run.
+workflow: loadtest
+backend: container
+concurrencyControl: true
+concurrencyMode: BUDGETED
+loadProfile: saturation
+functions:
+  - word-stats-java

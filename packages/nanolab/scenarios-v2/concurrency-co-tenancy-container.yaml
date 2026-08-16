@@ -3,8 +3,16 @@
 #
 # The first function carries the same load for the whole run while the second
 # comes and goes, so any movement in the first one's limit is attributable to
-# its neighbour. Same workload and same runtime family on both sides, so
-# co-tenancy is the only variable.
+# its neighbour.
+#
+# The two functions are NOT the same runtime, and an earlier version of this
+# comment claimed they were. `word-stats-java` is Spring Boot on a JVM using
+# `sdks/java`; `word-stats-java-lite` is a GraalVM native binary using
+# `sdks/java-lite`. Measured, they differ by roughly a factor of two in service
+# time and four in resident memory. So co-tenancy is NOT the only variable here,
+# and an asymmetry between the two sides is not by itself the governor's doing:
+# a controller sizing a limit from Little's law will give a faster function a
+# smaller one because it needs less, not because it was treated differently.
 #
 # This run reports rather than asserts: it exists to find out whether the effect
 # is there, and asserting it beforehand would assume the answer.

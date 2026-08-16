@@ -1,0 +1,12 @@
+# The same load profile as concurrency-cycle-container.yaml, driven by the BUDGETED
+# controller instead of the latency gradient.
+#
+# Paired with that scenario on purpose: whether a controller holds latency or sheds
+# fewer requests is not answerable from a run of one controller alone, so the two
+# differ in exactly one field.
+workflow: loadtest
+backend: container
+concurrencyControl: true
+concurrencyMode: BUDGETED
+functions:
+  - word-stats-java
