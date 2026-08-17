@@ -518,11 +518,6 @@ def load_script_name(config: ScenarioConfig) -> str:
     8 — so the function was never concurrent, the governor had nothing to react
     to, and a think-time override aimed at the other script changed nothing.
     """
-    if config.load_profile == "comparison":
-        # Checked before co-tenancy: this profile also drives two functions, but it
-        # runs without a governor, so `is_co_tenancy` — which reads concurrencyControl —
-        # is false here and would route the run to the single-function script.
-        return "runtime-comparison.js"
     if is_co_tenancy(config):
         # Staggered phases, which one global stage list cannot express, so these
         # scripts carry their own k6 scenarios.
@@ -545,8 +540,9 @@ def _resolve_script_and_summary(
     remote_run_dir: Path | None,
     run_dir: Path,
     tool_root: Path | None,
+    script_name: str | None = None,
 ) -> tuple[Path, Path]:
-    script_name = load_script_name(config)
+    script_name = script_name or load_script_name(config)
     if remote:
         role_target = environment.target("loadgen" if dedicated else "stack")
         home = role_target.remote_home
@@ -761,10 +757,7 @@ def k6_environment(
         # than a property of how hard the generator was told to push.
         env["K6_PEAK_VUS"] = str(burst_peak_vus(config))
         env.pop("K6_MAX_P95_MS", None)
-    if is_co_tenancy(config) or config.load_profile == "comparison":
-        # The comparison profile drives a pair too, but without a governor, so it
-        # is not co-tenancy by that function's definition and would otherwise be
-        # handed a neighbour name of `undefined` by the script's own default.
+    if is_co_tenancy(config):
         env["NANOFAAS_NEIGHBOUR"] = neighbour_name(config)
     return env
 
@@ -803,6 +796,7 @@ def _build_run_k6(
     target: Any,
     stages: tuple[tuple[str, int], ...] | None,
     config: ScenarioConfig,
+    env_overrides: Mapping[str, str] | None = None,
 ) -> K6Task:
     return K6Task(
         executor=executor,
@@ -814,23 +808,27 @@ def _build_run_k6(
             summary_output_path=summary_path,
             stages=tuple(
                 K6Stage(duration=duration, target=count)
+                # `is not None`, not `or`: a caller whose script carries its own k6
+                # scenarios passes an empty tuple to mean "no --stage flags", and
+                # under `or` that empty tuple would fall through to the defaults and
+                # override the scenarios it was trying to leave alone.
                 for duration, count in (
-                    stages
-                    or _default_stages(config)
+                    stages if stages is not None else _default_stages(config)
                 )
             ),
-            env=k6_environment(config, control_plane_url, target.name),
+            env={
+                **k6_environment(config, control_plane_url, target.name),
+                **dict(env_overrides or {}),
+            },
         ),
         remote_dir=_REMOTE_DIR,
     )
 
 
 def _default_stages(config: ScenarioConfig) -> tuple[tuple[str, int], ...]:
-    if config.load_profile == "comparison" or is_co_tenancy(config):
+    if is_co_tenancy(config):
         # None: the phases live in the script, and a --stage flag would override
-        # the scenarios that stagger them. For `comparison` it would do worse than
-        # override them — --stage applies VU counts, and this script's executors
-        # schedule arrival RATES, so the two do not even mean the same thing.
+        # the scenarios that stagger them.
         return ()
     if config.autoscaling:
         return (("10s", 10), ("20s", 20), ("90s", 20), ("10s", 0))
@@ -1258,6 +1256,9 @@ def build_loadtest_plan(
     stages: tuple[tuple[str, int], ...] | None = None,
     prebuilt_control_plane_image: str | None = None,
     prebuilt_function_images: Mapping[str, str] | None = None,
+    script_name: str | None = None,
+    k6_env_overrides: Mapping[str, str] | None = None,
+    container_metrics: bool = False,
 ) -> Workflow:
     """Compile the loadtest scenario into a Sonata workflow.
 
@@ -1267,6 +1268,12 @@ def build_loadtest_plan(
     it. The load itself is one composite, assembled here because it needs the
     k6 runner, the Prometheus client and the run directory, none of which
     belong in the task catalogue.
+
+    The last three arguments exist so a plan built on top of this one can supply
+    its own load shape without adding a case here. Every experiment that needed a
+    different script used to add a branch to `load_script_name`, `_default_stages`
+    and `k6_environment` at once, which put knowledge of each experiment into the
+    code shared by all of them.
     """
     backend = _validate_loadtest(config, environment)
     hpa, replica_floor, scaling_config = _autoscaling_setup(config)
@@ -1293,6 +1300,7 @@ def build_loadtest_plan(
         remote_run_dir=remote_run_dir,
         run_dir=run_dir,
         tool_root=tool_root,
+        script_name=script_name,
     )
     additional_modules = _additional_modules(
         config.autoscaling, hpa, config.concurrency_control
@@ -1307,10 +1315,7 @@ def build_loadtest_plan(
         root=root,
         remote_repo_root=remote_repo_root,
         hpa=hpa,
-        # Only the comparison profile reads them, and they are what it is for:
-        # a natively compiled control plane publishes no JVM memory gauges, so
-        # cAdvisor is the only source that can price all four builds alike.
-        container_metrics=config.load_profile == "comparison",
+        container_metrics=container_metrics,
     )
     load_role: ExecutionRole = "loadgen" if dedicated else "stack"
     executor = RoleBoundCommandTaskExecutor(bindings)
@@ -1332,6 +1337,7 @@ def build_loadtest_plan(
         target=target,
         stages=stages,
         config=config,
+        env_overrides=k6_env_overrides,
     )
     watcher, replica_probe = _build_replica_watcher(
         config=config,

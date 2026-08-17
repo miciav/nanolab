@@ -39,6 +39,10 @@ from nanolab.plans.offload import build_offload_plan
 from nanolab.plans.offload_loadtest import build_offload_loadtest_plan, format_offload_summary
 from nanolab.plans.cli import build_cli_plan
 from nanolab.plans.loadtest import build_loadtest_plan
+from nanolab.plans.runtime_comparison import (
+    build_runtime_comparison_plan,
+    is_runtime_comparison,
+)
 from nanolab.plans.release import (
     ReleaseRequest,
     build_release_request,
@@ -137,7 +141,15 @@ def _workflow(
             repo_root=paths.nanofaas_root,
             environment=environment,
         )
-    return build_loadtest_plan(
+    # The comparison is a load test in every respect the platform cares about, so
+    # it shares the workflow name and the provisioning that goes with it, and only
+    # the plan builder differs.
+    builder = (
+        build_runtime_comparison_plan
+        if is_runtime_comparison(scenario)
+        else build_loadtest_plan
+    )
+    return builder(
         scenario,
         environment,
         bindings,
