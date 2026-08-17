@@ -14,6 +14,7 @@ pay for a fresh k3s and would also destroy the images the prepare phase built.
 
 from __future__ import annotations
 
+import time
 from contextlib import ExitStack
 from pathlib import Path
 
@@ -24,7 +25,10 @@ from sonata_tasks.deployment import LOCAL_REGISTRY
 from sonata_tasks.loadtest.comparison_report import WriteComparisonReport
 from sonata_tasks.execution.bindings import RoleBoundCommandTaskExecutor
 
+from sonata_engine.workflow.context import bind_workflow_sink
+
 from nanolab.cli.execution import build_role_bindings
+from nanolab.cli.progress import ConsoleProgressSink
 from nanolab.comparison.matrix import ComparisonCell, build_matrix, write_manifest
 from nanolab.comparison.prepare import prepare_operations
 from nanolab.config.environment import EnvironmentConfig
@@ -65,6 +69,7 @@ def _run_prepare(
         parallelism=parallelism,
     ):
         typer.echo(f"prepare: {operation.summary}")
+        started = time.monotonic()
         result = executor.run(
             CommandTaskSpec(
                 task_id=operation.operation_id,
@@ -75,9 +80,13 @@ def _run_prepare(
                 remote_dir=None,
             )
         )
+        elapsed = time.monotonic() - started
         if result.status != "passed":
             detail = (result.stderr or result.stdout or "no output").strip()
-            raise RuntimeError(f"{operation.operation_id} failed: {detail}")
+            raise RuntimeError(
+                f"{operation.operation_id} failed after {elapsed:.0f}s: {detail}"
+            )
+        typer.echo(f"prepare: {operation.summary} — done in {elapsed:.0f}s")
 
 
 def cell_scenario(config: ScenarioConfig, cell: ComparisonCell) -> ScenarioConfig:
@@ -151,16 +160,23 @@ def register(app: typer.Typer) -> None:
         # images the prepare phase just built.
         with _provisioning_context(scenario_config, environment_config, paths, True) as _:
             bindings, _fetcher = build_role_bindings(environment_config)
-            _run_prepare(
-                scenario_config,
-                environment_config,
-                variants=selected,
-                repo_root=paths.nanofaas_root,
-                tool_root=paths.tool_root,
-                bindings=bindings,
-                build_memory=native_build_memory,
-                parallelism=native_parallelism,
-            )
+            # SubprocessShell._emit_output forwards every command's output to the
+            # workflow log, but only while a sink is bound. Without this the
+            # prepare phase runs silently: a twenty-minute native compile emits
+            # one line before it starts and nothing until it ends, so "working"
+            # and "hung" look identical from the log — the difference had to be
+            # read off the VM's load average instead.
+            with bind_workflow_sink(ConsoleProgressSink()):
+                _run_prepare(
+                    scenario_config,
+                    environment_config,
+                    variants=selected,
+                    repo_root=paths.nanofaas_root,
+                    tool_root=paths.tool_root,
+                    bindings=bindings,
+                    build_memory=native_build_memory,
+                    parallelism=native_parallelism,
+                )
             for index, cell in enumerate(cells, start=1):
                 typer.echo(f"[{index}/{len(cells)}] {cell.label}")
                 cell_dir = cell.run_dir(root)
