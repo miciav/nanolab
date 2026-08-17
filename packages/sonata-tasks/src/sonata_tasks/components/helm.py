@@ -30,6 +30,7 @@ def control_plane_helm_values(
     metrics_profile: str | None = None,
     sync_queue_admission_enabled: bool = False,
     sync_queue_max_depth: int | None = None,
+    container_metrics: bool = False,
 ) -> dict[str, str]:
     repository, tag = _image_parts(control_plane_image)
     callback_url = f"http://control-plane.{namespace}.svc.cluster.local:8080/v1/internal/executions"  # NOSONAR (S5332): in-cluster service DNS
@@ -76,12 +77,17 @@ def control_plane_helm_values(
         values["prometheus.create"] = "true"
         values["prometheus.service.type"] = "NodePort"
         values["prometheus.service.nodePort"] = str(TWO_VM_PROMETHEUS_NODE_PORT)
+    if container_metrics:
         # What every container cost in memory and CPU, which nothing else records:
         # Prometheus scrapes the control plane's own actuator, so the functions'
-        # footprint was absent from every load-test record, and the control plane
-        # reported only its JVM heap — a number a natively compiled build does not
-        # publish at all. The chart already carries the scrape job and the RBAC for
-        # it; only the switch was missing.
+        # footprint is absent from a run record, and the control plane reports only
+        # its JVM heap — a number a natively compiled build does not publish at all.
+        # The chart already carries the scrape job and the RBAC for it.
+        #
+        # Off by default rather than on for every load test: it adds a kubelet
+        # scrape and the RBAC to reach it, and turning that on underneath runs that
+        # never asked for it would change what they deploy in order to serve a
+        # different experiment. Ask for it where it is read.
         values["prometheus.containerMetrics.enabled"] = "true"
         values["prometheus.containerMetrics.mode"] = "kubelet"
     return values

@@ -572,6 +572,7 @@ def _build_platform_request(
     root: Path,
     remote_repo_root: Path | None,
     hpa: bool,
+    container_metrics: bool = False,
 ) -> PlatformRequest:
     request = PlatformRequest(
         backend=backend,
@@ -597,6 +598,7 @@ def _build_platform_request(
             control_plane_image=request.control_plane_image_reference(),
             expose_node_port=True,
             metrics_profile="advanced",
+            container_metrics=container_metrics,
         )
         if hpa:
             helm_values["hpa-metrics-adapter.enabled"] = "true"
@@ -1305,6 +1307,10 @@ def build_loadtest_plan(
         root=root,
         remote_repo_root=remote_repo_root,
         hpa=hpa,
+        # Only the comparison profile reads them, and they are what it is for:
+        # a natively compiled control plane publishes no JVM memory gauges, so
+        # cAdvisor is the only source that can price all four builds alike.
+        container_metrics=config.load_profile == "comparison",
     )
     load_role: ExecutionRole = "loadgen" if dedicated else "stack"
     executor = RoleBoundCommandTaskExecutor(bindings)

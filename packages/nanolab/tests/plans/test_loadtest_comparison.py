@@ -3,8 +3,13 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
+from pathlib import Path
+
+from sonata_tasks.platform import PlatformFunction
+
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.plans.loadtest import (
+    _build_platform_request,
     _default_stages,
     k6_environment,
     load_script_name,
@@ -46,6 +51,37 @@ def test_comparison_sets_no_latency_threshold() -> None:
     env = k6_environment(_config(), "http://cp:30080", PAIR[0])
 
     assert "K6_MAX_P95_MS" not in env
+
+
+def _helm_values(container_metrics: bool) -> tuple[str, ...]:
+    request = _build_platform_request(
+        backend="k8s",
+        build="docker",
+        functions=(
+            PlatformFunction(
+                name="word-stats-java", image="i:e2e", payload="{}", build_argv=("x",)
+            ),
+        ),
+        additional_modules=(),
+        prebuilt=False,
+        prebuilt_control_plane_image=None,
+        root=Path("/repo"),
+        remote_repo_root=None,
+        hpa=False,
+        container_metrics=container_metrics,
+    )
+    return request.helm_values
+
+
+def test_only_a_run_that_reads_container_metrics_deploys_the_scrape() -> None:
+    """cAdvisor needs a kubelet scrape and RBAC; runs that ignore it should not carry that."""
+    assert any(
+        "prometheus.containerMetrics.enabled=true" in value
+        for value in _helm_values(container_metrics=True)
+    )
+    assert not any(
+        "containerMetrics" in value for value in _helm_values(container_metrics=False)
+    )
 
 
 def test_comparison_requires_exactly_two_functions() -> None:
