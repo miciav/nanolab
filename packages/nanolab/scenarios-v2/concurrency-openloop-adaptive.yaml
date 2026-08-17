@@ -1,0 +1,20 @@
+# The ADAPTIVE_PER_POD baseline under open arrivals.
+#
+# Same load as concurrency-openloop-sojourn.yaml, same shared cores, same queues.
+# Both modes govern one function at a time and neither divides a budget, so the
+# pair isolates the control signal: service time against what the caller waits.
+#
+# This baseline exists because the closed-loop comparison could not separate
+# them. There the number in the system is pinned by the generator, so no limit
+# could move the wait by more than a few percent, and the two modes landed within
+# 2% of each other on end-to-end p95. With arrivals scheduled by the clock the
+# queue grows from demand rather than from how many requests k6 was told to hold
+# open, and the difference between the two signals has room to show.
+workflow: loadtest
+backend: container
+concurrencyControl: true
+concurrencyMode: ADAPTIVE_PER_POD
+loadProfile: openloop
+functions:
+  - word-stats-java
+  - word-stats-java-lite

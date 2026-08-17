@@ -19,6 +19,7 @@ from nanolab.plans.loadtest import (
     _BURST_TOTAL_BUDGET,
     _CONCURRENCY_CEILING,
     _CONCURRENCY_QUEUE_SIZE,
+    _OPEN_LOOP_PEAK_RPS,
     burst_peak_vus,
     compose_control_plane_modules,
     concurrency_budget,
@@ -355,6 +356,41 @@ def test_sojourn_and_adaptive_are_offered_the_same_load() -> None:
     assert burst_peak_vus(SOJOURN_SCENARIO) == burst_peak_vus(ADAPTIVE_BURST_SCENARIO)
     # And no budget is pinned for it, since it has none to divide.
     assert concurrency_budget(SOJOURN_SCENARIO) == ""
+
+
+OPEN_LOOP_SCENARIO = ScenarioConfig.model_validate(
+    {
+        "workflow": "loadtest",
+        "backend": "container",
+        "concurrencyControl": True,
+        "concurrencyMode": "SOJOURN",
+        "loadProfile": "openloop",
+        "functions": ["word-stats-java", "word-stats-java-lite"],
+    }
+)
+
+
+def test_open_arrivals_are_offered_as_a_rate_not_as_held_requests() -> None:
+    """Closed-loop VUs pin the number in the system, so queue depth is VUs minus
+    limit and no controller can move it by more than a few percent — which is why
+    two modes reading different signals landed within 2% of each other. A rate
+    lets the queue grow from demand instead."""
+    env = k6_environment(OPEN_LOOP_SCENARIO, "http://cp:8080", "fn")
+
+    assert env["K6_PEAK_RPS"] == "1800"
+    # The closed-loop knob has no meaning here and must not leak in.
+    assert "K6_PEAK_VUS" not in env
+
+
+def test_the_open_loop_profile_drives_its_own_script() -> None:
+    assert load_script_name(OPEN_LOOP_SCENARIO) == "open-loop.js"
+    assert load_script_name(BURST_SCENARIO) == "co-tenancy-burst.js"
+
+
+def test_the_open_loop_peak_asks_for_more_than_the_pair_can_serve() -> None:
+    """The queue only grows if demand exceeds capacity. Measured saturation on the
+    shared cores was around 1,400 served per second per function."""
+    assert _OPEN_LOOP_PEAK_RPS > 1_400
 
 
 def test_the_control_plane_runtime_defaults_to_the_jvm_build() -> None:

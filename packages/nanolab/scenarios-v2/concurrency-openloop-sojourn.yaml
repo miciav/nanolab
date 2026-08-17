@@ -1,0 +1,26 @@
+# SOJOURN under arrivals that do not wait for the system.
+#
+# The burst profile could not answer the question this mode was built for. It is
+# closed-loop, so each VU holds exactly one request and the number in the system
+# is pinned at the VU count: queue depth is VUs minus limit, and raising the
+# limit from 4 to 8 shortened the queue by 4% and nothing else. Two controllers
+# reading entirely different signals landed within 2% of each other on end-to-end
+# p95 — a property of the harness, not a finding about them.
+#
+# Here arrivals are scheduled by the clock at a peak above measured capacity, so
+# the queue grows because demand exceeded what the functions can serve. The wait
+# becomes something a limit can actually change, which is the only condition
+# under which a sojourn-driven controller can be shown right or wrong.
+#
+# Read `dropped_iterations` in the k6 summary separately from the platform's
+# rejections: dropped iterations are the GENERATOR giving up when its VU pool is
+# exhausted, not the platform refusing work, and adding them together would
+# overstate what the system shed.
+workflow: loadtest
+backend: container
+concurrencyControl: true
+concurrencyMode: SOJOURN
+loadProfile: openloop
+functions:
+  - word-stats-java
+  - word-stats-java-lite

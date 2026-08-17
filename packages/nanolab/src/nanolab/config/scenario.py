@@ -58,7 +58,12 @@ ConcurrencyMode = Literal["ADAPTIVE_PER_POD", "BUDGETED", "SOJOURN"]
 # fill the queue without automatically overflowing it, so queue depth, queue
 # wait and rejections are readings about the controller rather than about how
 # hard the generator was told to push.
-LoadProfile = Literal["cycle", "saturation", "burst"]
+# `openloop` schedules arrivals by the clock instead of holding one request per VU.
+# Under `burst` the number in the system is pinned by the generator, so queue depth is
+# VUs minus limit and no controller can move it by more than a few percent — which is
+# why two controllers reading different signals produced end-to-end p95 within 2% of
+# each other. Only with open arrivals does the wait become something a limit changes.
+LoadProfile = Literal["cycle", "saturation", "burst", "openloop"]
 # Which control-plane build to run. `native` uses a GraalVM image compiled
 # beforehand by `scripts/native-java-image.sh control-plane`, so the run does not
 # rebuild it — measured at rest, the JVM build held 212 MiB against the native

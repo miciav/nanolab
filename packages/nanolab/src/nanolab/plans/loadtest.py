@@ -306,6 +306,10 @@ _CONCURRENCY_QUEUE_SIZE = 100
 # What every BUDGETED function may hold between them. See `concurrency_budget`
 # for why it is neither the per-function ceiling nor the sum of them.
 _BURST_TOTAL_BUDGET = 12
+# The open-loop peak, per function. Measured saturation on the shared cores was around
+# 1,400 requests per second, so this asks for more than the pair can serve: the point of
+# the profile is a queue that grows because demand exceeded capacity.
+_OPEN_LOOP_PEAK_RPS = 1_800
 # The governor only reacts to a function that gets slower under concurrency, and
 # on an unconstrained multi-core host word-stats-java does not: an early run
 # climbed to the ceiling and stayed there, correctly, because eight parallel
@@ -517,7 +521,11 @@ def load_script_name(config: ScenarioConfig) -> str:
     if is_co_tenancy(config):
         # Staggered phases, which one global stage list cannot express, so these
         # scripts carry their own k6 scenarios.
-        return "co-tenancy-burst.js" if config.load_profile == "burst" else "co-tenancy.js"
+        if config.load_profile == "burst":
+            return "co-tenancy-burst.js"
+        if config.load_profile == "openloop":
+            return "open-loop.js"
+        return "co-tenancy.js"
     if config.autoscaling or config.concurrency_control:
         return "autoscaling.js"
     return "two-vm-function-invoke.js"
@@ -730,6 +738,13 @@ def k6_environment(
         # Shedding load is what this profile is for. Holding it to the ordinary failure budget
         # would mark every saturation run red for doing its job.
         env["K6_MAX_FAILED_RATE"] = "0.99"
+        env.pop("K6_MAX_P95_MS", None)
+    if config.load_profile == "openloop":
+        # Arrivals scheduled by the clock, so the peak is a RATE rather than a number of
+        # requests held open. Set from the measured saturation point — about 1,400 served
+        # per second per function on these cores — so the peak genuinely exceeds capacity
+        # and the queue has to grow, which is the condition the closed loop could not create.
+        env["K6_PEAK_RPS"] = str(_OPEN_LOOP_PEAK_RPS)
         env.pop("K6_MAX_P95_MS", None)
     if config.load_profile == "burst":
         # Closed-loop VUs each hold one request, in service or queued, so the peak
