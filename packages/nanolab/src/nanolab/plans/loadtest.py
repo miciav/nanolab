@@ -518,6 +518,11 @@ def load_script_name(config: ScenarioConfig) -> str:
     8 — so the function was never concurrent, the governor had nothing to react
     to, and a think-time override aimed at the other script changed nothing.
     """
+    if config.load_profile == "comparison":
+        # Checked before co-tenancy: this profile also drives two functions, but it
+        # runs without a governor, so `is_co_tenancy` — which reads concurrencyControl —
+        # is false here and would route the run to the single-function script.
+        return "runtime-comparison.js"
     if is_co_tenancy(config):
         # Staggered phases, which one global stage list cannot express, so these
         # scripts carry their own k6 scenarios.
@@ -754,7 +759,10 @@ def k6_environment(
         # than a property of how hard the generator was told to push.
         env["K6_PEAK_VUS"] = str(burst_peak_vus(config))
         env.pop("K6_MAX_P95_MS", None)
-    if is_co_tenancy(config):
+    if is_co_tenancy(config) or config.load_profile == "comparison":
+        # The comparison profile drives a pair too, but without a governor, so it
+        # is not co-tenancy by that function's definition and would otherwise be
+        # handed a neighbour name of `undefined` by the script's own default.
         env["NANOFAAS_NEIGHBOUR"] = neighbour_name(config)
     return env
 
@@ -816,9 +824,11 @@ def _build_run_k6(
 
 
 def _default_stages(config: ScenarioConfig) -> tuple[tuple[str, int], ...]:
-    if is_co_tenancy(config):
+    if config.load_profile == "comparison" or is_co_tenancy(config):
         # None: the phases live in the script, and a --stage flag would override
-        # the scenarios that stagger them.
+        # the scenarios that stagger them. For `comparison` it would do worse than
+        # override them — --stage applies VU counts, and this script's executors
+        # schedule arrival RATES, so the two do not even mean the same thing.
         return ()
     if config.autoscaling:
         return (("10s", 10), ("20s", 20), ("90s", 20), ("10s", 0))

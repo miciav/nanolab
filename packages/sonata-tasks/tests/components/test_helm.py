@@ -87,6 +87,25 @@ def test_loadtest_helm_values_allow_cold_start_queueing() -> None:
     assert _extra_env(loadtest, "SYNC_QUEUE_ADMISSION_ENABLED") == "false"
 
 
+def test_loadtest_helm_values_enable_container_metrics() -> None:
+    """Without this the run records no per-container CPU or memory at all.
+
+    A natively compiled control plane publishes no JVM memory gauges, so the
+    actuator scrape cannot answer "what did this build cost" for the very
+    comparison the load test exists to make. cAdvisor is runtime-agnostic.
+    """
+    regular = helm_mod.control_plane_helm_values(
+        namespace="ns", control_plane_image="control:latest"
+    )
+    loadtest = helm_mod.control_plane_helm_values(
+        namespace="ns", control_plane_image="control:latest", expose_node_port=True
+    )
+
+    assert "prometheus.containerMetrics.enabled" not in regular
+    assert loadtest["prometheus.containerMetrics.enabled"] == "true"
+    assert loadtest["prometheus.containerMetrics.mode"] == "kubelet"
+
+
 def test_helm_values_can_enable_sync_queue_admission_for_validation() -> None:
     values = helm_mod.control_plane_helm_values(
         namespace="ns",

@@ -63,7 +63,12 @@ ConcurrencyMode = Literal["ADAPTIVE_PER_POD", "BUDGETED", "SOJOURN"]
 # VUs minus limit and no controller can move it by more than a few percent — which is
 # why two controllers reading different signals produced end-to-end p95 within 2% of
 # each other. Only with open arrivals does the wait become something a limit changes.
-LoadProfile = Literal["cycle", "saturation", "burst", "openloop"]
+# `comparison` is the profile for telling control-plane BUILDS apart rather than
+# controllers: open arrivals shaped as warm/climb/hold/spike/recover/climb/spike/drain,
+# driving two functions at once. A flat rate is the one regime where the builds are
+# hardest to distinguish — a JIT reaches its peak and stays there, and a native image
+# starts at its own — so the differences live in the transitions.
+LoadProfile = Literal["cycle", "saturation", "burst", "openloop", "comparison"]
 # Which control-plane build to run. `native` uses a GraalVM image compiled
 # beforehand by `scripts/native-java-image.sh control-plane`, so the run does not
 # rebuild it — measured at rest, the JVM build held 212 MiB against the native
@@ -128,6 +133,16 @@ class ScenarioConfig(BaseModel):
             raise ValueError("concurrencyMode requires concurrencyControl=true")
         if self.concurrency_control and self.autoscaling:
             raise ValueError("concurrencyControl cannot run together with autoscaling")
+        if self.load_profile == "comparison":
+            # The script drives a named pair, and holds the functions fixed so the
+            # control-plane build is the only thing that varies between runs.
+            if len(self.functions) != 2:
+                raise ValueError("the comparison profile drives exactly two functions")
+            if self.concurrency_control or self.autoscaling:
+                raise ValueError(
+                    "the comparison profile compares control-plane builds; a governor "
+                    "or an autoscaler would move the limits underneath that comparison"
+                )
         if self.autoscaling_strategy == "HPA" and not self.autoscaling:
             raise ValueError("HPA autoscaling requires autoscaling=true")
         if self.autoscaling_strategy == "HPA" and self.backend == "container":

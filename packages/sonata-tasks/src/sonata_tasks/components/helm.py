@@ -76,6 +76,14 @@ def control_plane_helm_values(
         values["prometheus.create"] = "true"
         values["prometheus.service.type"] = "NodePort"
         values["prometheus.service.nodePort"] = str(TWO_VM_PROMETHEUS_NODE_PORT)
+        # What every container cost in memory and CPU, which nothing else records:
+        # Prometheus scrapes the control plane's own actuator, so the functions'
+        # footprint was absent from every load-test record, and the control plane
+        # reported only its JVM heap — a number a natively compiled build does not
+        # publish at all. The chart already carries the scrape job and the RBAC for
+        # it; only the switch was missing.
+        values["prometheus.containerMetrics.enabled"] = "true"
+        values["prometheus.containerMetrics.mode"] = "kubelet"
     return values
 
 
