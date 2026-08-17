@@ -10,6 +10,7 @@ from nanolab.plans import loadtest as loadtest_mod
 from nanolab.plans.runtime_comparison import (
     NO_STAGES,
     SCRIPT_NAME,
+    _variant_image,
     build_runtime_comparison_plan,
     comparison_k6_environment,
     is_runtime_comparison,
@@ -73,6 +74,37 @@ def test_refuses_a_governor_or_an_autoscaler() -> None:
         _config(concurrencyControl=True)
     with pytest.raises(ValidationError, match="compares control-plane builds"):
         _config(autoscaling=True)
+
+
+def test_the_variant_names_an_image_in_the_vm_local_registry() -> None:
+    """k3s pulls from the VM registry; a locally tagged image is invisible to containerd."""
+    assert (
+        _variant_image(_config(controlPlaneVariant="native-o3-g1"))
+        == "127.0.0.1:5000/nanofaas/control-plane:native-o3-g1"
+    )
+    assert _variant_image(_config()) is None
+
+
+def test_an_unknown_variant_is_rejected_with_the_alternatives() -> None:
+    with pytest.raises(ValueError, match="Available: jvm"):
+        _variant_image(_config(controlPlaneVariant="native-o4"))
+
+
+def test_a_variant_belongs_only_to_the_comparison_profile() -> None:
+    with pytest.raises(ValidationError, match="no other profile builds them"):
+        _config(loadProfile="cycle", controlPlaneVariant="jvm")
+
+
+def test_a_run_must_say_which_build_it_measures() -> None:
+    with pytest.raises(ValueError, match="needs a control-plane build to measure"):
+        build_runtime_comparison_plan(
+            _config(),
+            environment=None,  # type: ignore[arg-type]
+            bindings=None,  # type: ignore[arg-type]
+            control_plane_url="http://cp:30080",
+            prometheus_client=None,  # type: ignore[arg-type]
+            run_dir=None,  # type: ignore[arg-type]
+        )
 
 
 def test_the_shared_load_test_knows_nothing_about_this_experiment() -> None:

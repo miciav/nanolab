@@ -55,12 +55,18 @@ def _sonata_workflow(*, fails: str | None = None) -> SonataWorkflow:
     return workflow
 
 
-def test_top_level_exposes_only_six_product_commands() -> None:
+def test_top_level_exposes_only_the_intended_product_commands() -> None:
+    """The surface is a deliberate list, not whatever happens to be registered.
+
+    `compare` earns its place by being the one thing `run` cannot express: it
+    holds one cluster across many runs and varies the control-plane build between
+    them, where `run` compiles a single scenario once.
+    """
     result = CliRunner().invoke(app, ["--help"])
 
     assert result.exit_code == 0
     commands = {command.name for command in app.registered_commands}
-    assert commands == {"run", "plan", "list", "inspect", "doctor", "tui"}
+    assert commands == {"run", "plan", "list", "inspect", "doctor", "tui", "compare"}
 
 
 def test_list_does_not_require_nanofaas_root(monkeypatch: pytest.MonkeyPatch) -> None:

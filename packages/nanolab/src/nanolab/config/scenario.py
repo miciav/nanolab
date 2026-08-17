@@ -115,6 +115,14 @@ class ScenarioConfig(BaseModel):
     )
     autoscaling_strategy: AutoscalingStrategy = Field(default="INTERNAL", alias="autoscalingStrategy")
     hpa_scale_to_zero: bool = Field(default=False, alias="hpaScaleToZero")
+    # Which control-plane build this run measures. A plain string rather than a
+    # Literal: the catalogue of builds lives with the code that compiles them, and
+    # importing it here would make the scenario schema depend on the image layer.
+    # The name is checked against that catalogue by the plan, which can also say
+    # what the alternatives are.
+    control_plane_variant: str | None = Field(
+        default=None, alias="controlPlaneVariant"
+    )
     release: ReleaseConfig | None = None
 
     @model_validator(mode="after")
@@ -143,6 +151,11 @@ class ScenarioConfig(BaseModel):
                     "the comparison profile compares control-plane builds; a governor "
                     "or an autoscaler would move the limits underneath that comparison"
                 )
+        elif self.control_plane_variant is not None:
+            raise ValueError(
+                "controlPlaneVariant selects one of the builds the comparison profile "
+                "compares; no other profile builds them"
+            )
         if self.autoscaling_strategy == "HPA" and not self.autoscaling:
             raise ValueError("HPA autoscaling requires autoscaling=true")
         if self.autoscaling_strategy == "HPA" and self.backend == "container":

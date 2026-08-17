@@ -24,11 +24,14 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from sonata_engine import Workflow
+from sonata_tasks.deployment import LOCAL_REGISTRY
 from sonata_tasks.execution.bindings import RoleBindings
 from sonata_tasks.loadtest.ports import PrometheusClient, RemoteFileFetcher
 
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
+from nanolab.images.control_plane_variants import resolve_variants
+from nanolab.plans.functions import resolve_function
 from nanolab.plans.loadtest import build_loadtest_plan
 
 SCRIPT_NAME = "runtime-comparison.js"
@@ -56,6 +59,48 @@ def comparison_k6_environment(config: ScenarioConfig) -> Mapping[str, str]:
     return {"NANOFAAS_NEIGHBOUR": config.functions[1]}
 
 
+def _variant_image(config: ScenarioConfig) -> str | None:
+    """The image for the build this run measures, taken from the VM-local registry.
+
+    Passing it as `prebuilt_control_plane_image` is what makes the comparison
+    honest rather than merely convenient: `platform.py` skips its own build
+    entirely when an image is supplied, so a run measures the artefact the matrix
+    compiled and cannot silently rebuild a different one under the same name.
+    """
+    if config.control_plane_variant is None:
+        return None
+    variant = resolve_variants((config.control_plane_variant,))[0]
+    return variant.image(LOCAL_REGISTRY)
+
+
+def pinned_functions(
+    config: ScenarioConfig,
+    *,
+    repo_root: Path | None,
+    tool_root: Path | None,
+) -> dict[str, str]:
+    """The function images a cell uses, named exactly as the prepare phase built them.
+
+    Resolved rather than invented: these are the same tags `platform.py` would
+    have produced for itself. Declaring them as prebuilt changes nothing about
+    which image runs and everything about when it is built — the platform half
+    skips its build tasks, so no cell compiles anything.
+
+    That matters more than the time it saves. `build_images` gates the functions
+    and the control plane together, so a cell that was allowed to build its own
+    control-plane variant would rebuild the functions too, twelve times over an
+    hour, and base-image drift between the first cell and the last would arrive
+    as a difference between variants.
+    """
+    return {
+        function.key: function.image
+        for function in (
+            resolve_function(config, key, source_root=repo_root, tool_root=tool_root)
+            for key in config.functions
+        )
+    }
+
+
 def build_runtime_comparison_plan(
     config: ScenarioConfig,
     environment: EnvironmentConfig,
@@ -75,6 +120,12 @@ def build_runtime_comparison_plan(
     """Compile one variant's run of the comparison into a Sonata workflow."""
     if not is_runtime_comparison(config):
         raise ValueError("runtime-comparison plan requires loadProfile: comparison")
+    image = prebuilt_control_plane_image or _variant_image(config)
+    if image is None:
+        raise ValueError(
+            "a comparison run needs a control-plane build to measure: set "
+            "controlPlaneVariant, or pass a prebuilt image"
+        )
     return build_loadtest_plan(
         config,
         environment,
@@ -88,8 +139,12 @@ def build_runtime_comparison_plan(
         repo_root=repo_root,
         tool_root=tool_root,
         stages=NO_STAGES,
-        prebuilt_control_plane_image=prebuilt_control_plane_image,
-        prebuilt_function_images=prebuilt_function_images,
+        prebuilt_control_plane_image=image,
+        prebuilt_function_images=(
+            prebuilt_function_images
+            if prebuilt_function_images is not None
+            else pinned_functions(config, repo_root=repo_root, tool_root=tool_root)
+        ),
         script_name=SCRIPT_NAME,
         k6_env_overrides=comparison_k6_environment(config),
         # The only profile that needs them, and it cannot be read without them:
