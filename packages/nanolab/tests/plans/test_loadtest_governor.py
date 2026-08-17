@@ -24,6 +24,7 @@ from nanolab.plans.loadtest import (
     concurrency_budget,
     _additional_modules,
     _concurrency_control_setup,
+    _controller_settings,
     _default_stages,
     build_loadtest_plan,
     is_co_tenancy,
@@ -321,6 +322,39 @@ def test_the_budget_is_only_pinned_where_it_can_bind() -> None:
     # ADAPTIVE never consults it, and a single function has nobody to share with.
     assert concurrency_budget(CO_TENANCY_SCENARIO) == ""
     assert concurrency_budget(CONCURRENCY_SCENARIO) == ""
+
+
+SOJOURN_SCENARIO = ScenarioConfig.model_validate(
+    {
+        "workflow": "loadtest",
+        "backend": "container",
+        "concurrencyControl": True,
+        "concurrencyMode": "SOJOURN",
+        "loadProfile": "burst",
+        "functions": ["word-stats-java", "word-stats-java-lite"],
+    }
+)
+
+
+def test_sojourn_is_held_to_the_promise_the_load_generator_checks() -> None:
+    """For this mode `targetLatencyMs` is end-to-end, not service time. Reusing the
+    service-time SLO would hold it to a number it can never reach — the wait alone
+    was measured at four times it — so it would search continuously and never rest."""
+    settings = _controller_settings(SOJOURN_SCENARIO)
+
+    assert settings["mode"] == "SOJOURN"
+    assert settings["targetLatencyMs"] == 50
+    # No weight and no gradient thresholds: it divides no budget and steps towards no target.
+    assert "weight" not in settings
+    assert "upscaleCooldownMs" not in settings
+
+
+def test_sojourn_and_adaptive_are_offered_the_same_load() -> None:
+    """Both govern one function at a time, so the pair isolates the control signal.
+    A peak that moved with the mode would confound it with the load."""
+    assert burst_peak_vus(SOJOURN_SCENARIO) == burst_peak_vus(ADAPTIVE_BURST_SCENARIO)
+    # And no budget is pinned for it, since it has none to divide.
+    assert concurrency_budget(SOJOURN_SCENARIO) == ""
 
 
 def test_the_control_plane_runtime_defaults_to_the_jvm_build() -> None:

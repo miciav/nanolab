@@ -355,6 +355,17 @@ _END_TO_END_P95_BUDGET_MS = 50
 
 
 def _controller_settings(config: ScenarioConfig) -> dict[str, object]:
+    if config.concurrency_mode == "SOJOURN":
+        # Held to the SAME promise the load generator checks. For this mode `targetLatencyMs` is
+        # end-to-end rather than service time, so reusing the service-time SLO would hold the
+        # controller to a number it can never reach — the wait alone was measured at four times it
+        # — and it would search continuously instead of ever resting.
+        return {
+            "mode": "SOJOURN",
+            "minTargetInFlightPerPod": 1,
+            "maxTargetInFlightPerPod": _CONCURRENCY_CEILING,
+            "targetLatencyMs": _END_TO_END_P95_BUDGET_MS,
+        }
     if config.concurrency_mode == "BUDGETED":
         # No per-replica target and no gradient thresholds: this controller is told what the
         # function must deliver, not how its limit should step.

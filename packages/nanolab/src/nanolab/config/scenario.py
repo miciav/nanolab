@@ -50,7 +50,10 @@ class ReleaseConfig(BaseModel):
     error_rate_max: float = Field(default=0.30, ge=0, le=1)
 
 
-ConcurrencyMode = Literal["ADAPTIVE_PER_POD", "BUDGETED"]
+# SOJOURN decides from what the caller experiences — queue wait plus service — where the other
+# two decide from service time alone. Comparing it against ADAPTIVE_PER_POD isolates the signal,
+# since both govern one function at a time and neither divides a budget.
+ConcurrencyMode = Literal["ADAPTIVE_PER_POD", "BUDGETED", "SOJOURN"]
 # `burst` is the two-function profile: variable closed-loop load calibrated to
 # fill the queue without automatically overflowing it, so queue depth, queue
 # wait and rejections are readings about the controller rather than about how

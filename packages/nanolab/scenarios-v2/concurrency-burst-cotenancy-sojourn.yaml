@@ -1,0 +1,22 @@
+# The SOJOURN twin of concurrency-burst-cotenancy-adaptive.yaml.
+#
+# Same load, same shared cores, same queues, same per-function structure — the two
+# modes both govern one function at a time and neither divides a budget. The only
+# difference is the signal each decides from: ADAPTIVE_PER_POD reads service time,
+# SOJOURN reads what the caller experiences, queue wait included.
+#
+# That makes this pair the clean A/B for nanofaas#195. The comparison against the
+# BUDGETED scenarios would confound the signal with the budget.
+#
+# The number to beat, from the ADAPTIVE run at this peak: same throughput, same
+# rejections, LOWER end-to-end p95. Service time is expected to be worse, and
+# that is not a defect — it is the trade this mode exists to make, since the wait
+# it removes is larger than the service time it adds.
+workflow: loadtest
+backend: container
+concurrencyControl: true
+concurrencyMode: SOJOURN
+loadProfile: burst
+functions:
+  - word-stats-java
+  - word-stats-java-lite
