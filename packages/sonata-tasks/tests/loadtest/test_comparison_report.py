@@ -188,3 +188,24 @@ def test_the_page_is_self_contained(tmp_path: Path) -> None:
 def test_an_empty_matrix_says_so(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError, match="no comparison manifest"):
         WriteComparisonReport(task_id="", title="Comparison", root=tmp_path).run()
+
+
+def test_a_single_run_per_build_yields_no_verdict(tmp_path: Path) -> None:
+    """With one run min equals max, so the overlap test would always claim separation.
+
+    That turns one sample into a confident winner, which is the opposite of what
+    the spread is here to prevent.
+    """
+    _matrix(
+        tmp_path,
+        {
+            "jvm": [(400.0, 100.0, [500.0])],
+            "native": [(900.0, 20.0, [40.0])],
+        },
+    )
+    cells = [c for v in ("jvm", "native") for r in (1,) if (c := read_cell(tmp_path, v, r))]
+
+    verdict = _verdict(cells, {"jvm": "JVM", "native": "NATIVE"}, "rps", lower_is_better=False)
+
+    assert "single run" in verdict
+    assert "own spread" not in verdict

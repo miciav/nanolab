@@ -165,12 +165,23 @@ def _verdict(cells: list[CellData], labels: dict[str, str], metric: str, lower_i
     did not separate them, and saying so is the finding.
     """
     ranked = []
+    single_run = False
     for variant in labels:
         values = [getattr(cell, metric) for cell in cells if cell.variant == variant]
         if values:
+            single_run = single_run or len(values) == 1
             ranked.append((variant, min(values), max(values), statistics.fmean(values)))
     if len(ranked) < 2:
         return ""
+    if single_run:
+        # With one run per build the min equals the max, so the overlap test below
+        # always reports a clean separation — it would turn a single sample into a
+        # confident verdict. A build compared once has not been compared.
+        return (
+            "<p class='verdict warn'>At least one build has a single run, so nothing "
+            "here separates a difference between builds from a difference between "
+            "runs. Read the numbers, not a winner.</p>"
+        )
     ranked.sort(key=lambda row: row[3], reverse=not lower_is_better)
     best, runner_up = ranked[0], ranked[1]
     overlaps = not (best[2] < runner_up[1] or runner_up[2] < best[1])
