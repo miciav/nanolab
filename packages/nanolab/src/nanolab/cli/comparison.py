@@ -47,6 +47,8 @@ def _run_prepare(
     repo_root: Path,
     tool_root: Path | None,
     bindings: object,
+    build_memory: str | None,
+    parallelism: int | None,
 ) -> None:
     """Compile the functions and every control-plane build, on the VM, once."""
     functions = tuple(
@@ -59,6 +61,8 @@ def _run_prepare(
         variants=resolve_variants(variants),
         registry=LOCAL_REGISTRY,
         modules=COMPARISON_MODULES,
+        build_memory=build_memory,
+        parallelism=parallelism,
     ):
         typer.echo(f"prepare: {operation.summary}")
         result = executor.run(
@@ -101,6 +105,20 @@ def register(app: typer.Typer) -> None:
             help="Comma-separated control-plane builds to compare.",
         ),
         run_dir: Path | None = typer.Option(None, "--run-dir"),
+        native_build_memory: str | None = typer.Option(
+            None,
+            "--native-build-memory",
+            help=(
+                "Heap for the native-image BUILDER, e.g. 6g. It sizes its own heap "
+                "from the machine's total memory and cannot see what else is "
+                "running, so on a shared VM it gets OOM-killed. Unset means unbounded."
+            ),
+        ),
+        native_parallelism: int | None = typer.Option(
+            None,
+            "--native-parallelism",
+            help="native-image workers. Fewer cost wall-clock and save peak memory.",
+        ),
     ) -> None:
         """Compare control-plane builds under one varying load."""
         from nanolab.cli.product import (  # local: the router imports this module
@@ -140,6 +158,8 @@ def register(app: typer.Typer) -> None:
                 repo_root=paths.nanofaas_root,
                 tool_root=paths.tool_root,
                 bindings=bindings,
+                build_memory=native_build_memory,
+                parallelism=native_parallelism,
             )
             for index, cell in enumerate(cells, start=1):
                 typer.echo(f"[{index}/{len(cells)}] {cell.label}")

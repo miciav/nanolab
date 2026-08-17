@@ -81,3 +81,47 @@ def test_pinned_images_are_keyed_by_catalogue_key() -> None:
         "word-stats-java": JAVA.image,
         "word-stats-javascript": JS.image,
     }
+
+
+def test_native_builds_can_be_told_their_memory_budget() -> None:
+    """Unbounded, native-image sizes its heap from the whole machine.
+
+    On a 12GB VM already holding k3s, a control plane and Prometheus it was
+    OOM-killed after 9m50s, reporting only "exit 137".
+    """
+    ops = prepare_operations(
+        functions=[],
+        variants=resolve_variants(("native-o3",)),
+        registry=REGISTRY,
+        modules=MODULES,
+        build_memory="6g",
+        parallelism=2,
+    )
+
+    assert ops[0].env["NATIVE_BUILD_MEMORY"] == "6g"
+    assert ops[0].env["NATIVE_PARALLELISM"] == "2"
+
+
+def test_the_budget_is_absent_when_not_asked_for() -> None:
+    """A bound helps on a shared VM and only costs wall-clock on a dedicated one."""
+    ops = prepare_operations(
+        functions=[],
+        variants=resolve_variants(("native-o3",)),
+        registry=REGISTRY,
+        modules=MODULES,
+    )
+
+    assert "NATIVE_BUILD_MEMORY" not in ops[0].env
+
+
+def test_the_jvm_variant_ignores_a_native_budget() -> None:
+    """javac is not native-image; passing it the flag would only confuse a reader."""
+    ops = prepare_operations(
+        functions=[],
+        variants=resolve_variants(("jvm",)),
+        registry=REGISTRY,
+        modules=MODULES,
+        build_memory="6g",
+    )
+
+    assert all("NATIVE_BUILD_MEMORY" not in op.env for op in ops)

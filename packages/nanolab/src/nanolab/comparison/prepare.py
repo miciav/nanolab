@@ -72,6 +72,8 @@ def prepare_operations(
     variants: Sequence[ControlPlaneVariant],
     registry: str,
     modules: str,
+    build_memory: str | None = None,
+    parallelism: int | None = None,
 ) -> tuple[RemoteCommandOperation, ...]:
     """The whole prepare phase, functions first.
 
@@ -82,7 +84,13 @@ def prepare_operations(
     operations = list(function_build_operations(functions))
     for variant in variants:
         operations.extend(
-            build_operations(variant, registry=registry, modules=modules)
+            build_operations(
+                variant,
+                registry=registry,
+                modules=modules,
+                build_memory=build_memory,
+                parallelism=parallelism,
+            )
         )
     return tuple(operations)
 

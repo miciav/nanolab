@@ -109,6 +109,8 @@ def build_operations(
     *,
     registry: str,
     modules: str,
+    build_memory: str | None = None,
+    parallelism: int | None = None,
 ) -> tuple[RemoteCommandOperation, ...]:
     """Commands that produce this variant's image on the VM and publish it.
 
@@ -152,12 +154,22 @@ def build_operations(
     # distribution from the environment, and switches to Oracle GraalVM by itself
     # when G1 is asked for: Community rejects --gc=G1 at build time rather than
     # falling back, which is the behaviour worth keeping.
+    #
+    # The memory bound is for the BUILDER. native-image sizes its own heap from
+    # the machine's total memory and cannot see what else is running: on a 12GB
+    # VM already holding k3s, a control plane and Prometheus it was OOM-killed
+    # after 9m50s, reporting only "exit 137".
+    limits: dict[str, str] = {}
+    if build_memory:
+        limits["NATIVE_BUILD_MEMORY"] = build_memory
+    if parallelism:
+        limits["NATIVE_PARALLELISM"] = str(parallelism)
     return (
         RemoteCommandOperation(
             operation_id=f"variant.{variant.key}.image",
             summary=f"Compile native image for {variant.label}",
             argv=("./scripts/native-java-image.sh", "control-plane", image),
-            env=_env(CONTROL_PLANE_MODULES=modules, **dict(variant.build_env)),
+            env=_env(CONTROL_PLANE_MODULES=modules, **dict(variant.build_env), **limits),
             execution_target="vm",
         ),
         _push(variant, image),
