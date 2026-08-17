@@ -21,6 +21,7 @@ import typer
 
 from sonata_tasks.tasks.models import CommandTaskSpec
 from sonata_tasks.deployment import LOCAL_REGISTRY
+from sonata_tasks.loadtest.comparison_report import WriteComparisonReport
 from sonata_tasks.execution.bindings import RoleBoundCommandTaskExecutor
 
 from nanolab.cli.execution import build_role_bindings
@@ -177,4 +178,14 @@ def register(app: typer.Typer) -> None:
                     )
                 finally:
                     lifetime.close()
+        # Written after the cells, outside the provisioning context: the report
+        # reads the run directories and nothing else, so it survives a cluster
+        # that has already gone away — and a matrix interrupted partway through
+        # still renders from whatever cells did finish.
+        report = WriteComparisonReport(
+            task_id="",
+            title="Control-plane build comparison",
+            root=root,
+        ).run()
         typer.echo(f"matrix complete: {root}")
+        typer.echo(f"report: {report}")

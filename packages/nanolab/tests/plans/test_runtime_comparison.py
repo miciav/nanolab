@@ -11,6 +11,7 @@ from nanolab.plans.runtime_comparison import (
     NO_STAGES,
     SCRIPT_NAME,
     _variant_image,
+    container_queries,
     build_runtime_comparison_plan,
     comparison_k6_environment,
     is_runtime_comparison,
@@ -105,6 +106,38 @@ def test_a_run_must_say_which_build_it_measures() -> None:
             prometheus_client=None,  # type: ignore[arg-type]
             run_dir=None,  # type: ignore[arg-type]
         )
+
+
+def test_container_cost_is_queried_for_the_control_plane_and_every_function() -> None:
+    """Enabling the scrape is not enough: the snapshot records only what it asks for.
+
+    The default query list asks the control plane's actuator for
+    `jvm_heap_used_bytes`, which three of the four builds do not publish.
+    """
+    names = [q.name for q in container_queries(_config())]
+
+    assert "container_memory_bytes@control-plane" in names
+    assert "container_memory_bytes@word-stats-java" in names
+    assert "container_memory_bytes@word-stats-javascript" in names
+    assert len(names) == 6
+
+
+def test_cpu_is_a_rate_not_a_counter() -> None:
+    """A counter only rises, so charting it says nothing about when the work happened."""
+    cpu = next(q for q in container_queries(_config()) if q.name.startswith("container_cpu"))
+
+    assert cpu.expr.startswith("rate(container_cpu_usage_seconds_total")
+    assert "[30s]" in cpu.expr
+
+
+def test_functions_are_separated_by_pod_prefix() -> None:
+    """Every function container is named `function`; only the pod tells them apart."""
+    java = next(
+        q for q in container_queries(_config()) if q.name == "container_memory_bytes@word-stats-java"
+    )
+
+    assert 'container="function"' in java.expr
+    assert 'pod=~"fn-word-stats-java-.*"' in java.expr
 
 
 def test_the_shared_load_test_knows_nothing_about_this_experiment() -> None:

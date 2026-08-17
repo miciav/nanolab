@@ -20,12 +20,14 @@ since `platform.py` skips its own build entirely when an image is supplied.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from pathlib import Path
 
 from sonata_engine import Workflow
-from sonata_tasks.deployment import LOCAL_REGISTRY
+from sonata_tasks.deployment import DEFAULT_NAMESPACE, LOCAL_REGISTRY
 from sonata_tasks.execution.bindings import RoleBindings
+from sonata_tasks.loadtest.models import PrometheusQuery
 from sonata_tasks.loadtest.ports import PrometheusClient, RemoteFileFetcher
 
 from nanolab.config.environment import EnvironmentConfig
@@ -57,6 +59,51 @@ def comparison_k6_environment(config: ScenarioConfig) -> Mapping[str, str]:
     for — and the run would silently load a function that does not exist.
     """
     return {"NANOFAAS_NEIGHBOUR": config.functions[1]}
+
+
+def container_queries(config: ScenarioConfig) -> tuple[PrometheusQuery, ...]:
+    """What each container cost, from cAdvisor, for every pod in the run.
+
+    Enabling the scrape in the chart is not enough — the snapshot only records
+    the queries it is given, and the default list asks the control plane's own
+    actuator for `jvm_heap_used_bytes`. That metric does not exist on three of
+    the four builds being compared, and a heap gauge would be the wrong answer
+    anyway: what decides whether a build fits on a node is its resident set,
+    which on a JVM also holds class metadata, JIT-compiled code and thread
+    stacks. Measured here, a JVM control plane reporting a small heap held
+    1002 MiB.
+
+    CPU as a rate over 30s, not a counter: the counter only ever rises, so a
+    chart of it says nothing about when the work happened.
+    """
+    namespace = json.dumps(DEFAULT_NAMESPACE)
+    queries = [
+        PrometheusQuery(
+            "container_memory_bytes@control-plane",
+            f'container_memory_working_set_bytes{{namespace={namespace},container="control-plane"}}',
+        ),
+        PrometheusQuery(
+            "container_cpu_cores@control-plane",
+            f'rate(container_cpu_usage_seconds_total{{namespace={namespace},container="control-plane"}}[30s])',
+        ),
+    ]
+    for name in config.functions:
+        # Function containers are all named `function` by the deployment builder,
+        # so the pod prefix is what separates one function from another.
+        selector = f'namespace={namespace},container="function",pod=~"fn-{name}-.*"'
+        queries.extend(
+            (
+                PrometheusQuery(
+                    f"container_memory_bytes@{name}",
+                    f"container_memory_working_set_bytes{{{selector}}}",
+                ),
+                PrometheusQuery(
+                    f"container_cpu_cores@{name}",
+                    f"rate(container_cpu_usage_seconds_total{{{selector}}}[30s])",
+                ),
+            )
+        )
+    return tuple(queries)
 
 
 def _variant_image(config: ScenarioConfig) -> str | None:
@@ -151,4 +198,5 @@ def build_runtime_comparison_plan(
         # a natively compiled control plane publishes no JVM memory gauges, so
         # cAdvisor is the one source that prices every build on the same terms.
         container_metrics=True,
+        extra_prometheus_queries=container_queries(config),
     )

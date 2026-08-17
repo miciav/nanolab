@@ -104,9 +104,14 @@ function invoke(functionName) {
             tags: { fn: functionName },
         },
     );
+    // One check, not two. Two mutually exclusive ones ('served' / 'refused')
+    // make the checks metric read 50% by construction — exactly one fails on
+    // every request — which hides a real collapse behind a number that never
+    // moves. Shedding under the peak is a legitimate answer, so what is checked
+    // here is that the platform answered at all; `http_req_failed` and the
+    // control plane's own rejection counters say how it answered.
     check(response, {
-        'served': (r) => r.status === 200,
-        'refused': (r) => r.status === 429 || r.status === 503,
+        'answered': (r) => r.status === 200 || r.status === 429 || r.status === 503,
     });
 }
 

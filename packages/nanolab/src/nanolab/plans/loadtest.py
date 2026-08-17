@@ -948,6 +948,7 @@ def _build_steps_after(
     target: Any,
     replica_floor: int,
     prometheus_client: PrometheusClient,
+    extra_prometheus_queries: tuple[PrometheusQuery, ...] = (),
     neighbour: str | None = None,
     concurrency_report: WriteConcurrencyReport | None = None,
 ) -> list[Task[Any]]:
@@ -999,7 +1000,10 @@ def _build_steps_after(
                     task_id="",
                     title="Capture Prometheus snapshot",
                     client=prometheus_client,
-                    queries=_default_prometheus_queries(target.name, neighbour),
+                    queries=(
+                        _default_prometheus_queries(target.name, neighbour)
+                        + extra_prometheus_queries
+                    ),
                     window=window,
                     output_dir=run_dir,
                 )
@@ -1259,6 +1263,7 @@ def build_loadtest_plan(
     script_name: str | None = None,
     k6_env_overrides: Mapping[str, str] | None = None,
     container_metrics: bool = False,
+    extra_prometheus_queries: tuple[PrometheusQuery, ...] = (),
 ) -> Workflow:
     """Compile the loadtest scenario into a Sonata workflow.
 
@@ -1373,6 +1378,7 @@ def build_loadtest_plan(
         prometheus_client=prometheus_client,
         neighbour=neighbour_name(config) if is_co_tenancy(config) else None,
         concurrency_report=_build_concurrency_report(config, run_dir),
+        extra_prometheus_queries=extra_prometheus_queries,
     )
     prepare_argv = _prepare_run_directory_argv(summary_path, remote_run_dir)
     preflight = _build_preflight(
