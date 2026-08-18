@@ -281,7 +281,15 @@ def test_edge_offload_target_points_at_the_cloud_role(tmp_path: Path) -> None:
     edge_install = next(command for command in installs if "NANOFAAS_OFFLOAD_TARGETURL" in command)
     assert "].value=http://cloud.example:30080" in edge_install
     assert "SYNC_QUEUE_MAX_DEPTH" in edge_install
-    assert "controlPlane.extraEnv[5].value=1 --set" in edge_install
+    # Located by name, not by position: `extraEnv[5]` broke the day two dead
+    # variables were dropped from the list, which moved the index of a setting
+    # whose value had not changed at all.
+    depth_index = next(
+        argument.split("extraEnv[")[1].split("]")[0]
+        for argument in edge_install.split(" --set ")
+        if argument.endswith(".name=SYNC_QUEUE_MAX_DEPTH")
+    )
+    assert f"controlPlane.extraEnv[{depth_index}].value=1 " in edge_install
 
 
 def test_cleanup_covers_both_control_planes(tmp_path: Path) -> None:
