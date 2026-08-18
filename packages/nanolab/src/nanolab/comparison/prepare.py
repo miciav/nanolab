@@ -81,7 +81,10 @@ def prepare_operations(
     expose a broken checkout: finding out that the source does not compile after
     forty minutes of native-image work is a bad way to learn it.
     """
-    operations = list(function_build_operations(functions))
+    operations = list(
+        leftover_cleanup_operations([function.name for function in functions])
+    )
+    operations.extend(function_build_operations(functions))
     for variant in variants:
         operations.extend(
             build_operations(
@@ -104,3 +107,42 @@ def pinned_function_images(functions: Sequence[Any]) -> dict[str, str]:
     fails as "missing prebuilt function images" for every entry it in fact holds.
     """
     return {function.key: function.image for function in functions}
+
+
+# The control-plane API on the VM. The matrix reuses one cluster for every cell,
+# so a run that was interrupted leaves whatever the interrupted cell had already
+# registered — and the next run dies on its first cell with a 409, having done
+# nothing wrong.
+CONTROL_PLANE_NODE_PORT = 30080
+
+
+def leftover_cleanup_operations(
+    function_names: Sequence[str],
+    *,
+    node_port: int = CONTROL_PLANE_NODE_PORT,
+) -> tuple[RemoteCommandOperation, ...]:
+    """Remove anything a previous, interrupted matrix left registered.
+
+    Deliberately tolerant of every failure it can meet: the control plane may not
+    be deployed yet on a fresh VM, and the function is usually absent, which is
+    the point. Both are ordinary, so neither may stop a run — the only thing this
+    must not do is leave a 409 waiting for the first cell.
+
+    Not a substitute for the workflow's own compensation, which deregisters on a
+    clean exit. This is for the exit that was not clean.
+    """
+    if not function_names:
+        return ()
+    deletes = " ; ".join(
+        f"curl -s -o /dev/null -m 5 -X DELETE "
+        f"http://127.0.0.1:{node_port}/v1/functions/{name} || true"
+        for name in function_names
+    )
+    return (
+        RemoteCommandOperation(
+            operation_id="prepare.cleanup.leftover_functions",
+            summary="Deregister functions left by an interrupted run",
+            argv=("sh", "-c", deletes),
+            execution_target="vm",
+        ),
+    )

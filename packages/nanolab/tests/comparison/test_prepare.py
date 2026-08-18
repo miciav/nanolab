@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from nanolab.comparison.prepare import (
     function_build_operations,
+    leftover_cleanup_operations,
     pinned_function_images,
     prepare_operations,
 )
@@ -125,3 +126,33 @@ def test_the_jvm_variant_ignores_a_native_budget() -> None:
     )
 
     assert all("NATIVE_BUILD_MEMORY" not in op.env for op in ops)
+
+
+def test_a_matrix_reconciles_what_an_interrupted_run_left_behind() -> None:
+    """One cluster serves every cell, so a killed run leaves its functions registered.
+
+    The next matrix then dies on its first cell with a 409 having done nothing
+    wrong — which is exactly what happened, twice.
+    """
+    ops = prepare_operations(
+        functions=[JAVA, JS],
+        variants=resolve_variants(("jvm",)),
+        registry=REGISTRY,
+        modules=MODULES,
+    )
+
+    assert ops[0].operation_id == "prepare.cleanup.leftover_functions"
+    script = ops[0].argv[2]
+    assert "word-stats-java" in script and "word-stats-javascript" in script
+    assert "-X DELETE" in script
+
+
+def test_the_cleanup_cannot_stop_a_run() -> None:
+    """A fresh VM has no control plane and the functions are usually absent.
+
+    Both are ordinary; neither may fail the matrix before it starts.
+    """
+    script = leftover_cleanup_operations(["word-stats-java"])[0].argv[2]
+
+    assert script.endswith("|| true")
+    assert " -m 5 " in script, "an unreachable control plane must not hang the run"
