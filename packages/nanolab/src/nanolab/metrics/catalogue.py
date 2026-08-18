@@ -119,11 +119,27 @@ def runtime_queries(_function_name: str) -> Queries:
         # much of the wall clock the collector took, and the nine-cell matrix that
         # first raised the question could not answer it, because the platform
         # published these and the harness never asked.
+        # `_total` and `_seconds` are added by the Prometheus exporter, not by the
+        # code: both are FunctionCounters and the second declares baseUnit
+        # "seconds". Querying the names as registered returns nothing at all,
+        # which is how the first version of this catalogue asked for three GC
+        # metrics and collected one.
         PrometheusQuery(
-            "jvm_gc_collection_count", f"jvm_gc_collection_count{CONTROL_PLANE_SELECTOR}"
+            "jvm_gc_collection_count",
+            f"jvm_gc_collection_count_total{CONTROL_PLANE_SELECTOR}",
         ),
         PrometheusQuery(
-            "jvm_gc_collection_time", f"jvm_gc_collection_time{CONTROL_PLANE_SELECTOR}"
+            "jvm_gc_collection_time",
+            f"jvm_gc_collection_time_seconds_total{CONTROL_PLANE_SELECTOR}",
+        ),
+        # Micrometer's own binder, which reads GC notifications rather than
+        # polling the MXBean. Present on a JVM, absent on a native image — the
+        # difference is itself a reading worth having in a build comparison.
+        PrometheusQuery(
+            "jvm_gc_pause_count", f"jvm_gc_pause_seconds_count{CONTROL_PLANE_SELECTOR}"
+        ),
+        PrometheusQuery(
+            "jvm_gc_pause_sum", f"jvm_gc_pause_seconds_sum{CONTROL_PLANE_SELECTOR}"
         ),
         PrometheusQuery(
             "jvm_gc_time_fraction", f"jvm_gc_time_fraction{CONTROL_PLANE_SELECTOR}"

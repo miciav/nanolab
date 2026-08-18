@@ -28,6 +28,55 @@ from nanolab.metrics.catalogue import (
 
 _METRIC_BUILDER = re.compile(r'(?:Counter|Gauge|Timer|DistributionSummary)\.builder\(\s*"([a-z_0-9]+)"')
 _COUNTER_HELPER = re.compile(r'counter\(\s*\w+,\s*"([a-z_0-9]+)"')
+# Enough of the call to know how Prometheus will name the result: the builder
+# type decides the suffix and `baseUnit` inserts a unit before it.
+_TYPED_BUILDER = re.compile(
+    r'(Counter|FunctionCounter|Gauge|Timer|DistributionSummary)\.builder\('
+    r'\s*"([a-z_0-9]+)"(?P<tail>.{0,400}?)\.register\(',
+    re.DOTALL,
+)
+_BASE_UNIT = re.compile(r'\.baseUnit\(\s*"([a-z]+)"\s*\)')
+
+
+def exported_name(kind: str, name: str, base_unit: str | None) -> tuple[str, ...]:
+    """What Prometheus will call a meter, which is not what the code called it.
+
+    Micrometer renames on export and the difference is invisible in the source:
+    a counter gains `_total`, a declared base unit is inserted before it, and a
+    timer becomes a `_seconds_count`/`_seconds_sum` pair. Querying the registered
+    name returns nothing at all — silently, because an empty series is
+    indistinguishable from an idle one.
+    """
+    def suffixed(stem: str, suffix: str) -> str:
+        # Verified against a live /actuator/prometheus: a name that already ends
+        # in the suffix keeps it once. `function_dispatch_total` is served as
+        # itself, not `function_dispatch_total_total`, and the Timer
+        # `sync_queue_wait_seconds` becomes `sync_queue_wait_seconds_count`.
+        return stem if stem.endswith(suffix) else f"{stem}{suffix}"
+
+    stem = suffixed(name, f"_{base_unit}") if base_unit else name
+    if kind in ("Counter", "FunctionCounter"):
+        return (suffixed(stem, "_total"),)
+    if kind == "Timer":
+        timer = suffixed(name, "_seconds")
+        return (f"{timer}_count", f"{timer}_sum")
+    if kind == "DistributionSummary":
+        return (f"{stem}_count", f"{stem}_sum")
+    return (name,)
+
+
+def _exported_metrics(source_dir: Path) -> dict[str, tuple[str, ...]]:
+    """Registered name -> the names Prometheus will actually serve."""
+    exported: dict[str, tuple[str, ...]] = {}
+    for path in source_dir.rglob("*.java"):
+        if "/build/" in str(path) or "/test/" in str(path):
+            continue
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        for match in _TYPED_BUILDER.finditer(text):
+            kind, name, tail = match.group(1), match.group(2), match.group("tail")
+            unit = _BASE_UNIT.search(tail)
+            exported[name] = exported_name(kind, name, unit.group(1) if unit else None)
+    return exported
 
 # Names the catalogue deliberately does not collect in a run snapshot, with the
 # reason. Anything not listed here and not queried is a gap, not a decision.
@@ -125,3 +174,33 @@ def test_the_core_metrics_are_collected() -> None:
     }
 
     assert not missing, f"the core publishes metrics nothing collects: {sorted(missing)}"
+
+
+def test_queries_use_the_name_prometheus_serves_not_the_one_the_code_registers() -> None:
+    """Micrometer renames on export, and the rename is invisible in the source.
+
+    The first version of this catalogue asked for `jvm_gc_collection_count`, which
+    Prometheus serves as `jvm_gc_collection_count_total`. Three GC metrics were
+    requested and one arrived, and nothing said so: a query for a name that does
+    not exist returns an empty series, exactly like a metric that never moved.
+    """
+    root = _nanofaas_root()
+    exported = _exported_metrics(root / "platform" / "control-plane" / "src" / "main")
+    for module in MODULE_QUERIES:
+        exported |= _exported_metrics(root / "platform" / "modules" / module / "src" / "main")
+
+    catalogue = queries_for("word-stats-java", modules=tuple(MODULE_QUERIES), hpa=True)
+    expressions = " ".join(query.expr for query in catalogue)
+
+    wrong = {
+        registered: names
+        for registered, names in exported.items()
+        if registered not in _NOT_COLLECTED
+        and any(name in expressions for name in names) is False
+        and registered in expressions
+    }
+
+    assert not wrong, (
+        "these queries use the registered name where Prometheus serves a "
+        f"suffixed one: {sorted(wrong)}"
+    )
