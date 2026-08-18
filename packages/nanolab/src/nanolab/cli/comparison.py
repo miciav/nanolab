@@ -28,7 +28,7 @@ from sonata_tasks.loadtest.comparison_report import WriteComparisonReport
 from sonata_tasks.execution.bindings import RoleBoundCommandTaskExecutor
 
 from nanolab.cli.execution import build_role_bindings
-from nanolab.comparison.matrix import ComparisonCell, build_matrix, write_manifest
+from nanolab.comparison.matrix import ComparisonCell, build_matrix, pending, write_manifest
 from nanolab.comparison.prepare import prepare_operations
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
@@ -146,6 +146,15 @@ def register(app: typer.Typer) -> None:
             help="Comma-separated control-plane builds to compare.",
         ),
         run_dir: Path | None = typer.Option(None, "--run-dir"),
+        fresh: bool = typer.Option(
+            False,
+            "--fresh",
+            help=(
+                "Re-run cells that already have results. By default a matrix "
+                "resumes: an interruption should not cost the hours of correct "
+                "cells already on disk."
+            ),
+        ),
         native_build_memory: str | None = typer.Option(
             None,
             "--native-build-memory",
@@ -202,8 +211,14 @@ def register(app: typer.Typer) -> None:
                 build_memory=native_build_memory,
                 parallelism=native_parallelism,
             )
-            for index, cell in enumerate(cells, start=1):
-                typer.echo(f"[{index}/{len(cells)}] {cell.label}")
+            todo = cells if fresh else pending(cells, root)
+            if len(todo) < len(cells):
+                typer.echo(
+                    f"resuming: {len(cells) - len(todo)} of {len(cells)} cells "
+                    "already have results"
+                )
+            for index, cell in enumerate(todo, start=1):
+                typer.echo(f"[{index}/{len(todo)}] {cell.label}")
                 cell_dir = cell.run_dir(root)
                 lifetime = ExitStack()
                 try:

@@ -57,6 +57,22 @@ def build_matrix(
     )
 
 
+def completed(cell: ComparisonCell, root: Path) -> bool:
+    """Whether this cell already produced the summary the report reads.
+
+    A matrix runs for well over an hour, and every interruption so far has cost a
+    full redo of cells whose results were already on disk and correct. The k6
+    summary is the right marker: it is written last by the load half, so its
+    presence means the cell finished rather than merely started.
+    """
+    return (cell.run_dir(root) / "k6-summary.json").is_file()
+
+
+def pending(cells: tuple[ComparisonCell, ...], root: Path) -> tuple[ComparisonCell, ...]:
+    """The cells still to run, in matrix order."""
+    return tuple(cell for cell in cells if not completed(cell, root))
+
+
 def write_manifest(
     root: Path,
     cells: tuple[ComparisonCell, ...],

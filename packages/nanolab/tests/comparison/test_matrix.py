@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from nanolab.comparison.matrix import build_matrix, write_manifest
+from nanolab.comparison.matrix import build_matrix, completed, pending, write_manifest
 from nanolab.images.control_plane_variants import resolve_variants
 
 VARIANTS = resolve_variants(("jvm", "native-os", "native-o3", "native-o3-g1"))
@@ -77,3 +77,28 @@ def test_manifest_records_what_was_attempted(tmp_path: Path) -> None:
     # The order is the record of how drift was spread; without it a reader cannot
     # tell an interleaved matrix from a blocked one after the fact.
     assert manifest["order"][:2] == ["jvm run 1", "native-os run 1"]
+
+
+def test_a_matrix_resumes_the_cells_that_have_no_results(tmp_path: Path) -> None:
+    """An interruption must not cost the hours of correct cells already on disk.
+
+    Every interruption so far did: three restarts, each redoing completed work.
+    """
+    cells = build_matrix(VARIANTS, 3)
+    for cell in cells[:6]:
+        cell.run_dir(tmp_path).mkdir(parents=True)
+        (cell.run_dir(tmp_path) / "k6-summary.json").write_text("{}", encoding="utf-8")
+
+    todo = pending(cells, tmp_path)
+
+    assert len(todo) == 6
+    assert [c.label for c in todo] == [c.label for c in cells[6:]]
+
+
+def test_a_cell_that_only_started_is_not_treated_as_done(tmp_path: Path) -> None:
+    """The k6 summary is written last, so its absence means the cell did not finish."""
+    cell = build_matrix(VARIANTS, 1)[0]
+    cell.run_dir(tmp_path).mkdir(parents=True)
+    (cell.run_dir(tmp_path) / "run-metadata.json").write_text("{}", encoding="utf-8")
+
+    assert not completed(cell, tmp_path)
