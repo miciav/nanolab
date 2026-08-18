@@ -141,6 +141,16 @@ class HttpFunctionRegisterTask(CommandTask):
                     "1",
                     "--retry-max-time",
                     "30",
+                    # Without this, `--retry` ignores a refused connection and the
+                    # whole retry budget is never spent: curl treats ECONNREFUSED
+                    # as a hard failure. A control plane that is rolling — which
+                    # it is on every cell of a build-comparison matrix — refuses
+                    # for the second or two between the pod becoming Ready and
+                    # kube-proxy programming the NodePort. Measured: registration
+                    # failed with exit 7 after 0.5s while holding a 30s budget,
+                    # having retried nothing. `compose.py` already carries the
+                    # flag for the same reason.
+                    "--retry-connrefused",
                     "-H",
                     _JSON_CONTENT_TYPE_HEADER,
                     "--data",

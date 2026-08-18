@@ -356,3 +356,23 @@ def test_both_transports_send_a_byte_identical_manifest() -> None:
 
     assert MANIFEST.json() in cli_executor.seen[0].argv[-1]
     assert MANIFEST.json() in http_executor.seen[0].argv
+
+
+def test_http_register_retries_a_refused_connection() -> None:
+    """`--retry` alone never spends its budget on ECONNREFUSED.
+
+    curl treats a refused connection as a hard failure unless told otherwise, so
+    a control plane that is rolling — which it is on every cell of a build
+    comparison — kills the run. Measured before the flag: registration failed
+    with exit 7 after 0.5s while holding a 30-second retry budget it never used.
+    """
+    executor = RecordingExecutor()
+
+    _ = HttpFunctionRegisterTask(
+        MANIFEST, endpoint="http://cp:8080", executor=executor, role="host"
+    ).run(TaskInputs.empty())
+
+    argv = executor.seen[0].argv
+    assert "--retry-connrefused" in argv, (
+        "a retry budget that skips refused connections does not survive a rollout"
+    )
