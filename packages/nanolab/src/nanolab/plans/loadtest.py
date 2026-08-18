@@ -1,6 +1,5 @@
 from collections.abc import Mapping
 from dataclasses import replace
-import json
 from pathlib import Path, PurePosixPath
 from typing import Any, cast
 
@@ -57,6 +56,7 @@ from sonata_tasks.loadtest.tasks import (
 from sonata_tasks.tasks.models import CommandTaskSpec
 
 from nanolab.config.environment import EnvironmentConfig
+from nanolab.metrics.catalogue import queries_for
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.plans.functions import resolve_function, sonata_function
 from nanolab.workspace.paths import discover_tool_root
@@ -67,159 +67,21 @@ _HPA_METRIC_WAIT_SECONDS = 180
 
 
 def _default_prometheus_queries(
-    function_name: str, neighbour: str | None = None
+    function_name: str,
+    neighbour: str | None = None,
+    *,
+    modules: tuple[str, ...] = (),
+    hpa: bool = False,
 ) -> tuple[PrometheusQuery, ...]:
-    function = f"{{function={json.dumps(function_name)}}}"
-    control_plane = '{app="nanofaas-control-plane"}'
-    # kube-state-metrics labels by object name, not by the `function` label the
-    # control plane's own series carry; the HPA is named after the deployment.
-    hpa = f"{{horizontalpodautoscaler={json.dumps(f'fn-{function_name}')}}}"
-    return (
-        PrometheusQuery("function_dispatch_total", f"function_dispatch_total{function}", True),
-        PrometheusQuery("function_success_total", f"function_success_total{function}", True),
-        PrometheusQuery("function_error_total", f"function_error_total{function}"),
-        PrometheusQuery("function_retry_total", f"function_retry_total{function}"),
-        PrometheusQuery("function_timeout_total", f"function_timeout_total{function}"),
-        PrometheusQuery(
-            "function_queue_rejected_total", f"function_queue_rejected_total{function}"
-        ),
-        PrometheusQuery("function_cold_start_total", f"function_cold_start_total{function}"),
-        PrometheusQuery("function_warm_start_total", f"function_warm_start_total{function}"),
-        PrometheusQuery(
-            "function_latency_count", f"function_latency_ms_seconds_count{function}", True
-        ),
-        PrometheusQuery(
-            "function_latency_sum", f"function_latency_ms_seconds_sum{function}", True
-        ),
-        PrometheusQuery(
-            "function_init_duration_count",
-            f"function_init_duration_ms_seconds_count{function}",
-        ),
-        PrometheusQuery(
-            "function_init_duration_sum", f"function_init_duration_ms_seconds_sum{function}"
-        ),
-        PrometheusQuery(
-            "function_queue_wait_count", f"function_queue_wait_ms_seconds_count{function}"
-        ),
-        PrometheusQuery(
-            "function_queue_wait_sum", f"function_queue_wait_ms_seconds_sum{function}"
-        ),
-        PrometheusQuery("function_queue_depth", f"function_queue_depth{function}"),
-        # The mean of a wait is the number a queue is least honest about: a
-        # buffer that is empty most of the time and full occasionally reports a
-        # comfortable average while the callers who arrived during the burst
-        # waited for the whole of it. The timer runs with a percentile histogram
-        # under the advanced metrics profile, so the tail is recoverable.
-        PrometheusQuery(
-            "function_queue_wait_p95_ms",
-            "histogram_quantile(0.95, sum by (le) "
-            f"(rate(function_queue_wait_ms_seconds_bucket{function}[30s]))) * 1000",
-        ),
-        PrometheusQuery(
-            "function_e2e_latency_p95_ms",
-            "histogram_quantile(0.95, sum by (le) "
-            f"(rate(function_e2e_latency_ms_seconds_bucket{function}[30s]))) * 1000",
-        ),
-        PrometheusQuery(
-            "function_e2e_latency_count", f"function_e2e_latency_ms_seconds_count{function}"
-        ),
-        PrometheusQuery(
-            "function_e2e_latency_sum", f"function_e2e_latency_ms_seconds_sum{function}"
-        ),
-        PrometheusQuery("process_cpu_usage", f"process_cpu_usage{control_plane}", True),
-        PrometheusQuery(
-            "jvm_heap_used_bytes",
-            'jvm_memory_used_bytes{app="nanofaas-control-plane",area="heap"}',
-            True,
-        ),
-        # The HPA controller's own view, published by kube-state-metrics. Not
-        # required: only autoscaling runs enable it, and a run without an HPA
-        # should record its absence rather than fail on it.
-        PrometheusQuery(
-            "hpa_desired_replicas",
-            f"kube_horizontalpodautoscaler_status_desired_replicas{hpa}",
-        ),
-        PrometheusQuery(
-            "hpa_current_replicas",
-            f"kube_horizontalpodautoscaler_status_current_replicas{hpa}",
-        ),
-        # Was the controller able to read its metric at all — the condition that
-        # would have named an unservable external metric outright, instead of
-        # leaving the preflight to time out against it.
-        PrometheusQuery(
-            "hpa_scaling_active",
-            "kube_horizontalpodautoscaler_status_condition"
-            f'{{horizontalpodautoscaler="fn-{function_name}",'
-            'condition="ScalingActive",status="true"}',
-        ),
-        # Was the replica count it wanted clamped by minReplicas/maxReplicas.
-        # This is what tells a saturated metric apart from a capped decision.
-        PrometheusQuery(
-            "hpa_scaling_limited",
-            "kube_horizontalpodautoscaler_status_condition"
-            f'{{horizontalpodautoscaler="fn-{function_name}",'
-            'condition="ScalingLimited",status="true"}',
-        ),
-        # The same four questions for the INTERNAL strategy, which owns no HPA
-        # object and so appears in none of the series above. Published by the
-        # control plane's own autoscaler, and one of them is better than what
-        # Kubernetes offers: `recommended` is the count the ratio asked for
-        # BEFORE the clamp, which the HPA never exposes.
-        PrometheusQuery(
-            "internal_scaling_recommended_replicas",
-            f"function_scaling_recommended_replicas{function}",
-        ),
-        PrometheusQuery(
-            "internal_scaling_desired_replicas",
-            f"function_scaling_desired_replicas{function}",
-        ),
-        PrometheusQuery("internal_scaling_limited", f"function_scaling_limited{function}"),
-        PrometheusQuery("internal_scaling_ratio_milli", f"function_scaling_ratio_milli{function}"),
-    ) + _neighbour_prometheus_queries(neighbour)
+    """What this run can meaningfully be asked, given the modules it loaded.
 
-
-def _neighbour_prometheus_queries(neighbour: str | None) -> tuple[PrometheusQuery, ...]:
-    """The same queue readings for the second function of a co-tenancy run.
-
-    Kept under suffixed names so the primary series stay exactly where every
-    existing reader looks for them. Without these a two-function run records one
-    side of a question that is entirely about the relationship between two.
+    The list used to be written out here, flat, with no idea which modules were
+    compiled in. It asked `async-queue` for a depth that reads 0 under
+    synchronous traffic and never asked `sync-queue` for anything at all, so a
+    comparison run recorded zero rejections against 29,555 real ones. The
+    catalogue is grouped by publisher for that reason.
     """
-    if neighbour is None:
-        return ()
-    selector = f"{{function={json.dumps(neighbour)}}}"
-    return (
-        PrometheusQuery(f"function_dispatch_total@{neighbour}", f"function_dispatch_total{selector}"),
-        PrometheusQuery(
-            f"function_queue_rejected_total@{neighbour}",
-            f"function_queue_rejected_total{selector}",
-        ),
-        PrometheusQuery(f"function_queue_depth@{neighbour}", f"function_queue_depth{selector}"),
-        PrometheusQuery(
-            f"function_queue_wait_count@{neighbour}",
-            f"function_queue_wait_ms_seconds_count{selector}",
-        ),
-        PrometheusQuery(
-            f"function_queue_wait_sum@{neighbour}",
-            f"function_queue_wait_ms_seconds_sum{selector}",
-        ),
-        PrometheusQuery(
-            f"function_queue_wait_p95_ms@{neighbour}",
-            "histogram_quantile(0.95, sum by (le) "
-            f"(rate(function_queue_wait_ms_seconds_bucket{selector}[30s]))) * 1000",
-        ),
-        PrometheusQuery(
-            f"function_latency_count@{neighbour}", f"function_latency_ms_seconds_count{selector}"
-        ),
-        PrometheusQuery(
-            f"function_latency_sum@{neighbour}", f"function_latency_ms_seconds_sum{selector}"
-        ),
-        PrometheusQuery(
-            f"function_e2e_latency_p95_ms@{neighbour}",
-            "histogram_quantile(0.95, sum by (le) "
-            f"(rate(function_e2e_latency_ms_seconds_bucket{selector}[30s]))) * 1000",
-        ),
-    )
+    return queries_for(function_name, modules=modules, neighbour=neighbour, hpa=hpa)
 
 
 class _RoleRunner:
@@ -949,6 +811,12 @@ def _build_steps_after(
     replica_floor: int,
     prometheus_client: PrometheusClient,
     extra_prometheus_queries: tuple[PrometheusQuery, ...] = (),
+    # Which modules the control plane under test was built with. The snapshot
+    # asks each of them for what only it can answer, so this is not decoration:
+    # without it a run with sync-queue records zero rejections while the platform
+    # refuses work.
+    observed_modules: tuple[str, ...] = (),
+    hpa_metrics: bool = False,
     neighbour: str | None = None,
     concurrency_report: WriteConcurrencyReport | None = None,
 ) -> list[Task[Any]]:
@@ -1001,7 +869,12 @@ def _build_steps_after(
                     title="Capture Prometheus snapshot",
                     client=prometheus_client,
                     queries=(
-                        _default_prometheus_queries(target.name, neighbour)
+                        _default_prometheus_queries(
+                            target.name,
+                            neighbour,
+                            modules=observed_modules,
+                            hpa=hpa_metrics,
+                        )
                         + extra_prometheus_queries
                     ),
                     window=window,
@@ -1264,6 +1137,7 @@ def build_loadtest_plan(
     k6_env_overrides: Mapping[str, str] | None = None,
     container_metrics: bool = False,
     extra_prometheus_queries: tuple[PrometheusQuery, ...] = (),
+    observed_modules: tuple[str, ...] = (),
 ) -> Workflow:
     """Compile the loadtest scenario into a Sonata workflow.
 
@@ -1379,6 +1253,8 @@ def build_loadtest_plan(
         neighbour=neighbour_name(config) if is_co_tenancy(config) else None,
         concurrency_report=_build_concurrency_report(config, run_dir),
         extra_prometheus_queries=extra_prometheus_queries,
+        observed_modules=observed_modules or additional_modules,
+        hpa_metrics=hpa,
     )
     prepare_argv = _prepare_run_directory_argv(summary_path, remote_run_dir)
     preflight = _build_preflight(

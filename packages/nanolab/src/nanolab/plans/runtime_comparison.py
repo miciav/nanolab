@@ -38,6 +38,18 @@ from nanolab.plans.loadtest import build_loadtest_plan
 
 SCRIPT_NAME = "runtime-comparison.js"
 
+# The module set every variant is compiled with, and therefore the set the run
+# can be asked about. Written out rather than derived from `_additional_modules`:
+# that function returns extras for autoscaling and concurrency runs, and this
+# profile forbids both, so it would return nothing — and a snapshot told nothing
+# was loaded asks `sync-queue` for nothing, which is how a run reported zero
+# rejections against 29,555 real ones.
+COMPARISON_MODULES: tuple[str, ...] = (
+    "k8s-deployment-provider",
+    "async-queue",
+    "sync-queue",
+)
+
 # The script carries its own k6 scenarios, so no --stage flags. An empty tuple
 # rather than None: None means "use the profile's defaults", and those defaults
 # are VU counts, which this script's arrival-rate executors would reject as a
@@ -199,4 +211,5 @@ def build_runtime_comparison_plan(
         # cAdvisor is the one source that prices every build on the same terms.
         container_metrics=True,
         extra_prometheus_queries=container_queries(config),
+        observed_modules=COMPARISON_MODULES,
     )

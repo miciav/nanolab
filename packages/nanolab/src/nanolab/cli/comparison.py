@@ -34,12 +34,9 @@ from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.images.control_plane_variants import VARIANTS_BY_KEY, resolve_variants
 from nanolab.plans.functions import resolve_function
+from nanolab.plans.runtime_comparison import COMPARISON_MODULES
 
 DEFAULT_VARIANTS = tuple(VARIANTS_BY_KEY)
-# The module set every variant is compiled with. Written out rather than derived
-# from the scenario: `_additional_modules` returns extras for autoscaling and
-# concurrency runs, and the comparison forbids both, so it would return nothing.
-COMPARISON_MODULES = "k8s-deployment-provider,async-queue,sync-queue"
 
 
 HEARTBEAT_SECONDS = 60.0
@@ -98,7 +95,7 @@ def _run_prepare(
         functions=functions,
         variants=resolve_variants(variants),
         registry=LOCAL_REGISTRY,
-        modules=COMPARISON_MODULES,
+        modules=",".join(COMPARISON_MODULES),
         build_memory=build_memory,
         parallelism=parallelism,
     ):
