@@ -129,3 +129,25 @@ def test_helm_set_args_pairs_every_value_with_its_flag() -> None:
 def test_helm_set_args_keeps_insertion_order() -> None:
     """Helm applies later --set values over earlier ones, so order is meaning."""
     assert helm_mod.helm_set_args({"z": "1", "a": "2"})[1::2] == ("z=1", "a=2")
+
+
+def test_sync_queue_settings_use_the_prefix_the_platform_binds() -> None:
+    """SyncQueueProperties is bound to the bare `sync-queue` prefix.
+
+    A `NANOFAAS_`-prefixed variant would resolve to `nanofaas.sync-queue.*`, which
+    nothing in the platform declares, so it would set nothing while looking
+    authoritative. Reading a load test, one such variable cost an hour: the run
+    was blamed on a sync queue throttled to one in flight, a setting that had
+    never been applied because the property does not exist.
+    """
+    values = helm_mod.control_plane_helm_values(
+        namespace="ns", control_plane_image="control:latest", expose_node_port=True
+    )
+    sync_vars = {
+        value
+        for key, value in values.items()
+        if key.endswith(".name") and "SYNC_QUEUE" in str(value)
+    }
+
+    assert sync_vars, "the load-test deploy must configure the sync queue"
+    assert not any(name.startswith("NANOFAAS_SYNC_QUEUE") for name in sync_vars)

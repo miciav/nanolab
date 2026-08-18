@@ -54,11 +54,17 @@ def control_plane_helm_values(
     extra_env = [
         ("NANOFAAS_DEPLOYMENT_DEFAULT_BACKEND", "k8s"),
         ("NANOFAAS_K8S_CALLBACK_URL", callback_url),
+        # SyncQueueProperties is bound to the bare `sync-queue` prefix, so these
+        # carry no `NANOFAAS_`. Two that did were removed: nothing in the platform
+        # declares a `nanofaas.sync-queue` prefix, so they set nothing —
+        # NANOFAAS_SYNC_QUEUE_ENABLED silently duplicated the line above it, and
+        # NANOFAAS_SYNC_QUEUE_MAX_CONCURRENCY named a property that does not exist
+        # on the record at all. Reading a load test's results, the second one cost
+        # an hour: a run was blamed on a sync queue throttled to one in flight, a
+        # setting nothing had ever applied.
         ("SYNC_QUEUE_ENABLED", "true"),
-        ("NANOFAAS_SYNC_QUEUE_ENABLED", "true"),
         ("SYNC_QUEUE_ADMISSION_ENABLED", str(sync_queue_admission_enabled).lower()),
         ("SYNC_QUEUE_MAX_DEPTH", sync_queue_depth),
-        ("NANOFAAS_SYNC_QUEUE_MAX_CONCURRENCY", "1"),
         ("SYNC_QUEUE_MAX_ESTIMATED_WAIT", "2s"),
         ("SYNC_QUEUE_MAX_QUEUE_WAIT", sync_queue_wait),
         ("SYNC_QUEUE_RETRY_AFTER_SECONDS", "2"),
