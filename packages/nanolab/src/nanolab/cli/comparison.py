@@ -14,8 +14,10 @@ pay for a fresh k3s and would also destroy the images the prepare phase built.
 
 from __future__ import annotations
 
+import threading
 import time
-from contextlib import ExitStack
+from collections.abc import Iterator
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
 import typer
@@ -25,10 +27,7 @@ from sonata_tasks.deployment import LOCAL_REGISTRY
 from sonata_tasks.loadtest.comparison_report import WriteComparisonReport
 from sonata_tasks.execution.bindings import RoleBoundCommandTaskExecutor
 
-from sonata_engine.workflow.context import bind_workflow_sink
-
 from nanolab.cli.execution import build_role_bindings
-from nanolab.cli.progress import ConsoleProgressSink
 from nanolab.comparison.matrix import ComparisonCell, build_matrix, write_manifest
 from nanolab.comparison.prepare import prepare_operations
 from nanolab.config.environment import EnvironmentConfig
@@ -41,6 +40,41 @@ DEFAULT_VARIANTS = tuple(VARIANTS_BY_KEY)
 # from the scenario: `_additional_modules` returns extras for autoscaling and
 # concurrency runs, and the comparison forbids both, so it would return nothing.
 COMPARISON_MODULES = "k8s-deployment-provider,async-queue,sync-queue"
+
+
+HEARTBEAT_SECONDS = 60.0
+
+
+@contextmanager
+def _heartbeat(summary: str, interval: float = HEARTBEAT_SECONDS) -> Iterator[None]:
+    """Say the build is still alive, because nothing else will.
+
+    A native compile takes twenty minutes and prints nothing while it runs. The
+    obvious fix — binding a workflow sink so `SubprocessShell._emit_output`
+    forwards the command's output — does not work: `ConsoleProgressSink.emit`
+    returns early for any event without a `task_id`, so log lines are routed into
+    a sink that discards them. Command output is never shown by this CLI, for
+    cells or for prepare.
+
+    So the elapsed time is the signal. It cannot distinguish "compiling" from
+    "wedged", but it does distinguish both from "the process died", which is the
+    question that had to be answered by reading load average off the VM.
+    """
+    done = threading.Event()
+
+    def tick() -> None:
+        waited = 0.0
+        while not done.wait(interval):
+            waited += interval
+            typer.echo(f"prepare: {summary} — still running, {waited / 60:.0f}m")
+
+    thread = threading.Thread(target=tick, daemon=True)
+    thread.start()
+    try:
+        yield
+    finally:
+        done.set()
+        thread.join(timeout=1.0)
 
 
 def _run_prepare(
@@ -70,16 +104,17 @@ def _run_prepare(
     ):
         typer.echo(f"prepare: {operation.summary}")
         started = time.monotonic()
-        result = executor.run(
-            CommandTaskSpec(
-                task_id=operation.operation_id,
-                summary=operation.summary,
-                argv=tuple(operation.argv),
-                role="stack",
-                env=dict(operation.env),
-                remote_dir=None,
+        with _heartbeat(operation.summary):
+            result = executor.run(
+                CommandTaskSpec(
+                    task_id=operation.operation_id,
+                    summary=operation.summary,
+                    argv=tuple(operation.argv),
+                    role="stack",
+                    env=dict(operation.env),
+                    remote_dir=None,
+                )
             )
-        )
         elapsed = time.monotonic() - started
         if result.status != "passed":
             detail = (result.stderr or result.stdout or "no output").strip()
@@ -160,23 +195,16 @@ def register(app: typer.Typer) -> None:
         # images the prepare phase just built.
         with _provisioning_context(scenario_config, environment_config, paths, True) as _:
             bindings, _fetcher = build_role_bindings(environment_config)
-            # SubprocessShell._emit_output forwards every command's output to the
-            # workflow log, but only while a sink is bound. Without this the
-            # prepare phase runs silently: a twenty-minute native compile emits
-            # one line before it starts and nothing until it ends, so "working"
-            # and "hung" look identical from the log — the difference had to be
-            # read off the VM's load average instead.
-            with bind_workflow_sink(ConsoleProgressSink()):
-                _run_prepare(
-                    scenario_config,
-                    environment_config,
-                    variants=selected,
-                    repo_root=paths.nanofaas_root,
-                    tool_root=paths.tool_root,
-                    bindings=bindings,
-                    build_memory=native_build_memory,
-                    parallelism=native_parallelism,
-                )
+            _run_prepare(
+                scenario_config,
+                environment_config,
+                variants=selected,
+                repo_root=paths.nanofaas_root,
+                tool_root=paths.tool_root,
+                bindings=bindings,
+                build_memory=native_build_memory,
+                parallelism=native_parallelism,
+            )
             for index, cell in enumerate(cells, start=1):
                 typer.echo(f"[{index}/{len(cells)}] {cell.label}")
                 cell_dir = cell.run_dir(root)
