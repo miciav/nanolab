@@ -156,3 +156,50 @@ def test_the_cleanup_cannot_stop_a_run() -> None:
 
     assert script.endswith("|| true")
     assert " -m 5 " in script, "an unreachable control plane must not hang the run"
+
+
+class _RecordingExecutor:
+    def __init__(self) -> None:
+        self.seen: list[tuple[str, ...]] = []
+
+    def run(self, spec, dry_run: bool = False):  # noqa: ANN001 - structural stand-in
+        from sonata_tasks.tasks.models import TaskResult
+
+        self.seen.append(tuple(spec.argv))
+        return TaskResult(
+            task_id="", status="passed", return_code=0, stdout="", stderr=""
+        )
+
+
+def test_prepare_is_a_workflow_of_the_operations_in_order() -> None:
+    """It ran outside the engine for no better reason than being written later.
+
+    Command output routing is bound to the workflow sink, so the phase was silent,
+    and a reader had to learn two execution models to follow one command.
+    """
+    from nanolab.comparison.prepare import prepare_workflow
+
+    ops = prepare_operations(
+        functions=[JAVA],
+        variants=resolve_variants(("jvm",)),
+        registry=REGISTRY,
+        modules=MODULES,
+    )
+    workflow = prepare_workflow(ops, executor=_RecordingExecutor())
+    compiled = workflow.compile().tasks
+
+    assert [task.task.title for task in compiled] == [op.summary for op in ops]
+
+
+def test_every_prepare_task_targets_the_vm_role() -> None:
+    """A build that ran on the host would produce an image for the wrong architecture."""
+    from nanolab.comparison.prepare import prepare_workflow
+
+    ops = prepare_operations(
+        functions=[JAVA],
+        variants=resolve_variants(("native-o3",)),
+        registry=REGISTRY,
+        modules=MODULES,
+    )
+    for compiled in prepare_workflow(ops, executor=_RecordingExecutor()).compile().tasks:
+        assert getattr(compiled.task, "role", None) == "stack"

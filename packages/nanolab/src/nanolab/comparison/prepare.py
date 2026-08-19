@@ -19,6 +19,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
+from sonata_engine import Workflow
+from sonata_tasks.command import CommandTask
 from sonata_tasks.components.operations import RemoteCommandOperation
 
 from nanolab.images.control_plane_variants import (
@@ -146,3 +148,37 @@ def leftover_cleanup_operations(
             execution_target="vm",
         ),
     )
+
+
+def prepare_workflow(
+    operations: Sequence[RemoteCommandOperation],
+    *,
+    executor: Any,
+    workflow_id: str = "prepare",
+) -> Workflow:
+    """The prepare phase as a Sonata workflow rather than a loop of its own.
+
+    It ran outside the engine for no better reason than that it was written
+    later, and the cost was paid twice: command output routing is bound to the
+    workflow sink, so the phase was silent, and a reader following a run had to
+    learn two different execution models to understand one command.
+
+    What this does not change is worth stating, because it was claimed once and
+    is not true. The engine does not stream a task's output — `ConsoleProgressSink`
+    reports only that a task started and finished — so a twenty-minute compile is
+    still two lines with silence between them, and the heartbeat around the run
+    remains the thing that says it is alive. `Workflow.run` takes no concurrency
+    argument either, so nothing here got faster.
+    """
+    workflow = Workflow(workflow_id=workflow_id)
+    for operation in operations:
+        _ = workflow.add(
+            CommandTask(
+                title=operation.summary,
+                argv=tuple(operation.argv),
+                executor=executor,
+                role="stack",
+                env=dict(operation.env),
+            )
+        )
+    return workflow

@@ -15,21 +15,22 @@ pay for a fresh k3s and would also destroy the images the prepare phase built.
 from __future__ import annotations
 
 import threading
-import time
 from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
 import typer
 
-from sonata_tasks.tasks.models import CommandTaskSpec
 from sonata_tasks.deployment import LOCAL_REGISTRY
 from sonata_tasks.loadtest.comparison_report import WriteComparisonReport
 from sonata_tasks.execution.bindings import RoleBoundCommandTaskExecutor
 
+from sonata_engine.workflow.context import bind_workflow_sink
+
 from nanolab.cli.execution import build_role_bindings
+from nanolab.cli.progress import ConsoleProgressSink
 from nanolab.comparison.matrix import ComparisonCell, build_matrix, pending, write_manifest
-from nanolab.comparison.prepare import prepare_operations
+from nanolab.comparison.prepare import prepare_operations, prepare_workflow
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.images.control_plane_variants import VARIANTS_BY_KEY, resolve_variants
@@ -90,35 +91,23 @@ def _run_prepare(
         resolve_function(scenario_config, key, source_root=repo_root, tool_root=tool_root)
         for key in scenario_config.functions
     )
-    executor = RoleBoundCommandTaskExecutor(bindings)  # type: ignore[arg-type]
-    for operation in prepare_operations(
+    operations = prepare_operations(
         functions=functions,
         variants=resolve_variants(variants),
         registry=LOCAL_REGISTRY,
         modules=",".join(COMPARISON_MODULES),
         build_memory=build_memory,
         parallelism=parallelism,
-    ):
-        typer.echo(f"prepare: {operation.summary}")
-        started = time.monotonic()
-        with _heartbeat(operation.summary):
-            result = executor.run(
-                CommandTaskSpec(
-                    task_id=operation.operation_id,
-                    summary=operation.summary,
-                    argv=tuple(operation.argv),
-                    role="stack",
-                    env=dict(operation.env),
-                    remote_dir=None,
-                )
-            )
-        elapsed = time.monotonic() - started
-        if result.status != "passed":
-            detail = (result.stderr or result.stdout or "no output").strip()
-            raise RuntimeError(
-                f"{operation.operation_id} failed after {elapsed:.0f}s: {detail}"
-            )
-        typer.echo(f"prepare: {operation.summary} — done in {elapsed:.0f}s")
+    )
+    workflow = prepare_workflow(
+        operations, executor=RoleBoundCommandTaskExecutor(bindings)  # type: ignore[arg-type]
+    )
+    # log_lines=True because this phase is where the long commands live: an
+    # image build reports its own progress and there is nothing else to read it.
+    # The heartbeat stays as the backstop for a step that prints nothing at all —
+    # a quiet minute is then the only thing separating "working" from "dead".
+    with bind_workflow_sink(ConsoleProgressSink(log_lines=True)), _heartbeat("prepare"):
+        _ = workflow.run()
 
 
 def cell_scenario(config: ScenarioConfig, cell: ComparisonCell) -> ScenarioConfig:
