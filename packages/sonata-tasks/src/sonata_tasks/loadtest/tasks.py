@@ -46,6 +46,15 @@ class CapturePrometheusSnapshot:
     queries: tuple[PrometheusQuery, ...]
     window: TimeWindow | Callable[[], TimeWindow]
     output_dir: Path
+    # How far before k6 started to reach back. The trailing margin has a clear
+    # job — catch the last scrape after the load stops — but the leading one
+    # only picks up samples from before the load began, and on a run that
+    # redeploys the control plane those belong to the PREVIOUS build. Measured:
+    # a nine-cell comparison reported identical `jvm_gc_pause_seconds` for a JVM
+    # build and a native one, which publishes that metric not at all; the series
+    # came from the pod the previous cell had just replaced. Set it to 0 where
+    # every run starts from a fresh process.
+    lead_seconds: float | None = None
 
     def _resolve_window(self) -> TimeWindow:
         if callable(self.window):
@@ -67,8 +76,11 @@ class CapturePrometheusSnapshot:
         robust to that skew. Clients without ``server_time`` (e.g. test fakes) are
         left unshifted.
         """
-        margin = timedelta(seconds=self._WINDOW_MARGIN_S)
-        expanded = TimeWindow(start=window.start - margin, end=window.end + margin)
+        lead = timedelta(
+            seconds=self._WINDOW_MARGIN_S if self.lead_seconds is None else self.lead_seconds
+        )
+        trail = timedelta(seconds=self._WINDOW_MARGIN_S)
+        expanded = TimeWindow(start=window.start - lead, end=window.end + trail)
         server_time = getattr(self.client, "server_time", None)
         if server_time is None:
             return expanded

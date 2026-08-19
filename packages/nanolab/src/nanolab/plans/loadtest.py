@@ -817,6 +817,7 @@ def _build_steps_after(
     # refuses work.
     observed_modules: tuple[str, ...] = (),
     hpa_metrics: bool = False,
+    snapshot_lead_seconds: float | None = None,
     neighbour: str | None = None,
     concurrency_report: WriteConcurrencyReport | None = None,
 ) -> list[Task[Any]]:
@@ -879,6 +880,7 @@ def _build_steps_after(
                     ),
                     window=window,
                     output_dir=run_dir,
+                    lead_seconds=snapshot_lead_seconds,
                 )
             ),
             WriteReportTask(
@@ -1138,6 +1140,7 @@ def build_loadtest_plan(
     container_metrics: bool = False,
     extra_prometheus_queries: tuple[PrometheusQuery, ...] = (),
     observed_modules: tuple[str, ...] = (),
+    snapshot_lead_seconds: float | None = None,
 ) -> Workflow:
     """Compile the loadtest scenario into a Sonata workflow.
 
@@ -1255,6 +1258,7 @@ def build_loadtest_plan(
         extra_prometheus_queries=extra_prometheus_queries,
         observed_modules=observed_modules or additional_modules,
         hpa_metrics=hpa,
+        snapshot_lead_seconds=snapshot_lead_seconds,
     )
     prepare_argv = _prepare_run_directory_argv(summary_path, remote_run_dir)
     preflight = _build_preflight(

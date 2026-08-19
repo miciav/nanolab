@@ -212,4 +212,10 @@ def build_runtime_comparison_plan(
         container_metrics=True,
         extra_prometheus_queries=container_queries(config),
         observed_modules=COMPARISON_MODULES,
+        # No reaching back before the load started: every cell redeploys the
+        # control plane, so anything before k6 belongs to the build the previous
+        # cell was measuring. That is not hypothetical — two cells reported the
+        # same `jvm_gc_pause_seconds` for a JVM build and a native one, and the
+        # native one does not publish the metric at all.
+        snapshot_lead_seconds=0.0,
     )
