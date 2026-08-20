@@ -188,6 +188,30 @@ def _terminate_process(process: Any) -> None:
             _ = process.wait(timeout=5)
 
 
+# Multipass needs the tunnel because macOS refuses local-network peers to a
+# binary without Local Network access. Azure needs it for an unrelated reason
+# that lands in the same place: the host otherwise reaches Prometheus at the
+# public address, which the security rules admit only from the operator's own
+# address — and a domestic connection changed address three times in one
+# afternoon here, twice mid-cell. SSH is not narrowed that way, so a tunnel is
+# immune to the drift that kept costing cells.
+_TUNNELLED_PROVIDERS = frozenset({"multipass", "azure"})
+
+
+def _tunnel_identity(environment: EnvironmentConfig) -> str | None:
+    """The private key for the tunnel, where the environment names a public one.
+
+    Multipass installs the caller's default key and needs nothing here; Azure is
+    given an explicit public key, and ssh wants the private half beside it.
+    """
+    azure = environment.azure
+    if azure is None or not azure.ssh_key_path:
+        return None
+    public = Path(azure.ssh_key_path)
+    private = public.with_suffix("") if public.suffix == ".pub" else public
+    return str(private) if private.is_file() else None
+
+
 @contextmanager
 def prometheus_over_ssh(
     environment: EnvironmentConfig,
@@ -215,7 +239,7 @@ def prometheus_over_ssh(
     themselves.
     """
     parts = urlsplit(url)
-    if not enabled or environment.provider != "multipass" or not parts.port:
+    if not enabled or environment.provider not in _TUNNELLED_PROVIDERS or not parts.port:
         yield url
         return
 
@@ -227,11 +251,13 @@ def prometheus_over_ssh(
         yield url
         return
     target = environment.target("stack")
+    key = _tunnel_identity(environment)
     local_port = _free_local_port()
     process = spawn(
         [
             "ssh",
             "-N",
+            *(("-i", key) if key else ()),
             "-o", "StrictHostKeyChecking=no",
             "-o", "UserKnownHostsFile=/dev/null",
             # Without this ssh stays up after failing to bind, and the readiness

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from nanolab.cli.execution import prometheus_over_ssh
@@ -139,3 +141,37 @@ def test_an_explicit_url_is_left_alone() -> None:
         _multipass(), "http://elsewhere:9090", enabled=False, spawn=spawn
     ) as url:
         assert url == "http://elsewhere:9090"
+
+
+def _azure() -> EnvironmentConfig:
+    import yaml
+
+    return EnvironmentConfig.model_validate(
+        yaml.safe_load(
+            Path("packages/nanolab/environments/azure-comparison.yaml.example").read_text()
+        )
+    )
+
+
+def test_azure_is_tunnelled_too() -> None:
+    """Not for multipass's reason, but it lands in the same place.
+
+    The host otherwise reaches Prometheus at the public address, which the
+    security rules admit only from the operator's own address — and a domestic
+    connection changed address three times in one afternoon here, twice in the
+    middle of a cell. SSH is not narrowed that way, so the tunnel is immune to a
+    drift that was costing a cell each time.
+    """
+    commands: list[list[str]] = []
+
+    with prometheus_over_ssh(
+        _azure(),
+        "http://20.101.80.57:30090",
+        spawn=_spawn(commands, _FakeProcess()),
+        ready=lambda _port: True,
+    ) as url:
+        assert url.startswith("http://127.0.0.1:")
+
+    argv = commands[0]
+    assert argv[0] == "ssh"
+    assert argv[-1].endswith("@20.101.80.57")
