@@ -154,6 +154,7 @@ def prepare_workflow(
     operations: Sequence[RemoteCommandOperation],
     *,
     executor: Any,
+    remote_dir: str | None = None,
     workflow_id: str = "prepare",
 ) -> Workflow:
     """The prepare phase as a Sonata workflow rather than a loop of its own.
@@ -169,6 +170,13 @@ def prepare_workflow(
     still two lines with silence between them, and the heartbeat around the run
     remains the thing that says it is alive. `Workflow.run` takes no concurrency
     argument either, so nothing here got faster.
+
+    `remote_dir` is optional in the signature and not in practice. Every command
+    here is `./gradlew` or a docker build against a path in the checkout, and the
+    executor's default working directory is the repository *only on multipass* —
+    on Azure and Proxmox it is the home directory, one level above. Leaving it
+    unset worked for nine multipass matrices and failed on the first Azure one,
+    two seconds in, with `./gradlew: No such file or directory`.
     """
     workflow = Workflow(workflow_id=workflow_id)
     for operation in operations:
@@ -179,6 +187,7 @@ def prepare_workflow(
                 executor=executor,
                 role="stack",
                 env=dict(operation.env),
+                remote_dir=remote_dir,
             )
         )
     return workflow

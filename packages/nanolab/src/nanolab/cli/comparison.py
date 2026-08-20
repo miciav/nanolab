@@ -21,6 +21,7 @@ from pathlib import Path
 
 import typer
 
+from sonata_tasks.components.bootstrap import remote_project_dir
 from sonata_tasks.deployment import LOCAL_REGISTRY
 from sonata_tasks.loadtest.comparison_report import WriteComparisonReport
 from sonata_tasks.execution.bindings import RoleBoundCommandTaskExecutor
@@ -28,6 +29,7 @@ from sonata_tasks.execution.bindings import RoleBoundCommandTaskExecutor
 from sonata_engine.workflow.context import bind_workflow_sink
 
 from nanolab.cli.execution import build_role_bindings
+from nanolab.cli.vm_provider import vm_request_for_role
 from nanolab.cli.progress import ConsoleProgressSink
 from nanolab.comparison.matrix import ComparisonCell, build_matrix, pending, write_manifest
 from nanolab.comparison.prepare import prepare_operations, prepare_workflow
@@ -100,7 +102,11 @@ def _run_prepare(
         parallelism=parallelism,
     )
     workflow = prepare_workflow(
-        operations, executor=RoleBoundCommandTaskExecutor(bindings)  # type: ignore[arg-type]
+        operations,
+        executor=RoleBoundCommandTaskExecutor(bindings),  # type: ignore[arg-type]
+        # Said rather than inherited: the executor defaults to the checkout only
+        # on multipass, and to the home directory on Azure and Proxmox.
+        remote_dir=remote_project_dir(vm_request_for_role(environment_config, "stack")),
     )
     # log_lines=True because this phase is where the long commands live: an
     # image build reports its own progress and there is nothing else to read it.

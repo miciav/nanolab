@@ -203,3 +203,27 @@ def test_every_prepare_task_targets_the_vm_role() -> None:
     )
     for compiled in prepare_workflow(ops, executor=_RecordingExecutor()).compile().tasks:
         assert getattr(compiled.task, "role", None) == "stack"
+
+
+def test_prepare_tasks_run_inside_the_checkout() -> None:
+    """The commands are `./gradlew` and docker builds against paths in the repo.
+
+    The executor's default working directory is the checkout only on multipass;
+    on Azure and Proxmox it is the home directory one level above. Inheriting it
+    worked for nine multipass matrices and failed two seconds into the first
+    Azure one with `./gradlew: No such file or directory`.
+    """
+    from nanolab.comparison.prepare import prepare_workflow
+
+    ops = prepare_operations(
+        functions=[JAVA],
+        variants=resolve_variants(("jvm",)),
+        registry=REGISTRY,
+        modules=MODULES,
+    )
+    workflow = prepare_workflow(
+        ops, executor=_RecordingExecutor(), remote_dir="/home/azureuser/nanofaas"
+    )
+
+    for compiled in workflow.compile().tasks:
+        assert getattr(compiled.task, "remote_dir", None) == "/home/azureuser/nanofaas"

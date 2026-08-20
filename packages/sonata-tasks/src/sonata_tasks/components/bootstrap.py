@@ -30,8 +30,19 @@ def _remote_home(vm_request: VmRequest) -> str:
     return f"/home/{vm_request.user}"
 
 
-def _remote_project_dir(vm_request: VmRequest) -> str:
+def remote_project_dir(vm_request: VmRequest) -> str:
+    """Where the repository lands on the VM, whatever the provider.
+
+    Public because it is not only rsync's destination: anything running a command
+    against the checkout has to say so explicitly. The executor's default working
+    directory is this path only on multipass — on Azure and Proxmox it is the home
+    directory one level above.
+    """
     return f"{_remote_home(vm_request)}/nanofaas"
+
+
+# Retained for the existing call sites inside this module.
+_remote_project_dir = remote_project_dir
 
 
 def remote_assets_dir(vm_request: VmRequest) -> str:
