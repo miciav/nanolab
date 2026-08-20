@@ -95,22 +95,28 @@ def core_queries(function_name: str) -> Queries:
     )
 
 
-def runtime_queries(_function_name: str) -> Queries:
+def runtime_queries(_function_name: str, *, required: bool = True) -> Queries:
     """The process itself, published by Spring rather than by nanoFaaS.
 
-    `jvm_heap_used_bytes` is required, and that is a trap worth naming: a
-    natively compiled control plane publishes no JVM memory gauges at all, so a
-    comparison of builds must read the resident set from cAdvisor instead. This
-    stays required because on a JVM build its absence means the scrape is broken.
+    `required` is a property of the run, not of the metric. On a single-build run
+    the absence of these means the actuator scrape is broken and the run should
+    say so. On a comparison it means nothing of the sort: measured here, the JVM
+    and both serial-collector native builds publish `jvm_memory_used_bytes`, and
+    the G1 build publishes none of it — SubstrateVM registers no MXBeans at all
+    under G1, so there is no MemoryMXBean for Micrometer to read.
+
+    An earlier version of this docstring named that trap and left the flag on
+    anyway. The matrix then failed on its first G1 cell with "required query
+    'jvm_heap_used_bytes' returned no data", which was the truth and not a fault.
     """
     return (
         PrometheusQuery(
-            "process_cpu_usage", f"process_cpu_usage{CONTROL_PLANE_SELECTOR}", True
+            "process_cpu_usage", f"process_cpu_usage{CONTROL_PLANE_SELECTOR}", required
         ),
         PrometheusQuery(
             "jvm_heap_used_bytes",
             'jvm_memory_used_bytes{app="nanofaas-control-plane",area="heap"}',
-            True,
+            required,
         ),
         # Collection, published by a polling binder because a native image emits
         # no GC notifications and, under G1, registers no GarbageCollectorMXBean
@@ -255,6 +261,7 @@ def queries_for(
     modules: Iterable[str],
     neighbour: str | None = None,
     hpa: bool = False,
+    jvm_metrics_required: bool = True,
 ) -> Queries:
     """Everything this run can meaningfully be asked, and nothing it cannot.
 
@@ -264,7 +271,9 @@ def queries_for(
     moment when someone can act on it.
     """
     selected = tuple(modules)
-    queries = list(core_queries(function_name)) + list(runtime_queries(function_name))
+    queries = list(core_queries(function_name)) + list(
+        runtime_queries(function_name, required=jvm_metrics_required)
+    )
     for module in selected:
         builder = MODULE_QUERIES.get(module)
         if builder is not None:

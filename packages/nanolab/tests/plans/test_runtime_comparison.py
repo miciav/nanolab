@@ -194,3 +194,33 @@ def test_the_helm_chart_is_an_absolute_path_on_a_remote_provider() -> None:
 
     assert request.helm_chart.startswith("/")
     assert request.helm_chart.endswith("/deploy/helm/nanofaas")
+
+
+def test_the_comparison_does_not_require_jvm_gauges() -> None:
+    """The G1 build publishes none: SubstrateVM registers no MXBeans under it.
+
+    Measured across the matrix — the JVM build and both serial-collector native
+    builds report jvm_memory_used_bytes, and G1 reports nothing. Requiring it
+    failed the first G1 cell with "returned no data", which was the truth rather
+    than a fault.
+    """
+    from nanolab.metrics.catalogue import queries_for
+
+    required = {
+        q.name
+        for q in queries_for("word-stats-java", modules=(), jvm_metrics_required=False)
+        if q.required
+    }
+
+    assert "jvm_heap_used_bytes" not in required
+    assert "process_cpu_usage" not in required
+    # A single-build run keeps the guard: there the absence does mean a broken scrape.
+    default = {q.name for q in queries_for("word-stats-java", modules=()) if q.required}
+    assert "jvm_heap_used_bytes" in default
+
+
+def test_the_container_memory_series_is_the_guard_instead() -> None:
+    """cAdvisor reports it for every build alike, so its absence means a broken scrape."""
+    required = [q.name for q in container_queries(_config()) if q.required]
+
+    assert required == ["container_memory_bytes@control-plane"]

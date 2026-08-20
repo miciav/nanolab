@@ -93,6 +93,11 @@ def container_queries(config: ScenarioConfig) -> tuple[PrometheusQuery, ...]:
         PrometheusQuery(
             "container_memory_bytes@control-plane",
             f'container_memory_working_set_bytes{{namespace={namespace},container="control-plane"}}',
+            # Required: this is the one memory reading every build produces, so
+            # its absence means the cAdvisor scrape is broken rather than that a
+            # build is quiet — which is exactly what the JVM gauges could not
+            # distinguish.
+            True,
         ),
         PrometheusQuery(
             "container_cpu_cores@control-plane",
@@ -218,4 +223,10 @@ def build_runtime_comparison_plan(
         # same `jvm_gc_pause_seconds` for a JVM build and a native one, and the
         # native one does not publish the metric at all.
         snapshot_lead_seconds=0.0,
+        # Not required here, and it is not a lowered standard: the G1 build
+        # publishes no JVM gauges at all, because SubstrateVM registers no MXBeans
+        # under that collector. The guard moves to the container memory series
+        # below, which cAdvisor reports for every build alike — which is the whole
+        # reason this profile collects it.
+        jvm_metrics_required=False,
     )

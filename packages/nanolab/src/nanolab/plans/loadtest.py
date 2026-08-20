@@ -74,6 +74,7 @@ def _default_prometheus_queries(
     *,
     modules: tuple[str, ...] = (),
     hpa: bool = False,
+    jvm_metrics_required: bool = True,
 ) -> tuple[PrometheusQuery, ...]:
     """What this run can meaningfully be asked, given the modules it loaded.
 
@@ -83,7 +84,13 @@ def _default_prometheus_queries(
     comparison run recorded zero rejections against 29,555 real ones. The
     catalogue is grouped by publisher for that reason.
     """
-    return queries_for(function_name, modules=modules, neighbour=neighbour, hpa=hpa)
+    return queries_for(
+        function_name,
+        modules=modules,
+        neighbour=neighbour,
+        hpa=hpa,
+        jvm_metrics_required=jvm_metrics_required,
+    )
 
 
 class _RoleRunner:
@@ -820,6 +827,7 @@ def _build_steps_after(
     observed_modules: tuple[str, ...] = (),
     hpa_metrics: bool = False,
     snapshot_lead_seconds: float | None = None,
+    jvm_metrics_required: bool = True,
     neighbour: str | None = None,
     concurrency_report: WriteConcurrencyReport | None = None,
 ) -> list[Task[Any]]:
@@ -877,6 +885,7 @@ def _build_steps_after(
                             neighbour,
                             modules=observed_modules,
                             hpa=hpa_metrics,
+                            jvm_metrics_required=jvm_metrics_required,
                         )
                         + extra_prometheus_queries
                     ),
@@ -1143,6 +1152,7 @@ def build_loadtest_plan(
     extra_prometheus_queries: tuple[PrometheusQuery, ...] = (),
     observed_modules: tuple[str, ...] = (),
     snapshot_lead_seconds: float | None = None,
+    jvm_metrics_required: bool = True,
 ) -> Workflow:
     """Compile the loadtest scenario into a Sonata workflow.
 
@@ -1271,6 +1281,7 @@ def build_loadtest_plan(
         observed_modules=observed_modules or additional_modules,
         hpa_metrics=hpa,
         snapshot_lead_seconds=snapshot_lead_seconds,
+        jvm_metrics_required=jvm_metrics_required,
     )
     prepare_argv = _prepare_run_directory_argv(summary_path, remote_run_dir)
     preflight = _build_preflight(
