@@ -133,6 +133,11 @@ def _validate_image_urn(urn: str | None) -> None:
 
 
 def _validate_operator_source(source: str | None) -> None:
+    # `auto` is resolved from the VM at provisioning time, and resolving it here
+    # would need a VM that does not exist yet. It is still a restricted source:
+    # what it becomes is one address, with a /32 prefix.
+    if source == AUTO_OPERATOR_SOURCE:
+        return
     try:
         network = ipaddress.ip_network(source, strict=True) if source is not None else None
     except ValueError:
@@ -170,6 +175,36 @@ def verify_release_vm_facts(
         raise RuntimeError(f"Azure release VM facts mismatch for {role}: {', '.join(mismatches)}")
 
 
+# An operator address that says "work it out". A domestic connection does not
+# hold an address for a day — one changed twice during a single matrix here — and
+# a stale rule does not refuse the operator, it drops their packets, so the run
+# fails with a timeout that reads as "Prometheus is slow".
+AUTO_OPERATOR_SOURCE = "auto"
+
+
+def resolve_operator_source(provider: object, stack_request: VmRequest) -> str:
+    """The address the VM sees this operator arriving from, as a /32.
+
+    Asked of the VM rather than of an address-echo service, for two reasons: no
+    third party is involved, and this is by definition the address Azure applies
+    its rules to — an echo service can only report what it believes. sshd sets
+    SSH_CLIENT for the session, and SSH itself stays reachable regardless, so
+    this works precisely when it is needed.
+    """
+    result = provider.exec_argv(  # type: ignore[attr-defined]
+        stack_request, ["sh", "-c", "printf %s \"${SSH_CLIENT%% *}\""]
+    )
+    address = (result.stdout or "").strip()
+    try:
+        parsed = ipaddress.ip_address(address)
+    except ValueError as error:
+        raise ValueError(
+            "could not resolve the operator address from the VM "
+            f"(SSH_CLIENT gave {address!r}); set operator_source_cidr explicitly"
+        ) from error
+    return f"{parsed}/{parsed.max_prefixlen}"
+
+
 def secure_release_endpoints(
     environment: EnvironmentConfig,
     provider: object,
@@ -179,7 +214,10 @@ def secure_release_endpoints(
     azure = environment.azure
     assert azure is not None and azure.operator_source_cidr is not None
     stack_host = provider.connection_host(stack_request)  # type: ignore[attr-defined]
-    sources = (azure.operator_source_cidr,)
+    operator = azure.operator_source_cidr
+    if operator == AUTO_OPERATOR_SOURCE:
+        operator = resolve_operator_source(provider, stack_request)
+    sources = (operator,)
     if loadgen_request is not None:
         loadgen_address = ipaddress.ip_address(
             provider.connection_host(loadgen_request)  # type: ignore[attr-defined]

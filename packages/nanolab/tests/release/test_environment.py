@@ -166,3 +166,37 @@ def test_release_environment_rejects_burstable_vm_size(field: str) -> None:
 def test_release_environment_rejects_unprepared_project_version() -> None:
     with pytest.raises(ValueError, match="prepared project version"):
         validate_release_environment(_release_environment(), NANOFAAS_ROOT, "0.18.0")
+
+
+def test_auto_resolves_the_operator_address_from_the_vm() -> None:
+    """Asked of the VM, not of an address-echo service.
+
+    No third party is involved, and this is by definition the address Azure
+    applies its rules to. A domestic connection changed twice during one matrix
+    here, and each stale rule cost a cell: the firewall drops the packets rather
+    than refusing them, so the run fails with a timeout that reads as slowness.
+    """
+    from types import SimpleNamespace
+
+    from nanolab.release.environment import resolve_operator_source
+
+    class _Provider:
+        def exec_argv(self, request, argv):  # noqa: ANN001, ARG002
+            return SimpleNamespace(stdout="151.44.218.179\n", stderr="", returncode=0)
+
+    assert resolve_operator_source(_Provider(), object()) == "151.44.218.179/32"
+
+
+def test_an_unresolvable_address_says_what_to_do_instead() -> None:
+    from types import SimpleNamespace
+
+    import pytest
+
+    from nanolab.release.environment import resolve_operator_source
+
+    class _Provider:
+        def exec_argv(self, request, argv):  # noqa: ANN001, ARG002
+            return SimpleNamespace(stdout="", stderr="", returncode=0)
+
+    with pytest.raises(ValueError, match="set operator_source_cidr explicitly"):
+        resolve_operator_source(_Provider(), object())

@@ -46,9 +46,9 @@ azure:
   # `provisioning.py` then opens them bounded to this CIDR plus the load
   # generator's own address. Leave it unset and the ports go up open to the
   # internet — in front of a control plane that has no authentication.
-  # REPLACE with the address you operate from, as a /32. A home or office
-  # address is normally dynamic, so a run that cannot reach the control plane
-  # after the connection was renewed should re-check this first.
-  operator_source_cidr: 203.0.113.0/24
+  # `auto` asks the VM which address this operator arrives from, at every
+  # provisioning — the address Azure itself applies the rules to. Replace it with
+  # a fixed /32 only if yours does not change.
+  operator_source_cidr: auto
   # PUBLIC key path (the matching private key must sit next to it, without .pub).
   ssh_key_path: /home/you/.ssh/id_rsa.pub
