@@ -1,26 +1,57 @@
 from __future__ import annotations
 
+import time
+from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any
 
 import httpx
 
+# Prometheus itself answers a range query over a whole run in well under a
+# millisecond — measured on the VM, 0.7ms. Every second spent here is the
+# transport: on a remote provider these queries cross an SSH tunnel, and a tunnel
+# that stalls or is re-establishing eats the budget without Prometheus ever being
+# asked. A snapshot arriving a few seconds late costs nothing; a required query
+# giving up loses the whole cell, which is eight minutes of load.
+_DEFAULT_TIMEOUT_S = 20.0
+# Reads are idempotent, so retrying is safe in a way that retrying a load test is
+# not. This mirrors the release path's `retry_on_connection_death`, and for the
+# same stated reason: only the caller knows whether an operation may be re-run,
+# and a query plainly may.
+_ATTEMPTS = 3
+_BACKOFF_S = 2.0
+
 
 def _prometheus_api_get(
-    base_url: str, path: str, params: dict[str, str], timeout_seconds: float = 4.0
+    base_url: str,
+    path: str,
+    params: dict[str, str],
+    timeout_seconds: float = _DEFAULT_TIMEOUT_S,
+    *,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> Any:
     url = f"{base_url.rstrip('/')}{path}"
-    try:
-        response = httpx.get(url, params=params, timeout=timeout_seconds)
-        data = response.json()
-    except Exception as exc:
-        raise RuntimeError(f"prometheus api request failed for {path}: {exc}") from exc
-    if data.get("status") != "success":
-        raise RuntimeError(f"prometheus api failed for {path}: {data}")
-    return data.get("data")
+    last: Exception | None = None
+    for attempt in range(1, _ATTEMPTS + 1):
+        try:
+            response = httpx.get(url, params=params, timeout=timeout_seconds)
+            data = response.json()
+        except Exception as exc:  # noqa: BLE001 - any transport failure is retryable
+            last = exc
+            if attempt < _ATTEMPTS:
+                sleep(_BACKOFF_S)
+            continue
+        if data.get("status") != "success":
+            # A well-formed refusal is Prometheus answering, not the transport
+            # failing: a bad query returns the same way every time.
+            raise RuntimeError(f"prometheus api failed for {path}: {data}")
+        return data.get("data")
+    raise RuntimeError(f"prometheus api request failed for {path}: {last}")
 
 
-def query_prometheus_server_time(base_url: str, timeout_seconds: float = 4.0) -> float:
+def query_prometheus_server_time(
+    base_url: str, timeout_seconds: float = _DEFAULT_TIMEOUT_S
+) -> float:
     """Return Prometheus's current evaluation time (epoch seconds) via ``time()``.
 
     Used to align query windows to Prometheus's clock: when the host (which builds

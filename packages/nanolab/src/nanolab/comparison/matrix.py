@@ -61,11 +61,19 @@ def completed(cell: ComparisonCell, root: Path) -> bool:
     """Whether this cell already produced the summary the report reads.
 
     A matrix runs for well over an hour, and every interruption so far has cost a
-    full redo of cells whose results were already on disk and correct. The k6
-    summary is the right marker: it is written last by the load half, so its
-    presence means the cell finished rather than merely started.
+    full redo of cells whose results were already on disk and correct.
+
+    Both files, not just the k6 summary. The summary was the original marker and
+    it is written BEFORE the metrics snapshot, so a cell whose snapshot failed —
+    a Prometheus query timing out over a tunnel, say — left a summary behind and
+    would have been skipped for ever, silently absent from every figure that
+    reads the snapshot. The report tolerates a missing cell; it cannot tolerate
+    one that claims to be there.
     """
-    return (cell.run_dir(root) / "k6-summary.json").is_file()
+    run_dir = cell.run_dir(root)
+    return (run_dir / "k6-summary.json").is_file() and (
+        run_dir / "metrics" / "prometheus-snapshot.json"
+    ).is_file()
 
 
 def pending(cells: tuple[ComparisonCell, ...], root: Path) -> tuple[ComparisonCell, ...]:

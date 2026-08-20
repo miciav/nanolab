@@ -86,8 +86,10 @@ def test_a_matrix_resumes_the_cells_that_have_no_results(tmp_path: Path) -> None
     """
     cells = build_matrix(VARIANTS, 3)
     for cell in cells[:6]:
-        cell.run_dir(tmp_path).mkdir(parents=True)
-        (cell.run_dir(tmp_path) / "k6-summary.json").write_text("{}", encoding="utf-8")
+        run_dir = cell.run_dir(tmp_path)
+        (run_dir / "metrics").mkdir(parents=True)
+        (run_dir / "k6-summary.json").write_text("{}", encoding="utf-8")
+        (run_dir / "metrics" / "prometheus-snapshot.json").write_text("{}", encoding="utf-8")
 
     todo = pending(cells, tmp_path)
 
@@ -102,3 +104,24 @@ def test_a_cell_that_only_started_is_not_treated_as_done(tmp_path: Path) -> None
     (cell.run_dir(tmp_path) / "run-metadata.json").write_text("{}", encoding="utf-8")
 
     assert not completed(cell, tmp_path)
+
+
+def test_a_cell_without_its_metrics_is_not_complete(tmp_path: Path) -> None:
+    """The k6 summary is written before the snapshot, so it alone means little.
+
+    A cell whose Prometheus capture failed leaves the summary behind. Treating
+    that as done skips it for ever and leaves it silently absent from every
+    figure the snapshot feeds.
+    """
+    cell = build_matrix(VARIANTS, 1)[0]
+    cell.run_dir(tmp_path).mkdir(parents=True)
+    (cell.run_dir(tmp_path) / "k6-summary.json").write_text("{}", encoding="utf-8")
+
+    assert not completed(cell, tmp_path)
+
+    (cell.run_dir(tmp_path) / "metrics").mkdir()
+    (cell.run_dir(tmp_path) / "metrics" / "prometheus-snapshot.json").write_text(
+        "{}", encoding="utf-8"
+    )
+
+    assert completed(cell, tmp_path)
