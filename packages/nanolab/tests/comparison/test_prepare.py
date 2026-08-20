@@ -227,3 +227,17 @@ def test_prepare_tasks_run_inside_the_checkout() -> None:
 
     for compiled in workflow.compile().tasks:
         assert getattr(compiled.task, "remote_dir", None) == "/home/azureuser/nanofaas"
+
+
+def test_a_cell_is_retried_once_and_not_more() -> None:
+    """A dropped connection killed two k6 runs out of eight on Azure.
+
+    Re-running a cell is safe: it has produced no summary yet, so the second
+    attempt yields a whole valid cell rather than a mixture. But the SDK already
+    keepalives the transport, so a connection that dies twice running is not a
+    blip — the matrix should stop rather than grind through the rest producing
+    nothing.
+    """
+    from nanolab.cli import comparison
+
+    assert comparison.CELL_ATTEMPTS == 2

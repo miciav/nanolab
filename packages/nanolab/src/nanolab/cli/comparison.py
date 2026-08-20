@@ -116,6 +116,74 @@ def _run_prepare(
         _ = workflow.run()
 
 
+# One retry, not more. A cell is safe to re-run — it has produced no summary
+# yet, so a second attempt yields a whole valid cell rather than a mixture — and
+# the failure it exists for is a dropped connection, which recurs at a rate a
+# single retry covers: two k6 runs out of eight died with paramiko's "channel
+# closed without an exit status" over an eight-minute command.
+#
+# A second failure is not more of the same. The SDK already keepalives the
+# transport, so a connection that dies twice in a row is not a blip and the
+# matrix should stop rather than grind through ten more cells producing nothing.
+CELL_ATTEMPTS = 2
+
+
+def _run_cell(
+    cell: ComparisonCell,
+    *,
+    scenario: Path,
+    scenario_config: ScenarioConfig,
+    environment: Path,
+    environment_config: EnvironmentConfig,
+    paths: object,
+    root: Path,
+) -> None:
+    """Run one cell, retrying once if the attempt dies rather than fails."""
+    from nanolab.cli.product import _execute_workflow, _prepare_run
+
+    cell_dir = cell.run_dir(root)
+    for attempt in range(1, CELL_ATTEMPTS + 1):
+        lifetime = ExitStack()
+        try:
+            sink, *_rest = _prepare_run(
+                lifetime,
+                release=False,
+                scenario=scenario,
+                environment=environment,
+                release_config=None,
+                run_dir=cell_dir,
+                resume=False,
+                environment_config=environment_config,
+                paths=paths,  # type: ignore[arg-type]
+                effective_run_dir=cell_dir,
+            )
+            _execute_workflow(
+                sink=sink,
+                scenario_config=cell_scenario(scenario_config, cell),
+                environment_config=environment_config,
+                paths=paths,  # type: ignore[arg-type]
+                keep=True,
+                control_plane_url=None,
+                prometheus_url=None,
+                effective_run_dir=cell_dir,
+                only=None,
+                start=None,
+                until=None,
+                scenario=scenario,
+                release_request=None,
+                release_provider=None,
+                release_journal=None,
+                resume=False,
+            )
+            return
+        except Exception as error:  # noqa: BLE001 - any cell failure is retryable once
+            if attempt == CELL_ATTEMPTS:
+                raise
+            typer.echo(f"  {cell.label} failed ({error}); retrying once")
+        finally:
+            lifetime.close()
+
+
 def cell_scenario(config: ScenarioConfig, cell: ComparisonCell) -> ScenarioConfig:
     """The scenario for one cell: the base, with the build it measures named.
 
@@ -168,8 +236,6 @@ def register(app: typer.Typer) -> None:
         """Compare control-plane builds under one varying load."""
         from nanolab.cli.product import (  # local: the router imports this module
             _environment,
-            _execute_workflow,
-            _prepare_run,
             _provisioning_context,
             _scenario,
             default_tool_paths,
@@ -214,41 +280,15 @@ def register(app: typer.Typer) -> None:
                 )
             for index, cell in enumerate(todo, start=1):
                 typer.echo(f"[{index}/{len(todo)}] {cell.label}")
-                cell_dir = cell.run_dir(root)
-                lifetime = ExitStack()
-                try:
-                    sink, *_rest = _prepare_run(
-                        lifetime,
-                        release=False,
-                        scenario=scenario,
-                        environment=environment,
-                        release_config=None,
-                        run_dir=cell_dir,
-                        resume=False,
-                        environment_config=environment_config,
-                        paths=paths,
-                        effective_run_dir=cell_dir,
-                    )
-                    _execute_workflow(
-                        sink=sink,
-                        scenario_config=cell_scenario(scenario_config, cell),
-                        environment_config=environment_config,
-                        paths=paths,
-                        keep=True,
-                        control_plane_url=None,
-                        prometheus_url=None,
-                        effective_run_dir=cell_dir,
-                        only=None,
-                        start=None,
-                        until=None,
-                        scenario=scenario,
-                        release_request=None,
-                        release_provider=None,
-                        release_journal=None,
-                        resume=False,
-                    )
-                finally:
-                    lifetime.close()
+                _run_cell(
+                    cell,
+                    scenario=scenario,
+                    scenario_config=scenario_config,
+                    environment=environment,
+                    environment_config=environment_config,
+                    paths=paths,
+                    root=root,
+                )
         # Written after the cells, outside the provisioning context: the report
         # reads the run directories and nothing else, so it survives a cluster
         # that has already gone away — and a matrix interrupted partway through
