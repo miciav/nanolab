@@ -38,6 +38,28 @@ class FetchVmResults:
         return destination
 
 
+def _unreachable_hint(error: Exception) -> str:
+    """Say what a timeout usually means, because the word does not.
+
+    A firewall that drops packets produces a timeout, not a refusal, so the
+    message reads as "Prometheus is slow" when it means "you cannot reach
+    Prometheus at all". Measured on the VM itself, a range query over a whole run
+    answers in 0.7ms — this endpoint is never slow, so a timeout is a
+    reachability problem every time.
+
+    The usual cause on a cloud provider is the operator's own address having
+    changed: the security rules were written for the address held when the VM was
+    created, and a domestic connection does not keep one for a day.
+    """
+    if "timed out" not in str(error).lower():
+        return ""
+    return (
+        ". A timeout here means the endpoint was unreachable rather than slow; "
+        "on a cloud provider the usual cause is that the operator address allowed "
+        "by the security rules has changed since the VM was created"
+    )
+
+
 @dataclass
 class CapturePrometheusSnapshot:
     task_id: str
@@ -113,7 +135,9 @@ class CapturePrometheusSnapshot:
                 points = self.client.query_range(q.expr, window)
             except RuntimeError as exc:
                 if q.required:
-                    raise RuntimeError(f"required query '{q.name}' failed: {exc}") from exc
+                    raise RuntimeError(
+                        f"required query '{q.name}' failed: {exc}{_unreachable_hint(exc)}"
+                    ) from exc
                 entry["error"] = str(exc)
                 result[q.name] = entry
                 continue

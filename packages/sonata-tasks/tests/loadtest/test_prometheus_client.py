@@ -59,3 +59,26 @@ def test_a_refused_query_is_not_retried(monkeypatch: pytest.MonkeyPatch) -> None
         _ = prom._prometheus_api_get("http://p", "/api/v1/query", {}, sleep=lambda _: None)
 
     assert calls["n"] == 1
+
+
+def test_a_timeout_says_it_means_unreachable() -> None:
+    """The word "timeout" reads as "slow", and this endpoint is never slow.
+
+    Measured on the VM, a range query over a whole run answers in 0.7ms. A
+    timeout is a firewall dropping packets — which on Azure meant the operator's
+    address had changed since the VM was created, and cost a wrong diagnosis
+    about SSH tunnels before anyone thought to compare the two addresses.
+    """
+    from sonata_tasks.loadtest.tasks import _unreachable_hint
+
+    hint = _unreachable_hint(RuntimeError("prometheus api request failed: timed out"))
+
+    assert "unreachable rather than slow" in hint
+    assert "operator address" in hint
+
+
+def test_other_failures_get_no_hint() -> None:
+    """A malformed query is not a reachability problem and must not be dressed as one."""
+    from sonata_tasks.loadtest.tasks import _unreachable_hint
+
+    assert _unreachable_hint(RuntimeError("prometheus api failed: bad_data")) == ""
