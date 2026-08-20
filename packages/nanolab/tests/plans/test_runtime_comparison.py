@@ -4,6 +4,7 @@ import inspect
 
 import pytest
 from pydantic import ValidationError
+from sonata_tasks.platform import PlatformFunction
 
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.plans import loadtest as loadtest_mod
@@ -150,3 +151,46 @@ def test_the_shared_load_test_knows_nothing_about_this_experiment() -> None:
     shared = inspect.getsource(loadtest_mod)
     assert '"comparison"' not in shared
     assert SCRIPT_NAME not in shared
+
+
+def test_the_helm_chart_is_an_absolute_path_on_a_remote_provider() -> None:
+    """Relative, it is resolved against the executor's working directory.
+
+    That directory is the checkout only on multipass; on Azure it is the home
+    directory, and helm read the first segment of "deploy/helm/nanofaas" as a
+    chart repository name: "Error: repo deploy not found".
+    """
+    from pathlib import Path as _Path
+
+    import yaml
+
+    from nanolab.config.environment import EnvironmentConfig
+    from nanolab.plans.loadtest import _build_platform_request
+
+    environment = EnvironmentConfig.model_validate(
+        yaml.safe_load(
+            _Path("packages/nanolab/environments/azure-comparison.yaml.example").read_text()
+        )
+    )
+    from nanolab.cli.vm_provider import vm_request_for_role
+    from sonata_tasks.components.bootstrap import remote_project_dir
+
+    root = _Path(remote_project_dir(vm_request_for_role(environment, "stack")))
+    request = _build_platform_request(
+        backend="k8s",
+        build="docker",
+        functions=(
+            PlatformFunction(
+                name="word-stats-java", image="i:e2e", payload="{}", build_argv=("x",)
+            ),
+        ),
+        additional_modules=(),
+        prebuilt=True,
+        prebuilt_control_plane_image="cp:jvm",
+        root=_Path("/repo"),
+        remote_repo_root=root,
+        hpa=False,
+    )
+
+    assert request.helm_chart.startswith("/")
+    assert request.helm_chart.endswith("/deploy/helm/nanofaas")

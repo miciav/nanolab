@@ -28,6 +28,7 @@ from sonata_tasks.loadtest import (
     loadtest_composite,
 )
 from sonata_tasks.platform import Backend, Build, PlatformRequest
+from sonata_tasks.components.bootstrap import remote_project_dir
 from sonata_tasks.components.helm import control_plane_helm_values, helm_set_args
 from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
 from sonata_tasks.execution.roles import ExecutionRole
@@ -56,6 +57,7 @@ from sonata_tasks.loadtest.tasks import (
 from sonata_tasks.tasks.models import CommandTaskSpec
 
 from nanolab.config.environment import EnvironmentConfig
+from nanolab.cli.vm_provider import vm_request_for_role
 from nanolab.metrics.catalogue import queries_for
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.plans.functions import resolve_function, sonata_function
@@ -1174,6 +1176,16 @@ def build_loadtest_plan(
     target = functions[0]
     dedicated = "loadgen" in environment.roles
     remote = environment.provider != "local"
+    # Where the repository lives on the VM, when the caller did not say. The Helm
+    # chart is otherwise passed as the relative "deploy/helm/nanofaas", resolved
+    # against the executor's default working directory — and that default is the
+    # checkout only on multipass, the home directory on Azure and Proxmox. There
+    # it failed with "Error: repo deploy not found", helm having read the first
+    # path segment as a chart repository name.
+    if remote and remote_repo_root is None and environment.provider != "external":
+        remote_repo_root = Path(
+            remote_project_dir(vm_request_for_role(environment, "stack"))
+        )
     script_path, summary_path = _resolve_script_and_summary(
         config,
         environment,
