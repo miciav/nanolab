@@ -14,7 +14,11 @@ import yaml
 from nanolab.cli.vm_provider import vm_request_for_role
 from nanolab.config.environment import EnvironmentConfig
 
-ENVIRONMENT = Path("packages/nanolab/environments/azure-comparison.yaml")
+# The .example, not the working copy: `.gitignore` excludes
+# `environments/azure*.yaml` because a real one carries a resource group, a key
+# path and the operator's own address. A test that read the working copy would
+# pass here and fail on every clean checkout.
+ENVIRONMENT = Path("packages/nanolab/environments/azure-comparison.yaml.example")
 
 
 def _environment() -> EnvironmentConfig:
@@ -44,7 +48,7 @@ def test_the_node_ports_are_not_opened_at_creation() -> None:
 
     assert request.azure_open_ports is None
     assert azure is not None
-    assert azure.operator_source_cidr
+    assert azure.operator_source_cidr, "the example must ship a CIDR to be replaced, not none"
 
 
 def test_the_stack_is_sized_for_a_native_build() -> None:
