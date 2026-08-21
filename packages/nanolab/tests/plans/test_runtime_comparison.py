@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
@@ -8,6 +9,8 @@ from sonata_tasks.platform import PlatformFunction
 
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.plans import loadtest as loadtest_mod
+from nanolab.plans import runtime_comparison as comparison_mod
+from nanolab.plans.loadtest import _resolve_functions
 from nanolab.plans.runtime_comparison import (
     NO_STAGES,
     SCRIPT_NAME,
@@ -224,3 +227,43 @@ def test_the_container_memory_series_is_the_guard_instead() -> None:
     required = [q.name for q in container_queries(_config()) if q.required]
 
     assert required == ["container_memory_bytes@control-plane"]
+
+
+def test_comparison_registers_eight_slots_without_growing_the_queue(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    captured: dict[str, object] = {}
+
+    def capture(*_args: object, **kwargs: object) -> object:
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(comparison_mod, "build_loadtest_plan", capture)
+
+    result = build_runtime_comparison_plan(
+        _config(controlPlaneVariant="native-o3-g1"),
+        environment=None,  # type: ignore[arg-type]
+        bindings=None,  # type: ignore[arg-type]
+        control_plane_url="http://cp:30080",
+        prometheus_client=None,  # type: ignore[arg-type]
+        run_dir=tmp_path,
+    )
+
+    assert result is not None
+    assert captured["function_concurrency"] == 8
+    assert captured["function_queue_size"] == 20
+
+
+def test_fixed_function_limits_reach_the_registration_shape(nanofaas_root: Path) -> None:
+    functions, _ = _resolve_functions(
+        _config(),
+        nanofaas_root,
+        None,
+        None,
+        None,
+        None,
+        function_concurrency=8,
+        function_queue_size=20,
+    )
+
+    assert {(function.concurrency, function.queue_size) for function in functions} == {(8, 20)}

@@ -83,7 +83,6 @@ def _exported_metrics(source_dir: Path) -> dict[str, tuple[str, ...]]:
 _NOT_COLLECTED: dict[str, str] = {
     # Sampled continuously by the concurrency watcher: a post-run snapshot would
     # record the limit the governor settled on and lose the trajectory.
-    "function_effective_concurrency": "sampled by the concurrency watcher",
     "function_target_inflight_per_pod": "sampled by the concurrency watcher",
     "function_concurrency_controller_mode": "sampled by the concurrency watcher",
     # The admin API's own behaviour, not the platform's under load.
@@ -174,6 +173,18 @@ def test_the_core_metrics_are_collected() -> None:
     }
 
     assert not missing, f"the core publishes metrics nothing collects: {sorted(missing)}"
+
+
+def test_async_queue_snapshot_collects_dispatch_capacity() -> None:
+    queries = {
+        query.name: query.expr
+        for query in queries_for("word-stats-java", modules=("async-queue",))
+    }
+
+    assert queries["function_inFlight"] == 'function_inFlight{function="word-stats-java"}'
+    assert queries["function_effective_concurrency"] == (
+        'function_effective_concurrency{function="word-stats-java"}'
+    )
 
 
 def test_queries_use_the_name_prometheus_serves_not_the_one_the_code_registers() -> None:

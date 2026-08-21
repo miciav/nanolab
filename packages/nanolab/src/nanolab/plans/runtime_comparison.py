@@ -234,4 +234,6 @@ def build_runtime_comparison_plan(
         # below, which cAdvisor reports for every build alike — which is the whole
         # reason this profile collects it.
         jvm_metrics_required=False,
+        function_concurrency=8,
+        function_queue_size=20,
     )

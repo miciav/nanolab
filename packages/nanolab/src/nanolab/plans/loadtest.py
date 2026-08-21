@@ -301,6 +301,8 @@ def _resolve_functions(
     prebuilt_function_images: Mapping[str, str] | None,
     concurrency: int = 4,
     resources: dict[str, object] | None = None,
+    function_concurrency: int | None = None,
+    function_queue_size: int | None = None,
 ) -> tuple[tuple[Any, ...], bool]:
     resolved, prebuilt = _resolve_with_prebuilt_images(
         config,
@@ -319,6 +321,23 @@ def _resolve_functions(
                 concurrency=concurrency,
                 queue_size=_CONCURRENCY_QUEUE_SIZE,
                 **({"resources": resources} if resources is not None else {}),
+            )
+            for function in functions
+        )
+    if function_concurrency is not None or function_queue_size is not None:
+        functions = tuple(
+            replace(
+                function,
+                concurrency=(
+                    function_concurrency
+                    if function_concurrency is not None
+                    else function.concurrency
+                ),
+                queue_size=(
+                    function_queue_size
+                    if function_queue_size is not None
+                    else function.queue_size
+                ),
             )
             for function in functions
         )
@@ -1153,6 +1172,8 @@ def build_loadtest_plan(
     observed_modules: tuple[str, ...] = (),
     snapshot_lead_seconds: float | None = None,
     jvm_metrics_required: bool = True,
+    function_concurrency: int | None = None,
+    function_queue_size: int | None = None,
 ) -> Workflow:
     """Compile the loadtest scenario into a Sonata workflow.
 
@@ -1182,6 +1203,8 @@ def build_loadtest_plan(
         prebuilt_function_images,
         concurrency=_CONCURRENCY_CEILING if config.concurrency_control else 4,
         resources=_CONCURRENCY_FUNCTION_RESOURCES if config.concurrency_control else None,
+        function_concurrency=function_concurrency,
+        function_queue_size=function_queue_size,
     )
     target = functions[0]
     dedicated = "loadgen" in environment.roles

@@ -162,6 +162,11 @@ def _async_queue_queries(function_name: str) -> Queries:
     """
     return (
         PrometheusQuery("function_queue_depth", f"function_queue_depth{_fn(function_name)}"),
+        PrometheusQuery("function_inFlight", f"function_inFlight{_fn(function_name)}"),
+        PrometheusQuery(
+            "function_effective_concurrency",
+            f"function_effective_concurrency{_fn(function_name)}",
+        ),
     )
 
 
