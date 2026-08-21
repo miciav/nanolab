@@ -41,13 +41,18 @@ SCRIPT_NAME = "runtime-comparison.js"
 # The module set every variant is compiled with, and therefore the set the run
 # can be asked about. Written out rather than derived from `_additional_modules`:
 # that function returns extras for autoscaling and concurrency runs, and this
-# profile forbids both, so it would return nothing — and a snapshot told nothing
-# was loaded asks `sync-queue` for nothing, which is how a run reported zero
-# rejections against 29,555 real ones.
+# profile forbids both, so it would return nothing.
+#
+# No sync-queue, and that is the whole point of the profile rather than a
+# detail. With it, a twelve-cell matrix put all four builds at ~430 requests per
+# second and the number was the queue, not the builds: an A/B on one VM with one
+# variable changed measured p95 falling 84% and failures 44 points when it was
+# switched off (nanofaas#197). A comparison cannot see past a ceiling every
+# variant shares. Without it the sync path uses async-queue's per-function
+# queue, which is also what every concurrency experiment has always used.
 COMPARISON_MODULES: tuple[str, ...] = (
     "k8s-deployment-provider",
     "async-queue",
-    "sync-queue",
 )
 
 # The script carries its own k6 scenarios, so no --stage flags. An empty tuple
