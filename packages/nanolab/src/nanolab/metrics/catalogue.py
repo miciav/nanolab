@@ -196,6 +196,14 @@ def _async_queue_queries(function_name: str) -> Queries:
             f"function_scheduler_wakeup_delay_seconds_sum{function}",
         ),
         PrometheusQuery(
+            "function_dispatch_slot_hold_duration_count",
+            f"function_dispatch_slot_hold_duration_seconds_count{function}",
+        ),
+        PrometheusQuery(
+            "function_dispatch_slot_hold_duration_sum",
+            f"function_dispatch_slot_hold_duration_seconds_sum{function}",
+        ),
+        PrometheusQuery(
             "function_scheduler_batch_limit_total",
             f"function_scheduler_batch_limit_total{function}",
         ),
