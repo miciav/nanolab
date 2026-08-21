@@ -187,6 +187,37 @@ def test_async_queue_snapshot_collects_dispatch_capacity() -> None:
     )
 
 
+def test_async_queue_snapshot_collects_dispatch_diagnostics() -> None:
+    queries = {
+        query.name: query.expr
+        for query in queries_for("word-stats-java", modules=("async-queue",))
+    }
+    function = '{function="word-stats-java"}'
+
+    assert queries["function_dispatchable_backlog"] == f"function_dispatchable_backlog{function}"
+    assert queries["function_queue_offer_duration_count"] == (
+        f"function_queue_offer_duration_seconds_count{function}"
+    )
+    assert queries["function_queue_offer_duration_sum"] == (
+        f"function_queue_offer_duration_seconds_sum{function}"
+    )
+    assert queries["function_queue_poll_duration_count"] == (
+        f"function_queue_poll_duration_seconds_count{function}"
+    )
+    assert queries["function_queue_poll_duration_sum"] == (
+        f"function_queue_poll_duration_seconds_sum{function}"
+    )
+    assert queries["function_scheduler_wakeup_delay_count"] == (
+        f"function_scheduler_wakeup_delay_seconds_count{function}"
+    )
+    assert queries["function_scheduler_wakeup_delay_sum"] == (
+        f"function_scheduler_wakeup_delay_seconds_sum{function}"
+    )
+    assert queries["function_scheduler_batch_limit_total"] == (
+        f"function_scheduler_batch_limit_total{function}"
+    )
+
+
 def test_queries_use_the_name_prometheus_serves_not_the_one_the_code_registers() -> None:
     """Micrometer renames on export, and the rename is invisible in the source.
 

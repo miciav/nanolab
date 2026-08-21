@@ -229,7 +229,7 @@ def test_the_container_memory_series_is_the_guard_instead() -> None:
     assert required == ["container_memory_bytes@control-plane"]
 
 
-def test_comparison_registers_eight_slots_without_growing_the_queue(
+def test_comparison_pins_two_slots_and_twenty_queue_entries(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     captured: dict[str, object] = {}
@@ -250,7 +250,7 @@ def test_comparison_registers_eight_slots_without_growing_the_queue(
     )
 
     assert result is not None
-    assert captured["function_concurrency"] == 8
+    assert captured["function_concurrency"] == 2
     assert captured["function_queue_size"] == 20
 
 

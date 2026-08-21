@@ -160,12 +160,44 @@ def _async_queue_queries(function_name: str) -> Queries:
     path never calls `QueueManager.enqueue`, so this reads 0 while the other
     queue fills. See nanofaas#196.
     """
+    function = _fn(function_name)
     return (
-        PrometheusQuery("function_queue_depth", f"function_queue_depth{_fn(function_name)}"),
-        PrometheusQuery("function_inFlight", f"function_inFlight{_fn(function_name)}"),
+        PrometheusQuery("function_queue_depth", f"function_queue_depth{function}"),
+        PrometheusQuery("function_inFlight", f"function_inFlight{function}"),
         PrometheusQuery(
             "function_effective_concurrency",
-            f"function_effective_concurrency{_fn(function_name)}",
+            f"function_effective_concurrency{function}",
+        ),
+        PrometheusQuery(
+            "function_dispatchable_backlog", f"function_dispatchable_backlog{function}"
+        ),
+        PrometheusQuery(
+            "function_queue_offer_duration_count",
+            f"function_queue_offer_duration_seconds_count{function}",
+        ),
+        PrometheusQuery(
+            "function_queue_offer_duration_sum",
+            f"function_queue_offer_duration_seconds_sum{function}",
+        ),
+        PrometheusQuery(
+            "function_queue_poll_duration_count",
+            f"function_queue_poll_duration_seconds_count{function}",
+        ),
+        PrometheusQuery(
+            "function_queue_poll_duration_sum",
+            f"function_queue_poll_duration_seconds_sum{function}",
+        ),
+        PrometheusQuery(
+            "function_scheduler_wakeup_delay_count",
+            f"function_scheduler_wakeup_delay_seconds_count{function}",
+        ),
+        PrometheusQuery(
+            "function_scheduler_wakeup_delay_sum",
+            f"function_scheduler_wakeup_delay_seconds_sum{function}",
+        ),
+        PrometheusQuery(
+            "function_scheduler_batch_limit_total",
+            f"function_scheduler_batch_limit_total{function}",
         ),
     )
 
