@@ -219,6 +219,12 @@ def test_async_queue_snapshot_collects_dispatch_diagnostics() -> None:
     assert queries["function_dispatch_slot_hold_duration_sum"] == (
         f"function_dispatch_slot_hold_duration_seconds_sum{function}"
     )
+    assert queries["function_dispatch_slot_reacquisition_delay_count"] == (
+        f"function_dispatch_slot_reacquisition_delay_seconds_count{function}"
+    )
+    assert queries["function_dispatch_slot_reacquisition_delay_sum"] == (
+        f"function_dispatch_slot_reacquisition_delay_seconds_sum{function}"
+    )
     assert queries["function_scheduler_batch_limit_total"] == (
         f"function_scheduler_batch_limit_total{function}"
     )
