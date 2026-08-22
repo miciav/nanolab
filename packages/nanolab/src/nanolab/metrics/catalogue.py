@@ -196,6 +196,22 @@ def _async_queue_queries(function_name: str) -> Queries:
             f"function_scheduler_wakeup_delay_seconds_sum{function}",
         ),
         PrometheusQuery(
+            "function_scheduler_poll_delay_count",
+            f"function_scheduler_poll_delay_seconds_count{function}",
+        ),
+        PrometheusQuery(
+            "function_scheduler_poll_delay_sum",
+            f"function_scheduler_poll_delay_seconds_sum{function}",
+        ),
+        PrometheusQuery(
+            "function_scheduler_activation_bookkeeping_duration_count",
+            f"function_scheduler_activation_bookkeeping_duration_seconds_count{function}",
+        ),
+        PrometheusQuery(
+            "function_scheduler_activation_bookkeeping_duration_sum",
+            f"function_scheduler_activation_bookkeeping_duration_seconds_sum{function}",
+        ),
+        PrometheusQuery(
             "function_scheduler_signal_enqueue_duration_count",
             f"function_scheduler_signal_enqueue_duration_seconds_count{function}",
         ),
