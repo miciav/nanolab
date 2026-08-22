@@ -31,6 +31,7 @@ def control_plane_helm_values(
     sync_queue_admission_enabled: bool = False,
     sync_queue_max_depth: int | None = None,
     container_metrics: bool = False,
+    control_plane_cpu: str | None = None,
 ) -> dict[str, str]:
     repository, tag = _image_parts(control_plane_image)
     callback_url = f"http://control-plane.{namespace}.svc.cluster.local:8080/v1/internal/executions"  # NOSONAR (S5332): in-cluster service DNS
@@ -43,6 +44,11 @@ def control_plane_helm_values(
         "demos.enabled": "false",
         "prometheus.create": "false",
     }
+    if control_plane_cpu is not None:
+        # The chart's own default is 1 CPU, which a load test inherits in silence.
+        # A run that does not declare the scarcest resource of the thing it
+        # measures lets a packaging default decide its result.
+        values["controlPlane.resources.limits.cpu"] = control_plane_cpu
     if sync_queue_max_depth is not None:
         sync_queue_depth_value = sync_queue_max_depth
     elif expose_node_port:

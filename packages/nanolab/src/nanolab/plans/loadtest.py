@@ -459,6 +459,7 @@ def _build_platform_request(
     remote_repo_root: Path | None,
     hpa: bool,
     container_metrics: bool = False,
+    control_plane_cpu: str | None = None,
 ) -> PlatformRequest:
     request = PlatformRequest(
         backend=backend,
@@ -485,6 +486,7 @@ def _build_platform_request(
             expose_node_port=True,
             metrics_profile="advanced",
             container_metrics=container_metrics,
+            control_plane_cpu=control_plane_cpu,
         )
         if hpa:
             helm_values["hpa-metrics-adapter.enabled"] = "true"
@@ -1243,6 +1245,7 @@ def build_loadtest_plan(
         remote_repo_root=remote_repo_root,
         hpa=hpa,
         container_metrics=container_metrics,
+        control_plane_cpu=config.control_plane_cpu,
     )
     load_role: ExecutionRole = "loadgen" if dedicated else "stack"
     executor = RoleBoundCommandTaskExecutor(bindings)

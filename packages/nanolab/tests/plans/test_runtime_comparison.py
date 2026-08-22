@@ -123,12 +123,17 @@ def test_container_cost_is_queried_for_the_control_plane_and_every_function() ->
     assert "container_memory_bytes@control-plane" in names
     assert "container_memory_bytes@word-stats-java" in names
     assert "container_memory_bytes@word-stats-javascript" in names
-    assert len(names) == 6
+    # Cores used says what the control plane got; these say what it was denied.
+    # Their absence is why a process pinned at its cgroup quota read as idle.
+    assert "container_cpu_throttled_periods@control-plane" in names
+    assert "container_cpu_periods@control-plane" in names
+    assert "container_cpu_throttled_seconds@control-plane" in names
+    assert len(names) == 9
 
 
 def test_cpu_is_a_rate_not_a_counter() -> None:
     """A counter only rises, so charting it says nothing about when the work happened."""
-    cpu = next(q for q in container_queries(_config()) if q.name.startswith("container_cpu"))
+    cpu = next(q for q in container_queries(_config()) if q.name == "container_cpu_cores@control-plane")
 
     assert cpu.expr.startswith("rate(container_cpu_usage_seconds_total")
     assert "[30s]" in cpu.expr

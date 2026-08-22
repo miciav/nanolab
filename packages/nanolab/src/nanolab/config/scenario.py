@@ -123,6 +123,11 @@ class ScenarioConfig(BaseModel):
     control_plane_variant: str | None = Field(
         default=None, alias="controlPlaneVariant"
     )
+    # The CPU budget of the control plane under test. Unset means the chart's
+    # own default, which is 1 CPU: every comparison so far ran against that
+    # without saying so, and `process_cpu_usage` sat at 1.00 in all fourteen
+    # cells - the process pinned to the whole of the single core it was allowed.
+    control_plane_cpu: str | None = Field(default=None, alias="controlPlaneCpu")
     release: ReleaseConfig | None = None
 
     @model_validator(mode="after")

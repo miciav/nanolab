@@ -108,6 +108,22 @@ def container_queries(config: ScenarioConfig) -> tuple[PrometheusQuery, ...]:
             "container_cpu_cores@control-plane",
             f'rate(container_cpu_usage_seconds_total{{namespace={namespace},container="control-plane"}}[30s])',
         ),
+        # Cores used says how much CPU the process got; these say how much it was
+        # denied. Without them a process pinned at its cgroup quota is
+        # indistinguishable from one that simply had little to do - and that
+        # reading cost ten runs of dispatch-path instrumentation.
+        PrometheusQuery(
+            "container_cpu_throttled_periods@control-plane",
+            f'container_cpu_cfs_throttled_periods_total{{namespace={namespace},container="control-plane"}}',
+        ),
+        PrometheusQuery(
+            "container_cpu_periods@control-plane",
+            f'container_cpu_cfs_periods_total{{namespace={namespace},container="control-plane"}}',
+        ),
+        PrometheusQuery(
+            "container_cpu_throttled_seconds@control-plane",
+            f'container_cpu_cfs_throttled_seconds_total{{namespace={namespace},container="control-plane"}}',
+        ),
     ]
     for name in config.functions:
         # Function containers are all named `function` by the deployment builder,
