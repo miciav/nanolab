@@ -279,6 +279,21 @@ def _async_queue_queries(function_name: str) -> Queries:
             "function_scheduler_signal_coalesced_all_total",
             "sum(function_scheduler_signal_coalesced_total)",
         ),
+        # Untagged on purpose: one scheduler thread serves every function, so
+        # these two partition its wall clock and a `function` selector would
+        # return nothing. Their sum over a window must not exceed the window.
+        PrometheusQuery(
+            "scheduler_visit_duration_count", "scheduler_visit_duration_seconds_count"
+        ),
+        PrometheusQuery(
+            "scheduler_visit_duration_sum", "scheduler_visit_duration_seconds_sum"
+        ),
+        PrometheusQuery(
+            "scheduler_idle_duration_count", "scheduler_idle_duration_seconds_count"
+        ),
+        PrometheusQuery(
+            "scheduler_idle_duration_sum", "scheduler_idle_duration_seconds_sum"
+        ),
     )
 
 
