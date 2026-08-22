@@ -213,6 +213,18 @@ def test_async_queue_snapshot_collects_dispatch_diagnostics() -> None:
     assert queries["function_scheduler_wakeup_delay_sum"] == (
         f"function_scheduler_wakeup_delay_seconds_sum{function}"
     )
+    assert queries["function_scheduler_dispatch_submit_duration_count"] == (
+        f"function_scheduler_dispatch_submit_duration_seconds_count{function}"
+    )
+    assert queries["function_scheduler_dispatch_submit_duration_sum"] == (
+        f"function_scheduler_dispatch_submit_duration_seconds_sum{function}"
+    )
+    assert queries["function_scheduler_dispatch_submit_duration_all_count"] == (
+        "sum(function_scheduler_dispatch_submit_duration_seconds_count)"
+    )
+    assert queries["function_scheduler_dispatch_submit_duration_all_sum"] == (
+        "sum(function_scheduler_dispatch_submit_duration_seconds_sum)"
+    )
     assert queries["function_dispatch_slot_hold_duration_count"] == (
         f"function_dispatch_slot_hold_duration_seconds_count{function}"
     )
@@ -233,6 +245,18 @@ def test_async_queue_snapshot_collects_dispatch_diagnostics() -> None:
     )
     assert queries["function_scheduler_batch_limit_total"] == (
         f"function_scheduler_batch_limit_total{function}"
+    )
+    assert queries["function_scheduler_slot_blocked_total"] == (
+        f"function_scheduler_slot_blocked_total{function}"
+    )
+    assert queries["function_scheduler_slot_blocked_all_total"] == (
+        "sum(function_scheduler_slot_blocked_total)"
+    )
+    assert queries["function_scheduler_signal_coalesced_total"] == (
+        f"function_scheduler_signal_coalesced_total{function}"
+    )
+    assert queries["function_scheduler_signal_coalesced_all_total"] == (
+        "sum(function_scheduler_signal_coalesced_total)"
     )
 
 

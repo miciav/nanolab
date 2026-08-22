@@ -196,6 +196,22 @@ def _async_queue_queries(function_name: str) -> Queries:
             f"function_scheduler_wakeup_delay_seconds_sum{function}",
         ),
         PrometheusQuery(
+            "function_scheduler_dispatch_submit_duration_count",
+            f"function_scheduler_dispatch_submit_duration_seconds_count{function}",
+        ),
+        PrometheusQuery(
+            "function_scheduler_dispatch_submit_duration_sum",
+            f"function_scheduler_dispatch_submit_duration_seconds_sum{function}",
+        ),
+        PrometheusQuery(
+            "function_scheduler_dispatch_submit_duration_all_count",
+            "sum(function_scheduler_dispatch_submit_duration_seconds_count)",
+        ),
+        PrometheusQuery(
+            "function_scheduler_dispatch_submit_duration_all_sum",
+            "sum(function_scheduler_dispatch_submit_duration_seconds_sum)",
+        ),
+        PrometheusQuery(
             "function_dispatch_slot_hold_duration_count",
             f"function_dispatch_slot_hold_duration_seconds_count{function}",
         ),
@@ -222,6 +238,22 @@ def _async_queue_queries(function_name: str) -> Queries:
         PrometheusQuery(
             "function_scheduler_batch_limit_total",
             f"function_scheduler_batch_limit_total{function}",
+        ),
+        PrometheusQuery(
+            "function_scheduler_slot_blocked_total",
+            f"function_scheduler_slot_blocked_total{function}",
+        ),
+        PrometheusQuery(
+            "function_scheduler_slot_blocked_all_total",
+            "sum(function_scheduler_slot_blocked_total)",
+        ),
+        PrometheusQuery(
+            "function_scheduler_signal_coalesced_total",
+            f"function_scheduler_signal_coalesced_total{function}",
+        ),
+        PrometheusQuery(
+            "function_scheduler_signal_coalesced_all_total",
+            "sum(function_scheduler_signal_coalesced_total)",
         ),
     )
 
