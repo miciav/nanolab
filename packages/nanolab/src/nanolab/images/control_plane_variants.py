@@ -76,20 +76,6 @@ VARIANTS: tuple[ControlPlaneVariant, ...] = (
         build_env=_env(JVM_TUNING="-XX:+UseSerialGC"),
     ),
     ControlPlaneVariant(
-        key="jvm-c2-hop",
-        label="JVM (serial GC, full tiering) + salto su boundedElastic",
-        rationale=(
-            "The control for the thread-handoff A/B: same build as jvm-c2, with the"
-            " diagnostic property that restores the pre-31a0dac8 behaviour of sending"
-            " every sync invocation to boundedElastic. Same source tree, same image"
-            " recipe, one extra flag in the argfile - so the pair differ by the thing"
-            " under test and nothing else. Delete with the scaffolding it drives."
-        ),
-        build_env=_env(
-            JVM_TUNING="-XX:+UseSerialGC -Dnanofaas.experiment.hopOnPrepare=true"
-        ),
-    ),
-    ControlPlaneVariant(
         key="jvm-g1-c2",
         label="JVM (G1, full tiering)",
         rationale=(
