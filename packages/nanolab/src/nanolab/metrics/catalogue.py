@@ -459,6 +459,45 @@ def hpa_queries(function_name: str) -> Queries:
     )
 
 
+# A query that answers nothing is not a fact about the run, it is a hole in it -
+# and holes have been expensive here. The Netty series were absent for a whole
+# Azure night because the image predated the config that publishes them, and
+# nothing said so; four reacquisition probes went on being asked for months after
+# the meters were deleted, returning empty results that read as "it never
+# happened". Measured over the 114 archived cells, 69 of 80 query names never
+# came back empty where they were asked, so silence is the exception and belongs
+# where exceptions belong: declared, with its reason.
+#
+# Keyed by query name, valued by why that name may legitimately answer nothing.
+_MAY_BE_ABSENT: Mapping[str, str] = {
+    "jvm_gc_collection_count": "SubstrateVM under G1 registers no GarbageCollectorMXBean",
+    "jvm_gc_collection_time": "SubstrateVM under G1 registers no GarbageCollectorMXBean",
+    "jvm_gc_pause_count": "Micrometer's notification binder does not exist on a native image",
+    "jvm_gc_pause_sum": "Micrometer's notification binder does not exist on a native image",
+    "jvm_gc_time_fraction": "polled binder, absent when the collector publishes no MXBean",
+    # process_cpu_usage and jvm_heap_used_bytes are governed by the run instead,
+    # through runtime_queries(required=...): on a single-build run their absence
+    # means the actuator scrape is broken, on a build comparison it means G1.
+    "process_cpu_usage": "governed per run by jvm_metrics_required",
+    "jvm_heap_used_bytes": "governed per run by jvm_metrics_required",
+}
+
+
+def _require_everything_that_can_answer(queries: Queries) -> Queries:
+    """Flip the default: a query is required unless it is declared absent-able.
+
+    The flag was opt-in, and five of seventy-five queries had opted in. Every
+    other one could return nothing and the run would still pass, which is how a
+    matrix reported a healthy system while the platform shed 13% of its load.
+    """
+    return tuple(
+        query
+        if query.name in _MAY_BE_ABSENT or query.required
+        else PrometheusQuery(query.name, query.expr, True)
+        for query in queries
+    )
+
+
 def queries_for(
     function_name: str,
     *,
@@ -486,7 +525,7 @@ def queries_for(
         queries.extend(hpa_queries(function_name))
     if neighbour is not None:
         queries.extend(neighbour_queries(neighbour, modules=selected))
-    return tuple(queries)
+    return _require_everything_that_can_answer(tuple(queries))
 
 
 def neighbour_queries(neighbour: str, *, modules: Iterable[str]) -> Queries:
