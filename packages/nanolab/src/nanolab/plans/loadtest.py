@@ -656,6 +656,11 @@ def k6_environment(
         # rates live: mirroring the peak here would put knowledge of one
         # experiment into the module every experiment shares.
         env["K6_RATE_SCALE"] = str(config.load_scale)
+    if config.load_vus is not None:
+        # Overrides the script's own sizing. Declared per run because the pool has
+        # to be large enough that the platform, not the generator, is what gives
+        # way - and how large that is cannot be known before the run.
+        env["K6_MAX_VUS"] = str(config.load_vus)
     if is_co_tenancy(config):
         env["NANOFAAS_NEIGHBOUR"] = neighbour_name(config)
     return env

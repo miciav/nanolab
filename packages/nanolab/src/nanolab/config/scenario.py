@@ -133,6 +133,12 @@ class ScenarioConfig(BaseModel):
     # plane's own ceiling near 5.7x and the concurrency limit near 4.2x, so the
     # interesting range starts well above the increments intuition suggests.
     load_scale: float = Field(default=1.0, alias="loadScale", gt=0)
+    # The VU pool, declared rather than derived. A VU is held for a whole
+    # iteration, so the pool a run needs is its rate times its latency - and past
+    # the knee that latency is what the run is trying to find out. Deriving it
+    # from a latency budget censored the 2x and 3x arms of 2026-08-23 at 98% and
+    # 100% of their pool, which makes "VUs used" a floor rather than a demand.
+    load_vus: int | None = Field(default=None, alias="loadVus", gt=0)
     release: ReleaseConfig | None = None
 
     @model_validator(mode="after")

@@ -28,3 +28,8 @@ functions:
 # serve tutto: il modello di CPU del 2026-08-23 mette il suo tetto a ~5,7x e il
 # limite di concorrenza (2 slot, 0,526 ms di servizio) a ~4,2x.
 loadScale: 3.0
+
+# Il pool era saturo al 98% e al 100% nei bracci 2x e 3x del 2026-08-23:
+# dichiarato invece che derivato, perche la domanda dipende dalla latenza che
+# il run sta cercando di misurare.
+loadVus: 5000

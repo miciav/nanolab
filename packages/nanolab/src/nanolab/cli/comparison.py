@@ -258,6 +258,7 @@ def register(app: typer.Typer) -> None:
             regime={
                 "control_plane_cpu": scenario_config.control_plane_cpu,
                 "load_scale": scenario_config.load_scale,
+                "load_vus": scenario_config.load_vus,
                 "load_profile": scenario_config.load_profile,
                 "backend": scenario_config.backend,
                 "scenario": str(scenario),
