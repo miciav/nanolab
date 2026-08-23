@@ -32,8 +32,14 @@ const RATE_SCALE = Number(__ENV.K6_RATE_SCALE || 1);
 // The mix. Deliberately a minority of async and a small minority of keys: a 50/50
 // split would answer a question nobody has ("what if half the traffic changed kind"),
 // while the interesting one is whether a minority can displace the majority.
-const ASYNC_SHARE = Number(__ENV.K6_ASYNC_SHARE || 0.2);
-const IDEM_SHARE = Number(__ENV.K6_IDEM_SHARE || 0.05);
+const ASYNC_SHARE = Number(__ENV.K6_ASYNC_SHARE ?? 0.2);
+const IDEM_SHARE = Number(__ENV.K6_IDEM_SHARE ?? 0.05);
+
+// Both at zero make this the purely synchronous generator, which is how the
+// comparison arms of a matrix are driven: one script, the mix as parameters, so
+// every arm is measured by the same code and runtime-comparison.js stays untouched.
+const MANAGEMENT_URL = __ENV.NANOFAAS_MANAGEMENT_URL || BASE_URL.replace(/:\d+$/, ':30081');
+const PROBE_RPS = Number(__ENV.K6_PROBE_RPS ?? 1);
 
 // An idempotent iteration issues its request TWICE with the same key, so it holds a VU
 // for two round trips. The pool is sized for that rather than for the nominal rate.
@@ -81,6 +87,18 @@ export const options = {
     scenarios: {
         java: arrivals(RATE_SCALE, 'java'),
         javascript: arrivals(JS_SCALE * RATE_SCALE, 'javascript'),
+        // One request a second against 2,700: the load it adds is not measurable,
+        // and what it buys is the only direct reading of the quantity that decides
+        // whether the run survives at all.
+        probe: {
+            executor: 'constant-arrival-rate',
+            rate: PROBE_RPS,
+            timeUnit: '1s',
+            duration: SHAPE.reduce((total, [d]) => total + parseInt(d, 10), 0) + 's',
+            preAllocatedVUs: 4,
+            maxVUs: 16,
+            exec: 'probe',
+        },
     },
     thresholds: {},
 };
@@ -97,6 +115,30 @@ const syncRefused = new Rate('mixed_sync_refused');
 const asyncRefused = new Rate('mixed_async_refused');
 const idemAgreed = new Rate('mixed_idem_same_execution');
 const idemPairs = new Counter('mixed_idem_pairs');
+
+// What kubelet measures, measured the way kubelet measures it.
+//
+// On 2026-08-23 the liveness probe stopped answering within its second at 3x, on
+// synchronous and mixed traffic alike, and kubelet killed a control plane that was
+// serving requests - taking the whole in-memory registry with it. Everything known
+// about that failure was inferred: 863 pending tasks per event loop, 68.9% of CFS
+// periods throttled, an event line after the fact. None of those is the probe's
+// response time; they are its presumed causes.
+//
+// timeoutSeconds is 1 and failureThreshold is 3, so mixed_probe_over_budget counts
+// the samples that would have cost a strike.
+const probeDuration = new Trend('mixed_probe_duration', true);
+const probeOverBudget = new Rate('mixed_probe_over_budget');
+const PROBE_BUDGET_MS = Number(__ENV.K6_PROBE_BUDGET_MS || 1000);
+
+export function probe() {
+    const response = http.get(`${MANAGEMENT_URL}/actuator/health/liveness`, {
+        timeout: '5s',
+        tags: { fn: 'management', path: 'probe' },
+    });
+    probeDuration.add(response.timings.duration);
+    probeOverBudget.add(response.timings.duration > PROBE_BUDGET_MS || response.status !== 200);
+}
 
 const TEXTS = [
     'The quick brown fox jumps over the lazy dog. The dog barked at the fox while the fox ran away quickly.',

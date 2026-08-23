@@ -85,7 +85,14 @@ def comparison_k6_environment(config: ScenarioConfig) -> Mapping[str, str]:
     receive the script's own fallback rather than the functions the scenario asked
     for — and the run would silently load a function that does not exist.
     """
-    return {"NANOFAAS_NEIGHBOUR": config.functions[1]}
+    environment = {"NANOFAAS_NEIGHBOUR": config.functions[1]}
+    # Passate solo se dichiarate: lo script tiene i suoi valori predefiniti, e
+    # scriverli qui vorrebbe dire tenere la definizione del mix in due posti.
+    if config.async_share is not None:
+        environment["K6_ASYNC_SHARE"] = str(config.async_share)
+    if config.idem_share is not None:
+        environment["K6_IDEM_SHARE"] = str(config.idem_share)
+    return environment
 
 
 def container_queries(config: ScenarioConfig) -> tuple[PrometheusQuery, ...]:

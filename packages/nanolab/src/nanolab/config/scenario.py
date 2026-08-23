@@ -110,6 +110,12 @@ class ScenarioConfig(BaseModel):
     # hold, which is the only condition under which a request is ever rejected. Whether one
     # controller sheds fewer than another cannot be asked of a run where neither shed any.
     load_profile: LoadProfile = Field(default="cycle", alias="loadProfile")
+    # La composizione del carico misto. Con entrambe a zero il generatore misto e'
+    # il generatore puramente sincrono, che e' come si guida un braccio di
+    # confronto: uno script solo, il mix come parametri, cosi' ogni braccio e'
+    # misurato dallo stesso codice.
+    async_share: float | None = Field(default=None, alias="asyncShare", ge=0.0, le=1.0)
+    idem_share: float | None = Field(default=None, alias="idemShare", ge=0.0, le=1.0)
     control_plane_runtime: ControlPlaneRuntime = Field(
         default="jvm", alias="controlPlaneRuntime"
     )
@@ -157,6 +163,10 @@ class ScenarioConfig(BaseModel):
             raise ValueError("concurrencyMode requires concurrencyControl=true")
         if self.concurrency_control and self.autoscaling:
             raise ValueError("concurrencyControl cannot run together with autoscaling")
+        if self.load_profile != "mixed" and (self.async_share is not None or self.idem_share is not None):
+            raise ValueError("asyncShare and idemShare belong to loadProfile: mixed")
+        if (self.async_share or 0.0) + (self.idem_share or 0.0) > 1.0:
+            raise ValueError("asyncShare + idemShare cannot exceed 1.0")
         if self.load_profile in ("comparison", "mixed"):
             # The script drives a named pair, and holds the functions fixed so the
             # control-plane build is the only thing that varies between runs.
