@@ -108,6 +108,20 @@ def container_queries(config: ScenarioConfig) -> tuple[PrometheusQuery, ...]:
             "container_cpu_cores@control-plane",
             f'rate(container_cpu_usage_seconds_total{{namespace={namespace},container="control-plane"}}[30s])',
         ),
+        # What happens to a request before the application sees it. At the peak of
+        # the 2026-08-23 sweep a rejected request took 675 ms to receive its 429
+        # while the control plane measured 6.55 ms of queue wait plus service:
+        # the missing 668 ms sat in the accept queue and in Netty's pending
+        # reads, where nothing was looking. Active connections is that backlog,
+        # and without it "the queue is 20 deep" reads as the whole of it.
+        PrometheusQuery(
+            "netty_connections_active",
+            'reactor_netty_http_server_connections_active{job=~".*control-plane.*"}',
+        ),
+        PrometheusQuery(
+            "netty_connections_total",
+            'reactor_netty_http_server_connections_total{job=~".*control-plane.*"}',
+        ),
         # Cores used says how much CPU the process got; these say how much it was
         # denied. Without them a process pinned at its cgroup quota is
         # indistinguishable from one that simply had little to do - and that
