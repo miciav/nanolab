@@ -193,6 +193,24 @@ def runtime_queries(_function_name: str, *, required: bool = True) -> Queries:
             "netty_eventloop_pending_per_loop",
             f"reactor_netty_eventloop_pending_tasks{CONTROL_PLANE_SELECTOR}",
         ),
+        # How many threads exist and how many want a core. Reactor Netty runs
+        # max(availableProcessors, 4) event loops - four inside a two-CPU cgroup -
+        # while Schedulers.boundedElastic() sizes itself at 10 x availableProcessors
+        # and creates them lazily, so twenty more appear only once load arrives.
+        # Four loops against twenty workers on two cores is a scheduling story that
+        # no application meter can tell, and the JVM has been publishing the two
+        # numbers that test it since the first run.
+        #
+        # Verified against a live /actuator/prometheus, not remembered: the state
+        # tag is spelled "timed-waiting", and jvm_threads_live_threads is a gauge
+        # with no suffix beyond the unit.
+        PrometheusQuery(
+            "jvm_threads_live", f"jvm_threads_live_threads{CONTROL_PLANE_SELECTOR}"
+        ),
+        PrometheusQuery(
+            "jvm_threads_runnable",
+            f'jvm_threads_states_threads{{app="nanofaas-control-plane",state="runnable"}}',
+        ),
         # Time spent INSIDE the application, split by what the caller got. Spring
         # Boot publishes this already and nobody had asked for it.
         #
