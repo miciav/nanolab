@@ -38,6 +38,16 @@ from nanolab.plans.loadtest import build_loadtest_plan
 
 SCRIPT_NAME = "runtime-comparison.js"
 
+# The mixed profile is the comparison profile with a different generator: same
+# modules, same fixed pair of functions, same absence of a governor. What changes
+# is that the load carries both doors and a small share of idempotency keys, which
+# is the traffic the platform actually receives and has never been measured under.
+MIXED_SCRIPT_NAME = "mixed-workload.js"
+
+
+def script_for(config: ScenarioConfig) -> str:
+    return MIXED_SCRIPT_NAME if config.load_profile == "mixed" else SCRIPT_NAME
+
 # The module set every variant is compiled with, and therefore the set the run
 # can be asked about. Written out rather than derived from `_additional_modules`:
 # that function returns extras for autoscaling and concurrency runs, and this
@@ -63,7 +73,7 @@ NO_STAGES: tuple[tuple[str, int], ...] = ()
 
 
 def is_runtime_comparison(config: ScenarioConfig) -> bool:
-    return config.load_profile == "comparison"
+    return config.load_profile in ("comparison", "mixed")
 
 
 def comparison_k6_environment(config: ScenarioConfig) -> Mapping[str, str]:
@@ -204,7 +214,7 @@ def build_runtime_comparison_plan(
 ) -> Workflow:
     """Compile one variant's run of the comparison into a Sonata workflow."""
     if not is_runtime_comparison(config):
-        raise ValueError("runtime-comparison plan requires loadProfile: comparison")
+        raise ValueError("runtime-comparison plan requires loadProfile: comparison or mixed")
     image = prebuilt_control_plane_image or _variant_image(config)
     if image is None:
         raise ValueError(
@@ -230,7 +240,7 @@ def build_runtime_comparison_plan(
             if prebuilt_function_images is not None
             else pinned_functions(config, repo_root=repo_root, tool_root=tool_root)
         ),
-        script_name=SCRIPT_NAME,
+        script_name=script_for(config),
         k6_env_overrides=comparison_k6_environment(config),
         # The only profile that needs them, and it cannot be read without them:
         # a natively compiled control plane publishes no JVM memory gauges, so

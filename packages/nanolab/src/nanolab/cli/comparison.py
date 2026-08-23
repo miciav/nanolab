@@ -243,8 +243,10 @@ def register(app: typer.Typer) -> None:
 
         scenario_config = _scenario(scenario)
         environment_config = _environment(environment)
-        if scenario_config.load_profile != "comparison":
-            raise typer.BadParameter("compare requires a scenario with loadProfile: comparison")
+        if scenario_config.load_profile not in ("comparison", "mixed"):
+            raise typer.BadParameter(
+                "compare requires a scenario with loadProfile: comparison or mixed"
+            )
         selected = tuple(part.strip() for part in variants.split(",") if part.strip())
         resolve_variants(selected)  # fail here, not forty minutes into the matrix
         paths = default_tool_paths()

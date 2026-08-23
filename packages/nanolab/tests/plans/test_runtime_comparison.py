@@ -13,7 +13,9 @@ from nanolab.plans import runtime_comparison as comparison_mod
 from nanolab.plans.loadtest import _resolve_functions
 from nanolab.plans.runtime_comparison import (
     NO_STAGES,
+    MIXED_SCRIPT_NAME,
     SCRIPT_NAME,
+    script_for,
     _variant_image,
     container_queries,
     build_runtime_comparison_plan,
@@ -37,6 +39,21 @@ def _config(**overrides) -> ScenarioConfig:
 
 def test_recognises_its_own_profile() -> None:
     assert is_runtime_comparison(_config())
+
+
+def test_the_mixed_profile_is_this_plan_with_a_different_generator() -> None:
+    """Same modules, same fixed pair, same absence of a governor.
+
+    Only the script changes, and it has to actually change: routed to the
+    comparison generator, a mixed run would send 100% synchronous traffic under a
+    scenario name promising otherwise, and every table drawn from it would be
+    answering the old question.
+    """
+    mixed = _config(loadProfile="mixed")
+
+    assert is_runtime_comparison(mixed)
+    assert script_for(mixed) == MIXED_SCRIPT_NAME
+    assert script_for(_config()) == SCRIPT_NAME
     assert not is_runtime_comparison(_config(loadProfile="cycle", functions=PAIR))
 
 

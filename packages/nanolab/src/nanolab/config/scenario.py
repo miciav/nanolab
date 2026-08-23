@@ -68,7 +68,7 @@ ConcurrencyMode = Literal["ADAPTIVE_PER_POD", "BUDGETED", "SOJOURN"]
 # driving two functions at once. A flat rate is the one regime where the builds are
 # hardest to distinguish — a JIT reaches its peak and stays there, and a native image
 # starts at its own — so the differences live in the transitions.
-LoadProfile = Literal["cycle", "saturation", "burst", "openloop", "comparison"]
+LoadProfile = Literal["cycle", "saturation", "burst", "openloop", "comparison", "mixed"]
 # Which control-plane build to run. `native` uses a GraalVM image compiled
 # beforehand by `scripts/native-java-image.sh control-plane`, so the run does not
 # rebuild it — measured at rest, the JVM build held 212 MiB against the native
@@ -157,7 +157,7 @@ class ScenarioConfig(BaseModel):
             raise ValueError("concurrencyMode requires concurrencyControl=true")
         if self.concurrency_control and self.autoscaling:
             raise ValueError("concurrencyControl cannot run together with autoscaling")
-        if self.load_profile == "comparison":
+        if self.load_profile in ("comparison", "mixed"):
             # The script drives a named pair, and holds the functions fixed so the
             # control-plane build is the only thing that varies between runs.
             if len(self.functions) != 2:

@@ -50,6 +50,26 @@ def core_queries(function_name: str) -> Queries:
         PrometheusQuery(
             "function_queue_rejected_total", f"function_queue_rejected_total{function}"
         ),
+        # The same admissions and refusals as above, but split by the door they came
+        # in by. Separate series rather than a label on the counters above, because
+        # five of those feed control loops - the concurrency governor reads
+        # function_latency_ms and function_e2e_latency_ms, the autoscaler
+        # function_dispatch_total, the Kubernetes HPA function_inFlight and
+        # function_queue_depth - and splitting a series a control loop reads changes
+        # what that loop sees.
+        *(
+            PrometheusQuery(
+                f"function_{outcome}_{path}",
+                f'function_{outcome}_total{{function="{function_name}",path="{path}"}}',
+            )
+            for outcome in ("admitted", "refused", "replayed")
+            for path in ("sync", "async")
+        ),
+        # Keys held. Their lifetime is derived from the execution retention, so this is
+        # the only reading that says what that derivation costs: at 2x with 5% keyed
+        # arrivals a run files roughly 19,000, and whether they are released on
+        # schedule is otherwise invisible until the heap says so.
+        PrometheusQuery("idempotency_keys_held", "idempotency_keys_held"),
         PrometheusQuery("function_cold_start_total", f"function_cold_start_total{function}"),
         PrometheusQuery("function_warm_start_total", f"function_warm_start_total{function}"),
         PrometheusQuery(
@@ -252,6 +272,18 @@ def _async_queue_queries(function_name: str) -> Queries:
     return (
         PrometheusQuery("function_queue_depth", f"function_queue_depth{function}"),
         PrometheusQuery("function_inFlight", f"function_inFlight{function}"),
+        # How much of that one backlog is work nobody is waiting for. The depth above
+        # is a mixture whenever both doors are used: with sync-queue off the sync path
+        # calls the same enqueue the async path does, so one FunctionQueueState holds
+        # both. These two say which is which.
+        PrometheusQuery(
+            "function_queue_depth_sync",
+            f'function_queue_depth_by_path{{function="{function_name}",path="sync"}}',
+        ),
+        PrometheusQuery(
+            "function_queue_depth_async",
+            f'function_queue_depth_by_path{{function="{function_name}",path="async"}}',
+        ),
         PrometheusQuery(
             "function_effective_concurrency",
             f"function_effective_concurrency{function}",
@@ -567,6 +599,18 @@ def neighbour_queries(neighbour: str, *, modules: Iterable[str]) -> Queries:
             f"function_e2e_latency_p95_ms@{neighbour}",
             "histogram_quantile(0.95, sum by (le) "
             f"(rate(function_e2e_latency_ms_seconds_bucket{function}[30s]))) * 1000",
+        ),
+        # The co-tenant is driven through both doors too, so without these a mixed run
+        # sees which door displaced which on one function and nothing on the other.
+        # The queue depths arrive by the module loop below; these do not, because they
+        # are core meters and this list is written out rather than derived.
+        *(
+            PrometheusQuery(
+                f"function_{outcome}_{path}@{neighbour}",
+                f'function_{outcome}_total{{function="{neighbour}",path="{path}"}}',
+            )
+            for outcome in ("admitted", "refused", "replayed")
+            for path in ("sync", "async")
         ),
     ]
     for module in modules:
