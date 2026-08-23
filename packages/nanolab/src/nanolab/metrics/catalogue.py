@@ -150,6 +150,31 @@ def runtime_queries(_function_name: str, *, required: bool = True) -> Queries:
         PrometheusQuery(
             "jvm_gc_time_fraction", f"jvm_gc_time_fraction{CONTROL_PLANE_SELECTOR}"
         ),
+        # What happens to a request before the application sees it. At the peak of
+        # the 2026-08-23 sweep a rejected request waited 675 ms for its 429 while
+        # the control plane accounted for 6.55 ms of it; the rest sat in the accept
+        # queue and in Netty's pending reads, where nothing was looking.
+        #
+        # Names verified against a live /actuator/prometheus, because the first
+        # attempt guessed both: `connections_total` does not exist - the total is
+        # `connections`, unsuffixed - and the selector was a `job` regex when every
+        # other application metric here selects on `app`. Both mistakes return an
+        # empty series rather than an error, so a whole Azure sweep collected
+        # nothing and said nothing about it.
+        PrometheusQuery(
+            "netty_connections_active",
+            f"reactor_netty_http_server_connections_active{CONTROL_PLANE_SELECTOR}",
+        ),
+        PrometheusQuery(
+            "netty_connections",
+            f"reactor_netty_http_server_connections{CONTROL_PLANE_SELECTOR}",
+        ),
+        # Work queued on the event loops themselves: the backlog upstream of every
+        # meter the application owns, tagged per loop thread.
+        PrometheusQuery(
+            "netty_eventloop_pending",
+            f"sum(reactor_netty_eventloop_pending_tasks{CONTROL_PLANE_SELECTOR})",
+        ),
     )
 
 
