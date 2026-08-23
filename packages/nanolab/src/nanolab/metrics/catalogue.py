@@ -175,6 +175,33 @@ def runtime_queries(_function_name: str, *, required: bool = True) -> Queries:
             "netty_eventloop_pending",
             f"sum(reactor_netty_eventloop_pending_tasks{CONTROL_PLANE_SELECTOR})",
         ),
+        # Time spent INSIDE the application, split by what the caller got. Spring
+        # Boot publishes this already and nobody had asked for it.
+        #
+        # It is the missing half of the arithmetic: k6 says a rejected request
+        # waited 675 ms and that http_req_waiting - server think time - is 100% of
+        # it, while queue wait plus service accounts for 6.55 ms. This says how
+        # much of the rest was inside the handler. Whatever remains was in front
+        # of it, in the accept queue and Netty's pending reads.
+        #
+        # Summed by status because the raw series also carries method, outcome,
+        # exception and a templated uri, and only the status matters here.
+        PrometheusQuery(
+            "http_server_ok_count",
+            f'sum(http_server_requests_seconds_count{{app="nanofaas-control-plane",status="200"}})',
+        ),
+        PrometheusQuery(
+            "http_server_ok_sum",
+            f'sum(http_server_requests_seconds_sum{{app="nanofaas-control-plane",status="200"}})',
+        ),
+        PrometheusQuery(
+            "http_server_rejected_count",
+            f'sum(http_server_requests_seconds_count{{app="nanofaas-control-plane",status="429"}})',
+        ),
+        PrometheusQuery(
+            "http_server_rejected_sum",
+            f'sum(http_server_requests_seconds_sum{{app="nanofaas-control-plane",status="429"}})',
+        ),
     )
 
 
