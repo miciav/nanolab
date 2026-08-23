@@ -76,7 +76,23 @@ def core_queries(function_name: str) -> Queries:
         #
         # A gauge that only rises, except across a restart, where it falls to nearly
         # nothing. Cheap, and it turns a forensic hunt into a line on a chart.
-        PrometheusQuery("process_uptime_seconds", "process_uptime_seconds", True),
+        # Vincolata al control plane: senza il selettore la query risponde anche per
+        # le funzioni e per la seconda porta dello stesso processo, e il lettore
+        # prende la prima serie che arriva - che fra due letture puo' non essere la
+        # stessa. La mia guardia dal vivo ha suonato un falso allarme esattamente
+        # cosi', leggendo 952 s poi 576 s da due processi diversi.
+        PrometheusQuery(
+            "process_uptime_seconds",
+            'max(process_uptime_seconds{app="nanofaas-control-plane"})',
+            True,
+        ),
+        # Quanti record il control plane sta ricordando.
+        #
+        # La ritenzione delle esecuzioni e' dichiarata nel tempo e illimitata nello
+        # spazio, quindi la memoria richiesta e' proporzionale al tasso di arrivo.
+        # Senza questa serie, "l'heap sale di 2,79 MB/s" resta un fatto senza un
+        # colpevole: si sa che qualcosa cresce, non quale struttura la tiene.
+        PrometheusQuery("execution_store_size", "execution_store_size", True),
         # Keys held. Their lifetime is derived from the execution retention, so this is
         # the only reading that says what that derivation costs: at 2x with 5% keyed
         # arrivals a run files roughly 19,000, and whether they are released on
