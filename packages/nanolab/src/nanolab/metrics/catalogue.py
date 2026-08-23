@@ -65,6 +65,18 @@ def core_queries(function_name: str) -> Queries:
             for outcome in ("admitted", "refused", "replayed")
             for path in ("sync", "async")
         ),
+        # Whether the process measured at the end is the one measured at the start.
+        #
+        # It was not, on 2026-08-23: under the mixed workload at 3x the liveness probe
+        # (timeoutSeconds 1, failureThreshold 3) stopped answering within its second,
+        # kubelet killed the container, and the control plane came back with an empty
+        # in-memory registry. Every request after that was a 404, for 35 minutes, and
+        # nothing in the snapshot said so - the counters simply restarted from zero and
+        # a delta read across the window looked merely small.
+        #
+        # A gauge that only rises, except across a restart, where it falls to nearly
+        # nothing. Cheap, and it turns a forensic hunt into a line on a chart.
+        PrometheusQuery("process_uptime_seconds", "process_uptime_seconds", True),
         # Keys held. Their lifetime is derived from the execution retention, so this is
         # the only reading that says what that derivation costs: at 2x with 5% keyed
         # arrivals a run files roughly 19,000, and whether they are released on
