@@ -255,6 +255,12 @@ def register(app: typer.Typer) -> None:
             cells,
             functions=tuple(scenario_config.functions),
             registry=LOCAL_REGISTRY,
+            regime={
+                "control_plane_cpu": scenario_config.control_plane_cpu,
+                "load_profile": scenario_config.load_profile,
+                "backend": scenario_config.backend,
+                "scenario": str(scenario),
+            },
         )
 
         # One cluster and one registry for the whole matrix. Tearing down between

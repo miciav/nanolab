@@ -87,6 +87,7 @@ def write_manifest(
     *,
     functions: tuple[str, ...],
     registry: str,
+    regime: dict[str, object] | None = None,
 ) -> Path:
     """Record what was compared, so the report never has to infer it.
 
@@ -115,6 +116,11 @@ def write_manifest(
         "repetitions": max(cell.repetition for cell in cells),
         "order": [cell.label for cell in cells],
         "variants": variants,
+        # What the cells ran against, not just what they compared. A run
+        # directory that does not say which CPU budget produced it cannot be
+        # read a week later: the four matrices of the 2026-08-23 sweep differ in
+        # nothing else, and the manifest could not tell them apart.
+        "regime": regime or {},
     }
     root.mkdir(parents=True, exist_ok=True)
     path = root / "comparison-manifest.json"

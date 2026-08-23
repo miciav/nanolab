@@ -11,6 +11,31 @@ from nanolab.images.control_plane_variants import resolve_variants
 VARIANTS = resolve_variants(("jvm", "native-os", "native-o3", "native-o3-g1"))
 
 
+def test_the_manifest_records_the_regime_the_cells_ran_against() -> None:
+    """Four matrices of the CPU sweep differ in nothing the manifest recorded.
+
+    They compared the same four builds under the same profile with the same
+    repetitions, and only the control plane's CPU budget told them apart - which
+    was exactly the field a run directory did not carry. A result whose regime
+    has to be reconstructed from a shell history is not reproducible.
+    """
+    cells = build_matrix(VARIANTS, 1)
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = write_manifest(
+            Path(tmp),
+            cells,
+            functions=("word-stats-java",),
+            registry="r:5000",
+            regime={"control_plane_cpu": "4", "load_profile": "comparison"},
+        )
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+
+    assert manifest["regime"]["control_plane_cpu"] == "4"
+    assert manifest["regime"]["load_profile"] == "comparison"
+
+
 def test_variants_interleave_instead_of_running_in_blocks() -> None:
     """Blocks would make "which variant" and "when it ran" the same axis.
 
