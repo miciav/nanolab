@@ -649,6 +649,13 @@ def k6_environment(
         # than a property of how hard the generator was told to push.
         env["K6_PEAK_VUS"] = str(burst_peak_vus(config))
         env.pop("K6_MAX_P95_MS", None)
+    if config.load_scale != 1.0:
+        # One knob for the whole shape: scaling the stages individually is how a
+        # profile stops being the same profile.
+        # Only the scale. The VU pool is sized by the script, which is where the
+        # rates live: mirroring the peak here would put knowledge of one
+        # experiment into the module every experiment shares.
+        env["K6_RATE_SCALE"] = str(config.load_scale)
     if is_co_tenancy(config):
         env["NANOFAAS_NEIGHBOUR"] = neighbour_name(config)
     return env

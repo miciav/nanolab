@@ -257,6 +257,7 @@ def register(app: typer.Typer) -> None:
             registry=LOCAL_REGISTRY,
             regime={
                 "control_plane_cpu": scenario_config.control_plane_cpu,
+                "load_scale": scenario_config.load_scale,
                 "load_profile": scenario_config.load_profile,
                 "backend": scenario_config.backend,
                 "scenario": str(scenario),

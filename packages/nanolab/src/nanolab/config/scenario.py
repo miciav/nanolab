@@ -128,6 +128,11 @@ class ScenarioConfig(BaseModel):
     # without saying so, and `process_cpu_usage` sat at 1.00 in all fourteen
     # cells - the process pinned to the whole of the single core it was allowed.
     control_plane_cpu: str | None = Field(default=None, alias="controlPlaneCpu")
+    # Multiplies every stage of the comparison profile. 1.0 is the shape every
+    # matrix so far has used; the CPU model of 2026-08-23 puts the control
+    # plane's own ceiling near 5.7x and the concurrency limit near 4.2x, so the
+    # interesting range starts well above the increments intuition suggests.
+    load_scale: float = Field(default=1.0, alias="loadScale", gt=0)
     release: ReleaseConfig | None = None
 
     @model_validator(mode="after")

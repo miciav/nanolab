@@ -31,7 +31,25 @@ const BASE_RPS = Number(__ENV.K6_BASE_RPS || 200);
 const HIGH_RPS = Number(__ENV.K6_HIGH_RPS || 350);
 const SPIKE_RPS = Number(__ENV.K6_SPIKE_RPS || 600);
 const PEAK_RPS = Number(__ENV.K6_PEAK_RPS || 900);
-const MAX_VUS = Number(__ENV.K6_MAX_VUS || 600);
+// Multiplies every stage of the shape at once, so raising the load cannot change
+// its profile by accident. The rates above stay the one definition of the shape;
+// this is the only thing a run is allowed to turn.
+const RATE_SCALE = Number(__ENV.K6_RATE_SCALE || 1);
+
+// A VU is held for a whole iteration, response included, so the pool needed is
+// rate x iteration duration. Sizing it from a latency budget rather than a round
+// number is what keeps the generator from becoming the ceiling and reporting it
+// as the platform's: at scale 1 the serial native builds of the 2026-08-23 sweep
+// held 1191 VUs of 1200 and never issued 4.5% of their arrivals.
+//
+// Half a second means the run keeps measuring a platform that has degraded
+// 200-fold before k6 gives up. Derived here because this is where the rates are
+// defined; the harness only turns RATE_SCALE.
+const VU_LATENCY_BUDGET_S = Number(__ENV.K6_VU_LATENCY_BUDGET_S || 0.5);
+const MAX_VUS = Number(
+    __ENV.K6_MAX_VUS || Math.max(600, Math.ceil(PEAK_RPS * RATE_SCALE * VU_LATENCY_BUDGET_S)),
+);
+
 
 // Node is single-threaded, so the JavaScript function saturates at a fraction of
 // the Java one's rate. Offering both the same rate would put the JS function into
@@ -76,8 +94,8 @@ const arrivals = (scale, exec) => ({
 
 export const options = {
     scenarios: {
-        java: arrivals(1, 'java'),
-        javascript: arrivals(JS_SCALE, 'javascript'),
+        java: arrivals(RATE_SCALE, 'java'),
+        javascript: arrivals(JS_SCALE * RATE_SCALE, 'javascript'),
     },
     // No thresholds. Whether a build sheds requests under the peak is a result,
     // and gating on it would make the run report its own question as a failure.
