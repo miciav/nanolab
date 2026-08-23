@@ -152,8 +152,15 @@ def runtime_queries(_function_name: str, *, required: bool = True) -> Queries:
         ),
         # What happens to a request before the application sees it. At the peak of
         # the 2026-08-23 sweep a rejected request waited 675 ms for its 429 while
-        # the control plane accounted for 6.55 ms of it; the rest sat in the accept
-        # queue and in Netty's pending reads, where nothing was looking.
+        # the control plane accounted for 6.55 ms of it, and nothing was looking at
+        # the rest.
+        #
+        # Not the accept queue: http_req_connecting averaged 0.01 ms and one
+        # connection per VU accounts for 0.4-0.5% of requests, so ~99% of them
+        # arrive on a connection that was established long before. What is left in
+        # front of the application is per-connection: bytes sitting read but
+        # unhandled in the socket buffer, and a read event queued on an event loop.
+        # That is what the two series below are for.
         #
         # Names verified against a live /actuator/prometheus, because the first
         # attempt guessed both: `connections_total` does not exist - the total is
@@ -181,8 +188,8 @@ def runtime_queries(_function_name: str, *, required: bool = True) -> Queries:
         # It is the missing half of the arithmetic: k6 says a rejected request
         # waited 675 ms and that http_req_waiting - server think time - is 100% of
         # it, while queue wait plus service accounts for 6.55 ms. This says how
-        # much of the rest was inside the handler. Whatever remains was in front
-        # of it, in the accept queue and Netty's pending reads.
+        # much of the rest was inside the handler. Whatever remains was in front of
+        # it, on an already-open connection waiting to be read.
         #
         # Summed by status because the raw series also carries method, outcome,
         # exception and a templated uri, and only the status matters here.
