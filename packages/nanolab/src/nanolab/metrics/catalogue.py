@@ -177,10 +177,21 @@ def runtime_queries(_function_name: str, *, required: bool = True) -> Queries:
             f"reactor_netty_http_server_connections{CONTROL_PLANE_SELECTOR}",
         ),
         # Work queued on the event loops themselves: the backlog upstream of every
-        # meter the application owns, tagged per loop thread.
+        # meter the application owns.
+        #
+        # Summed AND unsummed, because the sum alone threw away the count. The
+        # 2026-08-23 verify run read 1,660 pending tasks and could not say whether
+        # that was four loops of 415 or sixteen of 104 - and without the number of
+        # loops there is no per-task cost, which is the quantity that decides
+        # whether this queue can hold 900ms. The unsummed series is tagged per
+        # loop thread, so its cardinality is the thread count.
         PrometheusQuery(
             "netty_eventloop_pending",
             f"sum(reactor_netty_eventloop_pending_tasks{CONTROL_PLANE_SELECTOR})",
+        ),
+        PrometheusQuery(
+            "netty_eventloop_pending_per_loop",
+            f"reactor_netty_eventloop_pending_tasks{CONTROL_PLANE_SELECTOR}",
         ),
         # Time spent INSIDE the application, split by what the caller got. Spring
         # Boot publishes this already and nobody had asked for it.
