@@ -392,6 +392,13 @@ def _async_queue_queries(function_name: str) -> Queries:
             f"function_dispatch_slot_hold_events_total{function}",
         ),
         PrometheusQuery(
+            "function_dispatch_slot_hold_distribution_series",
+            'count({__name__=~"function_dispatch_slot_hold_.*(_max|_bucket)",'
+            f'function="{function_name}"}} or '
+            '{__name__=~"function_dispatch_slot_hold_.*",'
+            f'function="{function_name}",quantile=~".+"}}) or vector(0)',
+        ),
+        PrometheusQuery(
             "function_scheduler_batch_limit_total",
             f"function_scheduler_batch_limit_total{function}",
         ),

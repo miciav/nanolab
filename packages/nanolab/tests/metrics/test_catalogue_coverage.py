@@ -249,6 +249,12 @@ def test_async_queue_snapshot_collects_dispatch_diagnostics() -> None:
     assert queries["function_dispatch_slot_hold_events_total"] == (
         f"function_dispatch_slot_hold_events_total{function}"
     )
+    assert queries["function_dispatch_slot_hold_distribution_series"] == (
+        'count({__name__=~"function_dispatch_slot_hold_.*(_max|_bucket)",'
+        'function="word-stats-java"} or '
+        '{__name__=~"function_dispatch_slot_hold_.*",'
+        'function="word-stats-java",quantile=~".+"}) or vector(0)'
+    )
     assert "function_dispatch_slot_hold_duration_count" not in queries
     assert "function_dispatch_slot_hold_duration_sum" not in queries
     # The four reacquisition series are gone on purpose: the probe was falsified
