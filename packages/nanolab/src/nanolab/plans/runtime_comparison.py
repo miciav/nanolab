@@ -108,6 +108,19 @@ def container_queries(config: ScenarioConfig) -> tuple[PrometheusQuery, ...]:
             "container_cpu_cores@control-plane",
             f'rate(container_cpu_usage_seconds_total{{namespace={namespace},container="control-plane"}}[30s])',
         ),
+        # Whether the CPU limit was the thing being measured. Usage alone cannot
+        # say: a process pinned at its quota and a process with work to spare
+        # both report a number below the limit, and only the throttled share
+        # tells them apart. Reading a comparison without it, a whole run can be
+        # attributed to the build when the answer was the chart's one core.
+        PrometheusQuery(
+            "container_cpu_periods@control-plane",
+            f'container_cpu_cfs_periods_total{{namespace={namespace},container="control-plane"}}',
+        ),
+        PrometheusQuery(
+            "container_cpu_throttled_periods@control-plane",
+            f'container_cpu_cfs_throttled_periods_total{{namespace={namespace},container="control-plane"}}',
+        ),
     ]
     for name in config.functions:
         # Function containers are all named `function` by the deployment builder,

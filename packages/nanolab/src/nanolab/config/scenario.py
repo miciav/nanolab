@@ -10,6 +10,13 @@ BuildStrategy = Literal["docker", "buildpack"]
 AutoscalingStrategy = Literal["INTERNAL", "HPA"]
 
 
+# The one key in `resources` that is not a function. The control plane's limits
+# are otherwise unreachable from a scenario: nothing sets them, so the chart
+# default of one core applies to every load test, and that single core was the
+# ceiling a whole investigation spent itself finding.
+CONTROL_PLANE_RESOURCES = "control-plane"
+
+
 class ResourceQuantity(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
@@ -131,8 +138,11 @@ class ScenarioConfig(BaseModel):
             raise ValueError(f"backend is required for {self.workflow} workflow")
         if self.workflow == "offload" and self.backend is not None:
             raise ValueError("offload workflow does not take a backend")
-        if set(self.resources) - set(self.functions):
-            raise ValueError("resources must refer to selected functions")
+        if set(self.resources) - set(self.functions) - {CONTROL_PLANE_RESOURCES}:
+            raise ValueError(
+                "resources must refer to selected functions, or to "
+                f"{CONTROL_PLANE_RESOURCES!r}"
+            )
         if self.autoscaling and self.workflow != "loadtest":
             raise ValueError("autoscaling is only supported by the loadtest workflow")
         if self.concurrency_control and self.workflow != "loadtest":

@@ -161,3 +161,30 @@ def test_rejects_legacy_fields() -> None:
                 "base_scenario": "validate-container-local",
             }
         )
+
+
+def test_resources_may_name_the_control_plane_as_well_as_functions() -> None:
+    """Its limits are otherwise unreachable, so every load test gets one core."""
+    config = ScenarioConfig.model_validate(
+        {
+            "workflow": "loadtest",
+            "backend": "k8s",
+            "functions": ["word-stats-java"],
+            "resources": {"control-plane": {"limits": {"cpu": 2, "memoryMiB": 1024}}},
+        }
+    )
+
+    assert config.resources["control-plane"].limits is not None
+    assert config.resources["control-plane"].limits.memory_mib == 1024
+
+
+def test_resources_still_reject_a_name_that_is_neither() -> None:
+    with pytest.raises(ValidationError):
+        ScenarioConfig.model_validate(
+            {
+                "workflow": "loadtest",
+                "backend": "k8s",
+                "functions": ["word-stats-java"],
+                "resources": {"word-stats-python": {"limits": {"cpu": 1}}},
+            }
+        )

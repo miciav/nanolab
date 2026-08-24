@@ -151,3 +151,24 @@ def test_sync_queue_settings_use_the_prefix_the_platform_binds() -> None:
 
     assert sync_vars, "the load-test deploy must configure the sync queue"
     assert not any(name.startswith("NANOFAAS_SYNC_QUEUE") for name in sync_vars)
+
+
+def test_control_plane_limits_reach_the_chart_as_kubernetes_quantities() -> None:
+    """A bare 2 would land in the manifest as two millicore, and 1024 as bytes."""
+    values = helm_mod.control_plane_helm_values(
+        namespace="nanofaas",
+        control_plane_image="reg/nanofaas/control-plane:jvm",
+        control_plane_resources={"limits": {"cpu": 2, "memoryMiB": 1024}},
+    )
+
+    assert values["controlPlane.resources.limits.cpu"] == "2"
+    assert values["controlPlane.resources.limits.memory"] == "1024Mi"
+
+
+def test_control_plane_limits_are_absent_when_the_scenario_declares_none() -> None:
+    """Silence must leave the chart default alone rather than set an empty one."""
+    values = helm_mod.control_plane_helm_values(
+        namespace="nanofaas", control_plane_image="reg/nanofaas/control-plane:jvm"
+    )
+
+    assert not [key for key in values if key.startswith("controlPlane.resources")]

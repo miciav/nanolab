@@ -123,7 +123,12 @@ def test_container_cost_is_queried_for_the_control_plane_and_every_function() ->
     assert "container_memory_bytes@control-plane" in names
     assert "container_memory_bytes@word-stats-java" in names
     assert "container_memory_bytes@word-stats-javascript" in names
-    assert len(names) == 6
+    # Usage alone cannot say whether the CPU limit was the thing being measured:
+    # a process pinned at its quota and one with work to spare both report a
+    # number below the limit. Only the throttled share separates them.
+    assert "container_cpu_periods@control-plane" in names
+    assert "container_cpu_throttled_periods@control-plane" in names
+    assert len(names) == 8
 
 
 def test_cpu_is_a_rate_not_a_counter() -> None:

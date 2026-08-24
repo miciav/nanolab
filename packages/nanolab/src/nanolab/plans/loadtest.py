@@ -59,7 +59,7 @@ from sonata_tasks.tasks.models import CommandTaskSpec
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.cli.vm_provider import vm_request_for_role
 from nanolab.metrics.catalogue import queries_for
-from nanolab.config.scenario import ScenarioConfig
+from nanolab.config.scenario import CONTROL_PLANE_RESOURCES, ScenarioConfig
 from nanolab.plans.functions import resolve_function, sonata_function
 from nanolab.workspace.paths import discover_tool_root
 from nanolab.workspace.provenance import source_fingerprint
@@ -447,6 +447,19 @@ def _resolve_script_and_summary(
     return script_path, summary_path
 
 
+def _control_plane_resources(
+    config: ScenarioConfig,
+) -> dict[str, dict[str, float | int | str]] | None:
+    """The control plane's own limits, if the scenario declared any.
+
+    Reuses the `resources` map rather than adding a field beside it: a scenario
+    that already says what a function may use should say it the same way for the
+    process serving that function.
+    """
+    spec = config.resources.get(CONTROL_PLANE_RESOURCES)
+    return spec.model_dump(by_alias=True, exclude_none=True) if spec is not None else None
+
+
 def _build_platform_request(
     *,
     backend: Backend,
@@ -459,6 +472,7 @@ def _build_platform_request(
     remote_repo_root: Path | None,
     hpa: bool,
     container_metrics: bool = False,
+    control_plane_resources: dict[str, dict[str, float | int | str]] | None = None,
 ) -> PlatformRequest:
     request = PlatformRequest(
         backend=backend,
@@ -485,6 +499,7 @@ def _build_platform_request(
             expose_node_port=True,
             metrics_profile="advanced",
             container_metrics=container_metrics,
+            control_plane_resources=control_plane_resources,
         )
         if hpa:
             helm_values["hpa-metrics-adapter.enabled"] = "true"
@@ -1243,6 +1258,7 @@ def build_loadtest_plan(
         remote_repo_root=remote_repo_root,
         hpa=hpa,
         container_metrics=container_metrics,
+        control_plane_resources=_control_plane_resources(config),
     )
     load_role: ExecutionRole = "loadgen" if dedicated else "stack"
     executor = RoleBoundCommandTaskExecutor(bindings)

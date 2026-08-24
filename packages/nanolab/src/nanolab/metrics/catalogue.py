@@ -51,6 +51,17 @@ def core_queries(function_name: str) -> Queries:
             "function_queue_rejected_total", f"function_queue_rejected_total{function}"
         ),
         PrometheusQuery("function_cold_start_total", f"function_cold_start_total{function}"),
+        # Not per-function: both are process-wide, and both answer the question
+        # the retention rewrite exists for. The store used to be declared in time
+        # and unbounded in space, which under sustained load produced a live set
+        # the size of the tenured generation - so how many records it actually
+        # holds is the reading that says whether that is still true. The key
+        # count belongs beside it: a key outliving its record duplicates an
+        # execution, and a key store that empties early does the same.
+        PrometheusQuery("execution_store_size", f"execution_store_size{CONTROL_PLANE_SELECTOR}"),
+        PrometheusQuery(
+            "idempotency_keys_held", f"idempotency_keys_held{CONTROL_PLANE_SELECTOR}"
+        ),
         PrometheusQuery("function_warm_start_total", f"function_warm_start_total{function}"),
         PrometheusQuery(
             "function_latency_count", f"function_latency_ms_seconds_count{function}", True
