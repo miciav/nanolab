@@ -15,7 +15,11 @@ def _executable(path: Path, body: str) -> None:
 
 
 def _run_matrix(
-    tmp_path: Path, *, fail_all: bool = False
+    tmp_path: Path,
+    *,
+    azure_fail: bool = False,
+    fail_all: bool = False,
+    helm_fail: bool = False,
 ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
     script = tmp_path / "run-matrix.sh"
     source = SCRIPT.read_text().replace(
@@ -28,21 +32,21 @@ def _run_matrix(
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     log = tmp_path / "events.log"
+    log.touch()
     _executable(
-        bin_dir / "caffeinate",
+        bin_dir / "az",
+        '[ "${AZURE_FAIL:-0}" = 1 ] && exit 41\nprintf "%s\\n" 198.51.100.42\n',
+    )
+    _executable(
+        bin_dir / "ssh",
         "\n".join(
             (
-                'echo caffeinate-start >> "$EVENT_LOG"',
-                "shift",
-                '"$@"',
-                "rc=$?",
-                'echo caffeinate-end >> "$EVENT_LOG"',
-                "exit $rc",
+                'echo "ssh $*" >> "$EVENT_LOG"',
+                'if [ "${HELM_FAIL:-0}" = 1 ] && [[ "$*" != *"; true"* ]]; then exit 42; fi',
+                "exit 0",
             )
         ),
     )
-    _executable(bin_dir / "az", 'printf "%s\\n" 198.51.100.42\n')
-    _executable(bin_dir / "ssh", 'echo "ssh $*" >> "$EVENT_LOG"\n')
     _executable(
         tmp_path / "nanolab.sh",
         "\n".join(
@@ -70,8 +74,12 @@ def _run_matrix(
     }
     if fail_all:
         env["FAIL_ALL"] = "1"
+    if azure_fail:
+        env["AZURE_FAIL"] = "1"
+    if helm_fail:
+        env["HELM_FAIL"] = "1"
     result = subprocess.run(
-        [str(bin_dir / "caffeinate"), "-dimsu", str(script)],
+        [str(script)],
         cwd=tmp_path,
         env=env,
         text=True,
@@ -87,6 +95,20 @@ def test_matrix_resolves_the_current_stack_ip(tmp_path: Path) -> None:
     assert result.returncode == 0
     ssh_event = next(event for event in events if event.startswith("ssh "))
     assert "azureuser@198.51.100.42" in ssh_event
+
+
+def test_azure_lookup_error_stops_before_compare(tmp_path: Path) -> None:
+    result, events = _run_matrix(tmp_path, azure_fail=True)
+
+    assert result.returncode == 41
+    assert not any(event.startswith("compare ") for event in events)
+
+
+def test_helm_error_stops_before_compare(tmp_path: Path) -> None:
+    result, events = _run_matrix(tmp_path, helm_fail=True)
+
+    assert result.returncode == 42
+    assert not any(event.startswith("compare ") for event in events)
 
 
 def test_failed_compare_propagates_and_does_not_teardown_historical_runs(
@@ -112,11 +134,3 @@ def test_current_twelve_cells_teardown_despite_historical_runs(tmp_path: Path) -
 
     assert result.returncode == 0
     assert "teardown" in events
-
-
-def test_caffeinate_covers_synchronous_teardown(tmp_path: Path) -> None:
-    result, events = _run_matrix(tmp_path)
-
-    assert result.returncode == 0
-    assert events[0] == "caffeinate-start"
-    assert events[-2:] == ["teardown", "caffeinate-end"]

@@ -30,11 +30,11 @@ RUN_PREFIX="$R/azure-matrix-$MATRIX_ID"
 
 # Un rilascio Helm lasciato in piedi da un run interrotto verrebbe RIUSATO, e il
 # tag :jvm-c2 e' mutabile: la cella misurerebbe l'immagine precedente.
-stack_ip=$(az network public-ip show -g maurinoRicerca-rg \
-  -n nanofaas-comparison-pip --query ipAddress -o tsv 2>/dev/null || true)
+stack_ip=$(az network public-ip list -g maurinoRicerca-rg \
+  --query "[?name == 'nanofaas-comparison-pip'].ipAddress | [0]" -o tsv)
 if [ -n "$stack_ip" ]; then
   ssh -o StrictHostKeyChecking=no "azureuser@$stack_ip" \
-    'export KUBECONFIG=/etc/rancher/k3s/k3s.yaml; sudo -E helm uninstall nanofaas -n nanofaas-e2e 2>/dev/null; true'
+    'export KUBECONFIG=/etc/rancher/k3s/k3s.yaml; sudo -E helm uninstall nanofaas -n nanofaas-e2e --ignore-not-found'
 fi
 
 for s in sync-baseline-load2x mixed-workload-load2x sync-baseline-load3x mixed-workload-load3x; do
