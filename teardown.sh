@@ -13,6 +13,16 @@ for pass in 1 2 3; do
   az disk list -g $G -o tsv --query "[?contains(name,'nanofaas-comparison')].name" \
     | while read -r d; do [ -n "$d" ] && az disk delete -g $G -n "$d" -y; done
 done
-echo "$(date '+%F %T') residui:"
-az resource list -g $G -o tsv --query "[?contains(name,'nanofaas-comparison')].name"
-echo "$(date '+%F %T') teardown finito"
+# Verifica, non annuncio. Il 2026-08-24 questo script ha stampato "teardown
+# finito" lasciando in piedi la VM principale, la sua rete e il disco: `az vm
+# delete` era fallito e niente lo aveva guardato. Una VM che sopravvive a un
+# teardown riuscito costa finche' qualcuno non se ne accorge, ed e' esattamente
+# il tipo di guasto che nessuno va a cercare.
+residui=$(az resource list -g $G -o tsv --query "[?contains(name,'nanofaas-comparison')].name")
+if [ -n "$residui" ]; then
+  echo "$(date '+%F %T') TEARDOWN INCOMPLETO, restano:"
+  echo "$residui"
+  echo "$(date '+%F %T') le risorse qui sopra COSTANO: cancellale a mano"
+  exit 1
+fi
+echo "$(date '+%F %T') teardown verificato: nessuna risorsa residua"
