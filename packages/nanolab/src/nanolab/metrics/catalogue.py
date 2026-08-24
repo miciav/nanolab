@@ -384,12 +384,12 @@ def _async_queue_queries(function_name: str) -> Queries:
             "sum(function_scheduler_dispatch_submit_duration_seconds_sum)",
         ),
         PrometheusQuery(
-            "function_dispatch_slot_hold_duration_count",
-            f"function_dispatch_slot_hold_duration_seconds_count{function}",
+            "function_dispatch_slot_hold_seconds_total",
+            f"function_dispatch_slot_hold_seconds_total{function}",
         ),
         PrometheusQuery(
-            "function_dispatch_slot_hold_duration_sum",
-            f"function_dispatch_slot_hold_duration_seconds_sum{function}",
+            "function_dispatch_slot_hold_events_total",
+            f"function_dispatch_slot_hold_events_total{function}",
         ),
         PrometheusQuery(
             "function_scheduler_batch_limit_total",

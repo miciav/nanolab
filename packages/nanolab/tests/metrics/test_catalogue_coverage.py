@@ -243,12 +243,14 @@ def test_async_queue_snapshot_collects_dispatch_diagnostics() -> None:
     assert queries["function_scheduler_dispatch_submit_duration_all_sum"] == (
         "sum(function_scheduler_dispatch_submit_duration_seconds_sum)"
     )
-    assert queries["function_dispatch_slot_hold_duration_count"] == (
-        f"function_dispatch_slot_hold_duration_seconds_count{function}"
+    assert queries["function_dispatch_slot_hold_seconds_total"] == (
+        f"function_dispatch_slot_hold_seconds_total{function}"
     )
-    assert queries["function_dispatch_slot_hold_duration_sum"] == (
-        f"function_dispatch_slot_hold_duration_seconds_sum{function}"
+    assert queries["function_dispatch_slot_hold_events_total"] == (
+        f"function_dispatch_slot_hold_events_total{function}"
     )
+    assert "function_dispatch_slot_hold_duration_count" not in queries
+    assert "function_dispatch_slot_hold_duration_sum" not in queries
     # The four reacquisition series are gone on purpose: the probe was falsified
     # and the meters deleted from QueueManager, so asking for them collected an
     # empty series that reads as "it never happened".
