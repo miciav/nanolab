@@ -19,25 +19,32 @@
 #
 # Il teardown parte da solo SOLO se ci sono tutte e dodici le celle: un braccio
 # fallito va guardato prima di essere distrutto.
-set -u
-export NANOFAAS_ROOT=/Users/micheleciavotta/Downloads/mcFaas/.worktrees/dispatch-instrumentation
-cd /Users/micheleciavotta/Downloads/nanolab/.worktrees/dispatch-instrumentation || exit 1
+set -eu
+export NANOFAAS_ROOT=${NANOFAAS_ROOT:-/Users/micheleciavotta/Downloads/mcFaas/.worktrees/dispatch-instrumentation}
+NANOLAB_ROOT=${NANOLAB_ROOT:-/Users/micheleciavotta/Downloads/nanolab/.worktrees/dispatch-instrumentation}
+cd "$NANOLAB_ROOT"
 R=packages/nanolab/runs
 E=packages/nanolab/environments/azure-comparison.yaml
+MATRIX_ID=${MATRIX_ID:-$(date -u '+%Y%m%dT%H%M%SZ')}
+RUN_PREFIX="$R/azure-matrix-$MATRIX_ID"
 
 # Un rilascio Helm lasciato in piedi da un run interrotto verrebbe RIUSATO, e il
 # tag :jvm-c2 e' mutabile: la cella misurerebbe l'immagine precedente.
-ssh -o StrictHostKeyChecking=no azureuser@20.61.67.252 \
-  'export KUBECONFIG=/etc/rancher/k3s/k3s.yaml; sudo -E helm uninstall nanofaas -n nanofaas-e2e 2>/dev/null; true'
+stack_ip=$(az network public-ip show -g maurinoRicerca-rg \
+  -n nanofaas-comparison-pip --query ipAddress -o tsv 2>/dev/null || true)
+if [ -n "$stack_ip" ]; then
+  ssh -o StrictHostKeyChecking=no "azureuser@$stack_ip" \
+    'export KUBECONFIG=/etc/rancher/k3s/k3s.yaml; sudo -E helm uninstall nanofaas -n nanofaas-e2e 2>/dev/null; true'
+fi
 
 for s in sync-baseline-load2x mixed-workload-load2x sync-baseline-load3x mixed-workload-load3x; do
   echo "$(date '+%F %T') === $s, 3 ripetizioni ==="
   ./nanolab.sh compare "packages/nanolab/scenarios-v2/$s.yaml" --environment "$E" \
-    --run-dir "$R/azure-matrix-$s" --variants jvm-c2 --repetitions 3
-  echo "$(date '+%F %T') $s rc=$?  celle=$(find "$R/azure-matrix-$s" -name k6-summary.json 2>/dev/null | wc -l | tr -d ' ')"
+    --run-dir "$RUN_PREFIX-$s" --variants jvm-c2 --repetitions 3
+  echo "$(date '+%F %T') $s rc=$?  celle=$(find "$RUN_PREFIX-$s" -name k6-summary.json 2>/dev/null | wc -l | tr -d ' ')"
 done
 
-celle=$(find "$R"/azure-matrix-* -name k6-summary.json 2>/dev/null | wc -l | tr -d ' ')
+celle=$(find "$R" -type f -path "$RUN_PREFIX-*/jvm-c2/run-*/k6-summary.json" 2>/dev/null | wc -l | tr -d ' ')
 echo "$(date '+%F %T') === matrice finita: $celle/12 celle ==="
 if [ "$celle" -eq 12 ]; then
   ./teardown.sh
