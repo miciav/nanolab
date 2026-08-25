@@ -1314,7 +1314,13 @@ def build_loadtest_plan(
         target=target,
         replica_floor=replica_floor,
         prometheus_client=prometheus_client,
-        neighbour=neighbour_name(config) if is_co_tenancy(config) else None,
+        # Due funzioni, non il governor, sono la ragione per raccogliere il
+        # vicino: un run che ne serve due e registra i contatori di piattaforma
+        # per una sola lascia meta' del carico senza spiegazione. Il confronto
+        # fra build non ha governor per progetto, e proprio li' una cella ha
+        # riportato il 30% di richieste HTTP fallite con lo 0,3% di rifiuti
+        # sull'unica funzione osservata.
+        neighbour=neighbour_name(config) if len(config.functions) >= 2 else None,
         concurrency_report=_build_concurrency_report(config, run_dir),
         extra_prometheus_queries=extra_prometheus_queries,
         observed_modules=observed_modules or additional_modules,

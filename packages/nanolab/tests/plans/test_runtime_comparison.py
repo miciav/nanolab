@@ -273,3 +273,26 @@ def test_fixed_function_limits_reach_the_registration_shape(nanofaas_root: Path)
     )
 
     assert {(function.concurrency, function.queue_size) for function in functions} == {(8, 20)}
+
+
+def test_a_two_function_comparison_records_both_functions_refusals() -> None:
+    """One cell reported 30% of HTTP requests failed and 0.3% refused.
+
+    The two are not in contradiction: function_queue_rejected_total was
+    collected for the primary function only, so the second function's refusals -
+    a third of the offered load - were never recorded anywhere. The gate used to
+    be concurrency control, which a build comparison never enables.
+    """
+    from nanolab.plans.loadtest import _default_prometheus_queries, neighbour_name
+
+    config = _config()
+    assert len(config.functions) == 2
+    names = [
+        q.name
+        for q in _default_prometheus_queries(
+            config.functions[0], neighbour_name(config), modules=("async-queue",)
+        )
+    ]
+
+    assert "function_queue_rejected_total" in names
+    assert f"function_queue_rejected_total@{config.functions[1]}" in names
