@@ -55,6 +55,23 @@ VARIANTS: tuple[ControlPlaneVariant, ...] = (
         ),
         build_env=_env(),
     ),
+    # The baseline's own tuning is not the JVM's default. The image pins
+    # -XX:+UseSerialGC -XX:TieredStopAtLevel=1, chosen when the chart gave the
+    # control plane a single core, and the running process confirms it: the
+    # actuator reports the serial collector's MXBeans even at two cores. Dropping
+    # TieredStopAtLevel restores the default of 4, so the flag is written out
+    # where C1-only is meant and omitted where it is not.
+    #
+    # Without this variant the comparison is optimised AOT against a JIT with its
+    # optimising compiler switched off, which is not the question the chapter
+    # asks. The 2026-08 archive prices the difference at 40% of throughput and a
+    # factor of six on p95 at one core.
+    ControlPlaneVariant(
+        key="jvm-c2",
+        label="JVM (serial GC, full tiering)",
+        rationale="Isolates the JIT: C2 restored, collector held at the baseline's serial.",
+        build_env=_env(JVM_TUNING="-XX:+UseSerialGC"),
+    ),
     ControlPlaneVariant(
         key="native-os",
         label="Native, -Os, serial GC",
@@ -118,7 +135,11 @@ def build_operations(
     a locally tagged image is invisible to containerd.
     """
     image = variant.image(registry)
-    if variant.key == "jvm":
+    if variant.key.startswith("jvm"):
+        tuning = variant.build_env.get("JVM_TUNING")
+        # Only passed when the variant asks for it, so the baseline's build line
+        # stays exactly what it was and its cache key does not move.
+        tuning_args = ("--build-arg", f"JVM_TUNING={tuning}") if tuning else ()
         return (
             RemoteCommandOperation(
                 operation_id=f"variant.{variant.key}.boot_jar",
@@ -141,6 +162,7 @@ def build_operations(
                     "build",
                     "-f",
                     "platform/control-plane/Dockerfile",
+                    *tuning_args,
                     "-t",
                     image,
                     "platform/control-plane",

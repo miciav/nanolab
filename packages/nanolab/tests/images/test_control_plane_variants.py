@@ -68,3 +68,21 @@ def test_every_variant_runs_on_the_vm() -> None:
     for variant in VARIANTS:
         for op in build_operations(variant, registry=REGISTRY, modules=MODULES):
             assert op.execution_target == "vm", op.operation_id
+
+
+def test_a_tuned_jvm_variant_is_built_as_a_jvm_image_not_a_native_one() -> None:
+    """key == "jvm" would send every tuned JVM down the native-image path."""
+    ops = build_operations(_variant("jvm-c2"), registry=REGISTRY, modules="all")
+    build = next(op for op in ops if op.operation_id.endswith(".image"))
+
+    assert "platform/control-plane/Dockerfile" in build.argv
+    assert "--build-arg" in build.argv
+    assert "JVM_TUNING=-XX:+UseSerialGC" in build.argv
+
+
+def test_the_baseline_jvm_build_line_is_left_exactly_as_it_was() -> None:
+    """A --build-arg the variant never asked for would move its cache key."""
+    ops = build_operations(_variant("jvm"), registry=REGISTRY, modules="all")
+    build = next(op for op in ops if op.operation_id.endswith(".image"))
+
+    assert "--build-arg" not in build.argv
