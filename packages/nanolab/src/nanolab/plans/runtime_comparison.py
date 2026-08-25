@@ -113,6 +113,17 @@ def container_queries(config: ScenarioConfig) -> tuple[PrometheusQuery, ...]:
         # both report a number below the limit, and only the throttled share
         # tells them apart. Reading a comparison without it, a whole run can be
         # attributed to the build when the answer was the chart's one core.
+        # The same reading without the sum. A snapshot entry holds one series, and
+        # `_merge_samples` adds every label dimension at each timestamp - so during
+        # the rollout each cell begins with, the terminating pod and the starting
+        # one are added together and the result exceeds the limit: 1.44 cores
+        # under a one-core cap, 3.088 under a two-core one. The mean is barely
+        # touched; the peak is nonsense. Kept beside the original rather than
+        # replacing it, so the series already archived stay comparable.
+        PrometheusQuery(
+            "container_cpu_cores_max@control-plane",
+            f'max(rate(container_cpu_usage_seconds_total{{namespace={namespace},container="control-plane"}}[30s]))',
+        ),
         PrometheusQuery(
             "container_cpu_periods@control-plane",
             f'container_cpu_cfs_periods_total{{namespace={namespace},container="control-plane"}}',

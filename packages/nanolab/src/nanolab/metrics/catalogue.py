@@ -161,6 +161,41 @@ def runtime_queries(_function_name: str, *, required: bool = True) -> Queries:
         PrometheusQuery(
             "jvm_gc_time_fraction", f"jvm_gc_time_fraction{CONTROL_PLANE_SELECTOR}"
         ),
+        # The same counters split by generation, because the snapshot sums a
+        # query's series together: `_merge_samples` adds every label dimension at
+        # each timestamp, so the aggregate above is Copy plus MarkSweepCompact
+        # with no way back. That difference is the whole question when a smaller
+        # heap makes a build faster - fewer young collections and fewer full ones
+        # mean opposite things.
+        #
+        # The names are the MXBean's, per collector: HotSpot serial calls them
+        # Copy and MarkSweepCompact, G1 calls them G1 Young Generation and G1
+        # Old/Concurrent. Matching on names rather than asking for `by (gc)`
+        # keeps one series per query, which is what a snapshot entry holds.
+        PrometheusQuery(
+            "jvm_gc_young_count",
+            "jvm_gc_collection_count_total"
+            + CONTROL_PLANE_SELECTOR.replace("}", ',gc=~"Copy|PS Scavenge|G1 Young Generation"}'),
+        ),
+        PrometheusQuery(
+            "jvm_gc_full_count",
+            "jvm_gc_collection_count_total"
+            + CONTROL_PLANE_SELECTOR.replace(
+                "}", ',gc=~"MarkSweepCompact|PS MarkSweep|G1 Old Generation|G1 Concurrent GC"}'
+            ),
+        ),
+        PrometheusQuery(
+            "jvm_gc_young_time",
+            "jvm_gc_collection_time_seconds_total"
+            + CONTROL_PLANE_SELECTOR.replace("}", ',gc=~"Copy|PS Scavenge|G1 Young Generation"}'),
+        ),
+        PrometheusQuery(
+            "jvm_gc_full_time",
+            "jvm_gc_collection_time_seconds_total"
+            + CONTROL_PLANE_SELECTOR.replace(
+                "}", ',gc=~"MarkSweepCompact|PS MarkSweep|G1 Old Generation|G1 Concurrent GC"}'
+            ),
+        ),
     )
 
 

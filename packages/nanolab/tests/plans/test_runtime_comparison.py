@@ -128,7 +128,8 @@ def test_container_cost_is_queried_for_the_control_plane_and_every_function() ->
     # number below the limit. Only the throttled share separates them.
     assert "container_cpu_periods@control-plane" in names
     assert "container_cpu_throttled_periods@control-plane" in names
-    assert len(names) == 8
+    assert "container_cpu_cores_max@control-plane" in names
+    assert len(names) == 9
 
 
 def test_cpu_is_a_rate_not_a_counter() -> None:
