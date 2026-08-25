@@ -55,22 +55,38 @@ VARIANTS: tuple[ControlPlaneVariant, ...] = (
         ),
         build_env=_env(),
     ),
-    # The baseline's own tuning is not the JVM's default. The image pins
-    # -XX:+UseSerialGC -XX:TieredStopAtLevel=1, chosen when the chart gave the
-    # control plane a single core, and the running process confirms it: the
-    # actuator reports the serial collector's MXBeans even at two cores. Dropping
-    # TieredStopAtLevel restores the default of 4, so the flag is written out
-    # where C1-only is meant and omitted where it is not.
+    # The three below turn the JVM baseline into a 2x2: collector on one axis, JIT
+    # tiering on the other. The baseline sets both to what a single core wants,
+    # and until the CPU sweep of 2026-08-23 nobody had noticed that the build
+    # called "JVM" was neither G1 nor fully JIT-compiled - while the build it was
+    # compared against, native-o3-g1, did get G1.
     #
-    # Without this variant the comparison is optimised AOT against a JIT with its
-    # optimising compiler switched off, which is not the question the chapter
-    # asks. The 2026-08 archive prices the difference at 40% of throughput and a
-    # factor of six on p95 at one core.
+    # Dropping TieredStopAtLevel restores the default of 4 on its own, so the
+    # flag is written out where C1-only is meant and omitted where it is not.
+    ControlPlaneVariant(
+        key="jvm-g1",
+        label="JVM (G1, C1 only)",
+        rationale="Isolates the collector: G1 against the baseline's serial, JIT held at C1.",
+        build_env=_env(JVM_TUNING="-XX:+UseG1GC -XX:TieredStopAtLevel=1"),
+    ),
+    # Misurato in A1c su questo codice: a un core il solo livello di tiering vale
+    # 225 contro 300 dispatch al secondo, shed dal 20,8% allo 0,7% e p95 da 151 a
+    # 4,3 ms. A due core il throughput pareggia e il prezzo si sposta sulla CPU:
+    # 0,65 contro 0,37 core per lo stesso lavoro.
     ControlPlaneVariant(
         key="jvm-c2",
         label="JVM (serial GC, full tiering)",
         rationale="Isolates the JIT: C2 restored, collector held at the baseline's serial.",
         build_env=_env(JVM_TUNING="-XX:+UseSerialGC"),
+    ),
+    ControlPlaneVariant(
+        key="jvm-g1-c2",
+        label="JVM (G1, full tiering)",
+        rationale=(
+            "The JVM as it would be deployed on more than one core, and the only "
+            "JVM build that meets native-o3-g1 on equal terms."
+        ),
+        build_env=_env(JVM_TUNING="-XX:+UseG1GC"),
     ),
     ControlPlaneVariant(
         key="native-os",

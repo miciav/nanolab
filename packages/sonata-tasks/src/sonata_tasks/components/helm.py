@@ -84,6 +84,11 @@ def control_plane_helm_values(
         values["prometheus.create"] = "true"
         values["prometheus.service.type"] = "NodePort"
         values["prometheus.service.nodePort"] = str(TWO_VM_PROMETHEUS_NODE_PORT)
+    # Il chart mette 1 CPU di default, e un load test lo eredita in silenzio: un
+    # run che non dichiara la risorsa piu' scarsa della cosa che misura lascia
+    # decidere il risultato a un default di packaging. Qui i limiti arrivano
+    # dallo scenario, CPU e memoria insieme - un solo modo di dirlo, perche' due
+    # prima o poi si contraddicono.
     if control_plane_resources:
         # requests e limits arrivano nella forma dello schema di scenario
         # ({"limits": {"cpu": 2, "memoryMiB": 1024}}); il chart li vuole come

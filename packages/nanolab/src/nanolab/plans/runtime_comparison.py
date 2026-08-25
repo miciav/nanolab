@@ -38,6 +38,16 @@ from nanolab.plans.loadtest import build_loadtest_plan
 
 SCRIPT_NAME = "runtime-comparison.js"
 
+# The mixed profile is the comparison profile with a different generator: same
+# modules, same fixed pair of functions, same absence of a governor. What changes
+# is that the load carries both doors and a small share of idempotency keys, which
+# is the traffic the platform actually receives and has never been measured under.
+MIXED_SCRIPT_NAME = "mixed-workload.js"
+
+
+def script_for(config: ScenarioConfig) -> str:
+    return MIXED_SCRIPT_NAME if config.load_profile == "mixed" else SCRIPT_NAME
+
 # The module set every variant is compiled with, and therefore the set the run
 # can be asked about. Written out rather than derived from `_additional_modules`:
 # that function returns extras for autoscaling and concurrency runs, and this
@@ -63,7 +73,7 @@ NO_STAGES: tuple[tuple[str, int], ...] = ()
 
 
 def is_runtime_comparison(config: ScenarioConfig) -> bool:
-    return config.load_profile == "comparison"
+    return config.load_profile in ("comparison", "mixed")
 
 
 def comparison_k6_environment(config: ScenarioConfig) -> Mapping[str, str]:
@@ -75,7 +85,14 @@ def comparison_k6_environment(config: ScenarioConfig) -> Mapping[str, str]:
     receive the script's own fallback rather than the functions the scenario asked
     for — and the run would silently load a function that does not exist.
     """
-    return {"NANOFAAS_NEIGHBOUR": config.functions[1]}
+    environment = {"NANOFAAS_NEIGHBOUR": config.functions[1]}
+    # Passate solo se dichiarate: lo script tiene i suoi valori predefiniti, e
+    # scriverli qui vorrebbe dire tenere la definizione del mix in due posti.
+    if config.async_share is not None:
+        environment["K6_ASYNC_SHARE"] = str(config.async_share)
+    if config.idem_share is not None:
+        environment["K6_IDEM_SHARE"] = str(config.idem_share)
+    return environment
 
 
 def container_queries(config: ScenarioConfig) -> tuple[PrometheusQuery, ...]:
@@ -124,13 +141,21 @@ def container_queries(config: ScenarioConfig) -> tuple[PrometheusQuery, ...]:
             "container_cpu_cores_max@control-plane",
             f'max(rate(container_cpu_usage_seconds_total{{namespace={namespace},container="control-plane"}}[30s]))',
         ),
+        # Cores used says how much CPU the process got; these say how much it was
+        # denied. Without them a process pinned at its cgroup quota is
+        # indistinguishable from one that simply had little to do - and that
+        # reading cost ten runs of dispatch-path instrumentation.
+        PrometheusQuery(
+            "container_cpu_throttled_periods@control-plane",
+            f'container_cpu_cfs_throttled_periods_total{{namespace={namespace},container="control-plane"}}',
+        ),
         PrometheusQuery(
             "container_cpu_periods@control-plane",
             f'container_cpu_cfs_periods_total{{namespace={namespace},container="control-plane"}}',
         ),
         PrometheusQuery(
-            "container_cpu_throttled_periods@control-plane",
-            f'container_cpu_cfs_throttled_periods_total{{namespace={namespace},container="control-plane"}}',
+            "container_cpu_throttled_seconds@control-plane",
+            f'container_cpu_cfs_throttled_seconds_total{{namespace={namespace},container="control-plane"}}',
         ),
     ]
     for name in config.functions:
@@ -212,7 +237,7 @@ def build_runtime_comparison_plan(
 ) -> Workflow:
     """Compile one variant's run of the comparison into a Sonata workflow."""
     if not is_runtime_comparison(config):
-        raise ValueError("runtime-comparison plan requires loadProfile: comparison")
+        raise ValueError("runtime-comparison plan requires loadProfile: comparison or mixed")
     image = prebuilt_control_plane_image or _variant_image(config)
     if image is None:
         raise ValueError(
@@ -238,7 +263,7 @@ def build_runtime_comparison_plan(
             if prebuilt_function_images is not None
             else pinned_functions(config, repo_root=repo_root, tool_root=tool_root)
         ),
-        script_name=SCRIPT_NAME,
+        script_name=script_for(config),
         k6_env_overrides=comparison_k6_environment(config),
         # The only profile that needs them, and it cannot be read without them:
         # a natively compiled control plane publishes no JVM memory gauges, so
@@ -258,6 +283,6 @@ def build_runtime_comparison_plan(
         # below, which cAdvisor reports for every build alike — which is the whole
         # reason this profile collects it.
         jvm_metrics_required=False,
-        function_concurrency=8,
+        function_concurrency=2,
         function_queue_size=20,
     )
