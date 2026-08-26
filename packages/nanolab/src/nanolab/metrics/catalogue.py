@@ -634,6 +634,19 @@ def hpa_queries(function_name: str) -> Queries:
 _MAY_BE_ABSENT: Mapping[str, str] = {
     "jvm_gc_collection_count": "SubstrateVM under G1 registers no GarbageCollectorMXBean",
     "jvm_gc_collection_time": "SubstrateVM under G1 registers no GarbageCollectorMXBean",
+    # Same VM, same reason, and they were left out of this list by oversight: a
+    # split of counters that do not exist cannot exist either. Declaring the
+    # aggregates absent-able while requiring the per-generation split made the
+    # 0.19.0 campaign fail on its second cell, after the native G1 build had run
+    # its whole load test, with "required query returned no data".
+    #
+    # Silence here is no longer ambiguous the way it was in August: whether a
+    # build can see its own collector at all is now answered by
+    # gc_metrics_source_mxbean, and native G1 publishes its pauses through JFR.
+    "jvm_gc_young_count": "SubstrateVM under G1 registers no GarbageCollectorMXBean",
+    "jvm_gc_young_time": "SubstrateVM under G1 registers no GarbageCollectorMXBean",
+    "jvm_gc_full_count": "SubstrateVM under G1 registers no GarbageCollectorMXBean",
+    "jvm_gc_full_time": "SubstrateVM under G1 registers no GarbageCollectorMXBean",
     "jvm_gc_pause_count": "Micrometer's notification binder does not exist on a native image",
     "jvm_gc_pause_sum": "Micrometer's notification binder does not exist on a native image",
     "jvm_gc_time_fraction": "polled binder, absent when the collector publishes no MXBean",
