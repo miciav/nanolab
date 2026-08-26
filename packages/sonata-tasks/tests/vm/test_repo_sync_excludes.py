@@ -1,10 +1,10 @@
-"""What the repo sync ships, checked against rsync itself.
+"""What the repo sync ships, checked by running rsync rather than re-reading the tuple.
 
-Asserting that a pattern is in the tuple would only restate the tuple. What can
-actually be wrong is whether rsync AGREES: `docs/experiments/*/raw/` and
-`experiments/control-plane-staging/versions/*/snapshot/` have wildcards in the
-middle, and a pattern that silently matches nothing looks exactly like a pattern
-that works until a 2.1 GB directory goes over the wire.
+The sync used to carry a hand-written copy of .gitignore, and the copy drifted:
+it listed `target/`, `out/` and `dist/` but not `build/`, so 2.77 GB went over
+the wire where 44 MB was needed. It now asks rsync to read the repo's own
+.gitignore files. That is only true if rsync actually honours them, which is
+what this checks - on a real tree, with the real command.
 """
 
 from __future__ import annotations
@@ -15,60 +15,63 @@ from pathlib import Path
 
 import pytest
 
-from sonata_tasks.vm.multipass import REPO_SYNC_EXCLUDE_PATTERNS
+from sonata_tasks.vm.multipass import repo_rsync_command
+
+
+# One file per decision worth making, and the .gitignore that should decide it.
+KEEP = (
+    "settings.gradle.kts",
+    "platform/control-plane/src/main/java/App.java",
+    "docs/experiments/baseline/README.md",
+    "experiments/control-plane-staging/versions/v1/version.yaml",
+)
+DROP = (
+    # Gitignored: the VM regenerates all of it.
+    "platform/control-plane/build/libs/control-plane.jar",
+    "build/reports/index.html",
+    "runtimes/watchdog/target/debug/watchdog",
+    "tools/controlplane/.venv/bin/python",
+    "experiments/control-plane-staging/versions/v1/snapshot/target/debug/binary",
+    # Tracked on purpose, but useless to a VM that compiles: excluded explicitly.
+    "docs/experiments/baseline/raw/A1/metrics/snapshot.json.gz",
+)
+GITIGNORE = "build/\ntarget/\n.venv/\n"
 
 
 def _tree(root: Path) -> None:
-    """A miniature of the checkout, with one file per thing worth deciding on."""
-    files = {
-        # Kept: this is what the VM actually builds from.
-        "platform/control-plane/src/main/java/App.java": "keep",
-        "settings.gradle.kts": "keep",
-        "docs/experiments/baseline/README.md": "keep",
-        "experiments/control-plane-staging/versions/v1/version.yaml": "keep",
-        # Dropped: regenerated on the VM, or irrelevant to building.
-        "platform/control-plane/build/libs/control-plane.jar": "drop",
-        "build/reports/index.html": "drop",
-        "functions/java/word-stats/build/classes/Main.class": "drop",
-        "docs/experiments/baseline/raw/A1/metrics/snapshot.json.gz": "drop",
-        "experiments/control-plane-staging/versions/v1/snapshot/binary": "drop",
-        "runtimes/watchdog/target/debug/watchdog": "drop",
-        "tools/controlplane/.venv/bin/python": "drop",
-    }
-    for name in files:
+    (root / ".gitignore").write_text(GITIGNORE)
+    for name in KEEP + DROP:
         path = root / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("x")
 
 
 @pytest.mark.skipif(shutil.which("rsync") is None, reason="rsync not installed")
-def test_the_sync_ships_sources_and_not_build_output(tmp_path: Path) -> None:
+def test_the_sync_ships_sources_and_not_what_git_ignores(tmp_path: Path) -> None:
     source = tmp_path / "src"
     source.mkdir()
     _tree(source)
 
-    result = subprocess.run(
-        [
-            "rsync", "-an", "--out-format=%n", "--delete", "--delete-excluded",
-            *(f"--exclude={pattern}" for pattern in REPO_SYNC_EXCLUDE_PATTERNS),
-            f"{source}/", str(tmp_path / "dest") + "/",
-        ],
-        capture_output=True, text=True, check=True,
+    command = repo_rsync_command(
+        source=source, user="u", host="h", destination="/remote/nanofaas"
     )
+    # Same argv the provisioning uses, minus the remote: run it dry and locally
+    # so the assertion is about the filters and nothing else.
+    local = [*command[:-1], "--dry-run", "--out-format=%n", f"{tmp_path / 'dest'}/"]
+    result = subprocess.run(local, capture_output=True, text=True, check=True)
     shipped = {line for line in result.stdout.splitlines() if not line.endswith("/")}
 
-    assert "platform/control-plane/src/main/java/App.java" in shipped
-    assert "settings.gradle.kts" in shipped
-    assert "docs/experiments/baseline/README.md" in shipped
-    # The metadata beside a staging snapshot is tracked and stays.
-    assert "experiments/control-plane-staging/versions/v1/version.yaml" in shipped
-
-    for dropped in (
-        "platform/control-plane/build/libs/control-plane.jar",
-        "build/reports/index.html",
-        "docs/experiments/baseline/raw/A1/metrics/snapshot.json.gz",
-        "experiments/control-plane-staging/versions/v1/snapshot/binary",
-        "runtimes/watchdog/target/debug/watchdog",
-        "tools/controlplane/.venv/bin/python",
-    ):
+    for kept in KEEP:
+        assert kept in shipped, f"the sync would no longer ship {kept}"
+    for dropped in DROP:
         assert dropped not in shipped, f"the sync would still ship {dropped}"
+
+
+def test_the_command_reads_gitignore_per_directory() -> None:
+    command = repo_rsync_command(
+        source=Path("/src"), user="u", host="h", destination="/remote"
+    )
+    # A dir-merge rule, not a single top-level exclude: nested .gitignore files
+    # are most of what a monorepo relies on.
+    assert "--filter" in command
+    assert command[command.index("--filter") + 1].startswith(":-")

@@ -11,35 +11,33 @@ from sonata_tasks.deployment import DEFAULT_NAMESPACE
 from sonata_tasks.vm.models import VmRequest, vm_remote_home
 
 
-# What NOT to ship to a VM that is about to build the source itself.
+# Ask rsync to read the repo's own .gitignore files, per directory, instead of
+# keeping a second copy of them here. `:-` is a dir-merge rule: every .gitignore
+# rsync meets applies to that directory and below, exactly as git reads it.
 #
-# The list is not cosmetic. Measured on the nanoFaaS checkout of 2026-08-26 it
-# decides between 2.77 GB and 45 MB per sync - and the sync runs twice per
-# comparison, once for the control plane and once for the load generator. It is
-# also the step most likely to break: A1 of the 0.19.0 campaign died inside it
-# with "Can't assign requested address" after twenty-five minutes.
+# The list below used to try to say the same thing by hand, and drifted. It
+# excluded `target/`, `out/` and `dist/` but not `build/`, which in a Gradle
+# project is THE output directory - so every sync shipped 2.77 GB where 44 MB
+# was needed, twice per comparison, once for the control plane and once for the
+# load generator. It is also the step most likely to break: A1 of the 0.19.0
+# campaign died inside it with "Can't assign requested address" after
+# twenty-five minutes of uploading, among other things, 1.5 GB of a Rust build
+# from February that git had been ignoring all along.
 #
-# Anything the VM regenerates belongs here. `target/`, `out/` and `dist/` were
-# already listed, but `build/` was not - and in a Gradle project that is THE
-# output directory: class files and jars compiled on an arm64 laptop, shipped to
-# an amd64 node that recompiles them anyway.
+# A hand-maintained copy of .gitignore can only ever be as good as the last
+# person who remembered to update it. This one cannot go stale, because it is
+# not a copy.
+REPO_SYNC_GITIGNORE_FILTER = ":- .gitignore"
+
+# What is left for an explicit list: things git tracks on purpose but a VM that
+# compiles the platform has no use for, plus .git itself, which gitignore cannot
+# talk about.
 REPO_SYNC_EXCLUDE_PATTERNS = (
-    ".git", ".git/", ".gitnexus", ".gradle/", ".gradle-local/", ".DS_Store",
-    ".idea/", ".vscode/", ".env", "*.log", "*.class", ".worktrees/",
-    "__pycache__/", "*.egg-info/", "*.pyc", "*.pyo", "*.pyd",
-    ".pytest_cache/", ".venv/", ".uv/", "node_modules/", "dist/",
-    "/building/", "out/", "target/", "build/", "building-test/", "k6/results/",
-    "experiments/k6/results/", "experiments/loadtest/results/",
-    "experiments/.image-cache/", "tools/controlplane/runs/",
-    # Binary snapshots of past staging experiments. The metadata beside them
-    # (version.yaml, hypothesis.md) is tracked, tiny, and stays; the snapshots
-    # are untracked local debris - 2.1 GB of a Rust build from February, still
-    # being uploaded to Azure six months later.
-    "experiments/control-plane-staging/versions/*/snapshot/",
-    # Archived campaign results. A VM that builds the platform has no use for
-    # the measurements of previous campaigns, and they only grow.
+    ".git", ".git/", ".gitnexus", ".DS_Store", ".idea/", ".vscode/",
+    ".worktrees/",
+    # Archived campaign measurements: tracked deliberately, and the largest
+    # tracked thing in the repo. They only grow, and no build reads them.
     "docs/experiments/*/raw/",
-    "recovery/",
 )
 _SSH_CREDENTIALS_UNRESOLVED = object()
 
@@ -120,6 +118,7 @@ def repo_rsync_command(
 ) -> list[str]:
     command = [
         "rsync", "-az", "--delete", "--delete-excluded",
+        "--filter", REPO_SYNC_GITIGNORE_FILTER,
         *(f"--exclude={pattern}" for pattern in REPO_SYNC_EXCLUDE_PATTERNS),
     ]
     if ssh_rsh is not None:
