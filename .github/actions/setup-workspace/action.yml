@@ -48,7 +48,7 @@ runs:
         #     refuses before an execution is built.
         # Tests read the version and the matrix from this checkout rather than
         # assuming them, so moving the pin needs no test edits.
-        ref: c6fa85f6399265e3e6284a8f57a66e2814f7f753
+        ref: 65573223c291b192739efdd340c242c8869ec8c0
         path: .nanofaas-source
         token: ${{ inputs.nanofaas-token }}
 
