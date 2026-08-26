@@ -93,6 +93,12 @@ def core_queries(function_name: str) -> Queries:
         # Senza questa serie, "l'heap sale di 2,79 MB/s" resta un fatto senza un
         # colpevole: si sa che qualcosa cresce, non quale struttura la tiene.
         PrometheusQuery("execution_store_size", "execution_store_size", True),
+        # La META' dell'altra mappa. Il rilascio 0.19.0 spezza ExecutionStore in
+        # due: gli esiti compatti, che `max-outcomes` limita in NUMERO, e le
+        # esecuzioni ancora in volo, che nessun tetto limita. Chiedere solo la
+        # prima misurerebbe il tetto e non la memoria: se sotto il tetto la
+        # memoria non scende, e' questa serie a dire perche'.
+        PrometheusQuery("execution_in_flight_records", "execution_in_flight_records", True),
         # Keys held. Their lifetime is derived from the execution retention, so this is
         # the only reading that says what that derivation costs: at 2x with 5% keyed
         # arrivals a run files roughly 19,000, and whether they are released on
@@ -107,6 +113,10 @@ def core_queries(function_name: str) -> Queries:
         # count belongs beside it: a key outliving its record duplicates an
         # execution, and a key store that empties early does the same.
         PrometheusQuery("execution_store_size", f"execution_store_size{CONTROL_PLANE_SELECTOR}"),
+        PrometheusQuery(
+            "execution_in_flight_records",
+            f"execution_in_flight_records{CONTROL_PLANE_SELECTOR}",
+        ),
         PrometheusQuery(
             "idempotency_keys_held", f"idempotency_keys_held{CONTROL_PLANE_SELECTOR}"
         ),
@@ -208,6 +218,37 @@ def runtime_queries(_function_name: str, *, required: bool = True) -> Queries:
         ),
         PrometheusQuery(
             "jvm_gc_time_fraction", f"jvm_gc_time_fraction{CONTROL_PLANE_SELECTOR}"
+        ),
+        # Whether the build can see its own collector AT ALL, asked as presence
+        # rather than as a value: the gauge always reads 1.0 and carries its
+        # answer in a tag, which the snapshot's per-timestamp sum would erase.
+        # Pinning source="mxbean" turns the tag into the presence of a series.
+        #
+        # This exists because the previous campaign left the GC row of the native
+        # G1 build empty and could not say whether that meant "no collections" or
+        # "no instrument". Silence now has a witness.
+        PrometheusQuery(
+            "gc_metrics_source_mxbean",
+            "nanofaas_gc_metrics_source"
+            + CONTROL_PLANE_SELECTOR.replace("}", ',source="mxbean"}'),
+        ),
+        # Native G1 registers no collector MXBean, so its pauses are read from
+        # JFR VM operations instead. Two queries on purpose: the total says
+        # whether the JFR stream is alive, the filtered one says how much of it
+        # was collection. Both may legitimately answer nothing - on a JVM because
+        # the stream is never opened, on the filtered one because SubstrateVM's
+        # operation names may not match. An empty filtered query beside a
+        # non-empty total is a reading about the names, not about the collector.
+        PrometheusQuery(
+            "jfr_vm_operation_count",
+            f"nanofaas_jfr_vm_operation_count_total{CONTROL_PLANE_SELECTOR}",
+        ),
+        PrometheusQuery(
+            "jfr_gc_operation_time",
+            "nanofaas_jfr_vm_operation_time_seconds_total"
+            + CONTROL_PLANE_SELECTOR.replace(
+                "}", ',operation=~".*(G|g)arbage.*|.*GC.*|.*[Cc]ollect.*"}'
+            ),
         ),
         # The same counters split by generation, because the snapshot sums a
         # query's series together: `_merge_samples` adds every label dimension at
@@ -588,6 +629,9 @@ _MAY_BE_ABSENT: Mapping[str, str] = {
     "jvm_gc_pause_count": "Micrometer's notification binder does not exist on a native image",
     "jvm_gc_pause_sum": "Micrometer's notification binder does not exist on a native image",
     "jvm_gc_time_fraction": "polled binder, absent when the collector publishes no MXBean",
+    "gc_metrics_source_mxbean": "absent IS the reading: the build has no usable collector MXBean",
+    "jfr_vm_operation_count": "the JFR stream is opened only where the MXBeans cannot answer",
+    "jfr_gc_operation_time": "no JFR stream, or SubstrateVM names its GC operation otherwise",
     # process_cpu_usage and jvm_heap_used_bytes are governed by the run instead,
     # through runtime_queries(required=...): on a single-build run their absence
     # means the actuator scrape is broken, on a build comparison it means G1.

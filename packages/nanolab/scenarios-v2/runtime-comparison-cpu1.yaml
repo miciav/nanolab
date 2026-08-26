@@ -23,6 +23,11 @@ resources:
   control-plane:
     limits:
       cpu: 1
+      # Scritto invece che ereditato. Il default del chart e' 2Gi, quindi il
+      # numero non cambia: cambia che la condizione la dichiara lo scenario, e
+      # una campagna che chiama questa cella "1 core / 2 GiB" non lo fa sulla
+      # fiducia in un default che puo' muoversi sotto di lei.
+      memoryMiB: 2048
 functions:
   - word-stats-java
   - word-stats-javascript
