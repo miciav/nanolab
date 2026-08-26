@@ -37,7 +37,14 @@ REPO_SYNC_EXCLUDE_PATTERNS = (
     ".worktrees/",
     # Archived campaign measurements: tracked deliberately, and the largest
     # tracked thing in the repo. They only grow, and no build reads them.
+    #
+    # Two patterns because rsync's `*` stops at a slash and `**` requires at
+    # least one component to cross: neither alone covers both a campaign
+    # directory and an archived one nested a level deeper. Measured on the VM,
+    # the missing depth let 28 MB through. Anchored rather than a bare `raw/`,
+    # which would also swallow a future functions/testdata/raw a build needs.
     "docs/experiments/*/raw/",
+    "docs/experiments/*/*/raw/",
 )
 _SSH_CREDENTIALS_UNRESOLVED = object()
 

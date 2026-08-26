@@ -34,6 +34,10 @@ DROP = (
     "experiments/control-plane-staging/versions/v1/snapshot/target/debug/binary",
     # Tracked on purpose, but useless to a VM that compiles: excluded explicitly.
     "docs/experiments/baseline/raw/A1/metrics/snapshot.json.gz",
+    # A level deeper: an archived campaign. rsync's `*` stops at a slash, so
+    # the first version of this exclusion missed exactly this shape and shipped
+    # 28 MB of it.
+    "docs/experiments/archive/dispatch-bottleneck/raw/A/snapshot.json.gz",
 )
 GITIGNORE = "build/\ntarget/\n.venv/\n"
 
