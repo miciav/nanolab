@@ -50,7 +50,66 @@ def core_queries(function_name: str) -> Queries:
         PrometheusQuery(
             "function_queue_rejected_total", f"function_queue_rejected_total{function}"
         ),
+        # The same admissions and refusals as above, but split by the door they came
+        # in by. Separate series rather than a label on the counters above, because
+        # five of those feed control loops - the concurrency governor reads
+        # function_latency_ms and function_e2e_latency_ms, the autoscaler
+        # function_dispatch_total, the Kubernetes HPA function_inFlight and
+        # function_queue_depth - and splitting a series a control loop reads changes
+        # what that loop sees.
+        *(
+            PrometheusQuery(
+                f"function_{outcome}_{path}",
+                f'function_{outcome}_total{{function="{function_name}",path="{path}"}}',
+            )
+            for outcome in ("admitted", "refused", "replayed")
+            for path in ("sync", "async")
+        ),
+        # Whether the process measured at the end is the one measured at the start.
+        #
+        # It was not, on 2026-08-23: under the mixed workload at 3x the liveness probe
+        # (timeoutSeconds 1, failureThreshold 3) stopped answering within its second,
+        # kubelet killed the container, and the control plane came back with an empty
+        # in-memory registry. Every request after that was a 404, for 35 minutes, and
+        # nothing in the snapshot said so - the counters simply restarted from zero and
+        # a delta read across the window looked merely small.
+        #
+        # A gauge that only rises, except across a restart, where it falls to nearly
+        # nothing. Cheap, and it turns a forensic hunt into a line on a chart.
+        # Vincolata al control plane: senza il selettore la query risponde anche per
+        # le funzioni e per la seconda porta dello stesso processo, e il lettore
+        # prende la prima serie che arriva - che fra due letture puo' non essere la
+        # stessa. La mia guardia dal vivo ha suonato un falso allarme esattamente
+        # cosi', leggendo 952 s poi 576 s da due processi diversi.
+        PrometheusQuery(
+            "process_uptime_seconds",
+            'max(process_uptime_seconds{app="nanofaas-control-plane"})',
+            True,
+        ),
+        # Quanti record il control plane sta ricordando.
+        #
+        # La ritenzione delle esecuzioni e' dichiarata nel tempo e illimitata nello
+        # spazio, quindi la memoria richiesta e' proporzionale al tasso di arrivo.
+        # Senza questa serie, "l'heap sale di 2,79 MB/s" resta un fatto senza un
+        # colpevole: si sa che qualcosa cresce, non quale struttura la tiene.
+        PrometheusQuery("execution_store_size", "execution_store_size", True),
+        # Keys held. Their lifetime is derived from the execution retention, so this is
+        # the only reading that says what that derivation costs: at 2x with 5% keyed
+        # arrivals a run files roughly 19,000, and whether they are released on
+        # schedule is otherwise invisible until the heap says so.
+        PrometheusQuery("idempotency_keys_held", "idempotency_keys_held"),
         PrometheusQuery("function_cold_start_total", f"function_cold_start_total{function}"),
+        # Not per-function: both are process-wide, and both answer the question
+        # the retention rewrite exists for. The store used to be declared in time
+        # and unbounded in space, which under sustained load produced a live set
+        # the size of the tenured generation - so how many records it actually
+        # holds is the reading that says whether that is still true. The key
+        # count belongs beside it: a key outliving its record duplicates an
+        # execution, and a key store that empties early does the same.
+        PrometheusQuery("execution_store_size", f"execution_store_size{CONTROL_PLANE_SELECTOR}"),
+        PrometheusQuery(
+            "idempotency_keys_held", f"idempotency_keys_held{CONTROL_PLANE_SELECTOR}"
+        ),
         PrometheusQuery("function_warm_start_total", f"function_warm_start_total{function}"),
         PrometheusQuery(
             "function_latency_count", f"function_latency_ms_seconds_count{function}", True
@@ -150,6 +209,129 @@ def runtime_queries(_function_name: str, *, required: bool = True) -> Queries:
         PrometheusQuery(
             "jvm_gc_time_fraction", f"jvm_gc_time_fraction{CONTROL_PLANE_SELECTOR}"
         ),
+        # The same counters split by generation, because the snapshot sums a
+        # query's series together: `_merge_samples` adds every label dimension at
+        # each timestamp, so the aggregate above is Copy plus MarkSweepCompact
+        # with no way back. That difference is the whole question when a smaller
+        # heap makes a build faster - fewer young collections and fewer full ones
+        # mean opposite things.
+        #
+        # The names are the MXBean's, per collector: HotSpot serial calls them
+        # Copy and MarkSweepCompact, G1 calls them G1 Young Generation and G1
+        # Old/Concurrent. Matching on names rather than asking for `by (gc)`
+        # keeps one series per query, which is what a snapshot entry holds.
+        PrometheusQuery(
+            "jvm_gc_young_count",
+            "jvm_gc_collection_count_total"
+            + CONTROL_PLANE_SELECTOR.replace("}", ',gc=~"Copy|PS Scavenge|G1 Young Generation"}'),
+        ),
+        PrometheusQuery(
+            "jvm_gc_full_count",
+            "jvm_gc_collection_count_total"
+            + CONTROL_PLANE_SELECTOR.replace(
+                "}", ',gc=~"MarkSweepCompact|PS MarkSweep|G1 Old Generation|G1 Concurrent GC"}'
+            ),
+        ),
+        PrometheusQuery(
+            "jvm_gc_young_time",
+            "jvm_gc_collection_time_seconds_total"
+            + CONTROL_PLANE_SELECTOR.replace("}", ',gc=~"Copy|PS Scavenge|G1 Young Generation"}'),
+        ),
+        PrometheusQuery(
+            "jvm_gc_full_time",
+            "jvm_gc_collection_time_seconds_total"
+            + CONTROL_PLANE_SELECTOR.replace(
+                "}", ',gc=~"MarkSweepCompact|PS MarkSweep|G1 Old Generation|G1 Concurrent GC"}'
+            ),
+        ),
+        # What happens to a request before the application sees it. At the peak of
+        # the 2026-08-23 sweep a rejected request waited 675 ms for its 429 while
+        # the control plane accounted for 6.55 ms of it, and nothing was looking at
+        # the rest.
+        #
+        # Not the accept queue: http_req_connecting averaged 0.01 ms and one
+        # connection per VU accounts for 0.4-0.5% of requests, so ~99% of them
+        # arrive on a connection that was established long before. What is left in
+        # front of the application is per-connection: bytes sitting read but
+        # unhandled in the socket buffer, and a read event queued on an event loop.
+        # That is what the two series below are for.
+        #
+        # Names verified against a live /actuator/prometheus, because the first
+        # attempt guessed both: `connections_total` does not exist - the total is
+        # `connections`, unsuffixed - and the selector was a `job` regex when every
+        # other application metric here selects on `app`. Both mistakes return an
+        # empty series rather than an error, so a whole Azure sweep collected
+        # nothing and said nothing about it.
+        PrometheusQuery(
+            "netty_connections_active",
+            f"reactor_netty_http_server_connections_active{CONTROL_PLANE_SELECTOR}",
+        ),
+        PrometheusQuery(
+            "netty_connections",
+            f"reactor_netty_http_server_connections{CONTROL_PLANE_SELECTOR}",
+        ),
+        # Work queued on the event loops themselves: the backlog upstream of every
+        # meter the application owns.
+        #
+        # Summed AND unsummed, because the sum alone threw away the count. The
+        # 2026-08-23 verify run read 1,660 pending tasks and could not say whether
+        # that was four loops of 415 or sixteen of 104 - and without the number of
+        # loops there is no per-task cost, which is the quantity that decides
+        # whether this queue can hold 900ms. The unsummed series is tagged per
+        # loop thread, so its cardinality is the thread count.
+        PrometheusQuery(
+            "netty_eventloop_pending",
+            f"sum(reactor_netty_eventloop_pending_tasks{CONTROL_PLANE_SELECTOR})",
+        ),
+        PrometheusQuery(
+            "netty_eventloop_pending_per_loop",
+            f"reactor_netty_eventloop_pending_tasks{CONTROL_PLANE_SELECTOR}",
+        ),
+        # How many threads exist and how many want a core. Reactor Netty runs
+        # max(availableProcessors, 4) event loops - four inside a two-CPU cgroup -
+        # while Schedulers.boundedElastic() sizes itself at 10 x availableProcessors
+        # and creates them lazily, so twenty more appear only once load arrives.
+        # Four loops against twenty workers on two cores is a scheduling story that
+        # no application meter can tell, and the JVM has been publishing the two
+        # numbers that test it since the first run.
+        #
+        # Verified against a live /actuator/prometheus, not remembered: the state
+        # tag is spelled "timed-waiting", and jvm_threads_live_threads is a gauge
+        # with no suffix beyond the unit.
+        PrometheusQuery(
+            "jvm_threads_live", f"jvm_threads_live_threads{CONTROL_PLANE_SELECTOR}"
+        ),
+        PrometheusQuery(
+            "jvm_threads_runnable",
+            f'jvm_threads_states_threads{{app="nanofaas-control-plane",state="runnable"}}',
+        ),
+        # Time spent INSIDE the application, split by what the caller got. Spring
+        # Boot publishes this already and nobody had asked for it.
+        #
+        # It is the missing half of the arithmetic: k6 says a rejected request
+        # waited 675 ms and that http_req_waiting - server think time - is 100% of
+        # it, while queue wait plus service accounts for 6.55 ms. This says how
+        # much of the rest was inside the handler. Whatever remains was in front of
+        # it, on an already-open connection waiting to be read.
+        #
+        # Summed by status because the raw series also carries method, outcome,
+        # exception and a templated uri, and only the status matters here.
+        PrometheusQuery(
+            "http_server_ok_count",
+            f'sum(http_server_requests_seconds_count{{app="nanofaas-control-plane",status="200"}})',
+        ),
+        PrometheusQuery(
+            "http_server_ok_sum",
+            f'sum(http_server_requests_seconds_sum{{app="nanofaas-control-plane",status="200"}})',
+        ),
+        PrometheusQuery(
+            "http_server_rejected_count",
+            f'sum(http_server_requests_seconds_count{{app="nanofaas-control-plane",status="429"}})',
+        ),
+        PrometheusQuery(
+            "http_server_rejected_sum",
+            f'sum(http_server_requests_seconds_sum{{app="nanofaas-control-plane",status="429"}})',
+        ),
     )
 
 
@@ -160,12 +342,142 @@ def _async_queue_queries(function_name: str) -> Queries:
     path never calls `QueueManager.enqueue`, so this reads 0 while the other
     queue fills. See nanofaas#196.
     """
+    function = _fn(function_name)
     return (
-        PrometheusQuery("function_queue_depth", f"function_queue_depth{_fn(function_name)}"),
-        PrometheusQuery("function_inFlight", f"function_inFlight{_fn(function_name)}"),
+        PrometheusQuery("function_queue_depth", f"function_queue_depth{function}"),
+        PrometheusQuery("function_inFlight", f"function_inFlight{function}"),
+        # How much of that one backlog is work nobody is waiting for. The depth above
+        # is a mixture whenever both doors are used: with sync-queue off the sync path
+        # calls the same enqueue the async path does, so one FunctionQueueState holds
+        # both. These two say which is which.
+        PrometheusQuery(
+            "function_queue_depth_sync",
+            f'function_queue_depth_by_path{{function="{function_name}",path="sync"}}',
+        ),
+        PrometheusQuery(
+            "function_queue_depth_async",
+            f'function_queue_depth_by_path{{function="{function_name}",path="async"}}',
+        ),
         PrometheusQuery(
             "function_effective_concurrency",
-            f"function_effective_concurrency{_fn(function_name)}",
+            f"function_effective_concurrency{function}",
+        ),
+        PrometheusQuery(
+            "function_dispatchable_backlog", f"function_dispatchable_backlog{function}"
+        ),
+        PrometheusQuery(
+            "function_queue_offer_duration_count",
+            f"function_queue_offer_duration_seconds_count{function}",
+        ),
+        PrometheusQuery(
+            "function_queue_offer_duration_sum",
+            f"function_queue_offer_duration_seconds_sum{function}",
+        ),
+        PrometheusQuery(
+            "function_queue_poll_duration_count",
+            f"function_queue_poll_duration_seconds_count{function}",
+        ),
+        PrometheusQuery(
+            "function_queue_poll_duration_sum",
+            f"function_queue_poll_duration_seconds_sum{function}",
+        ),
+        PrometheusQuery(
+            "function_scheduler_wakeup_delay_count",
+            f"function_scheduler_wakeup_delay_seconds_count{function}",
+        ),
+        PrometheusQuery(
+            "function_scheduler_wakeup_delay_sum",
+            f"function_scheduler_wakeup_delay_seconds_sum{function}",
+        ),
+        PrometheusQuery(
+            "function_scheduler_poll_delay_count",
+            f"function_scheduler_poll_delay_seconds_count{function}",
+        ),
+        PrometheusQuery(
+            "function_scheduler_poll_delay_sum",
+            f"function_scheduler_poll_delay_seconds_sum{function}",
+        ),
+        PrometheusQuery(
+            "function_scheduler_activation_bookkeeping_duration_count",
+            f"function_scheduler_activation_bookkeeping_duration_seconds_count{function}",
+        ),
+        PrometheusQuery(
+            "function_scheduler_activation_bookkeeping_duration_sum",
+            f"function_scheduler_activation_bookkeeping_duration_seconds_sum{function}",
+        ),
+        PrometheusQuery(
+            "function_scheduler_signal_enqueue_duration_count",
+            f"function_scheduler_signal_enqueue_duration_seconds_count{function}",
+        ),
+        PrometheusQuery(
+            "function_scheduler_signal_enqueue_duration_sum",
+            f"function_scheduler_signal_enqueue_duration_seconds_sum{function}",
+        ),
+        PrometheusQuery(
+            "function_scheduler_dispatch_submit_duration_count",
+            f"function_scheduler_dispatch_submit_duration_seconds_count{function}",
+        ),
+        PrometheusQuery(
+            "function_scheduler_dispatch_submit_duration_sum",
+            f"function_scheduler_dispatch_submit_duration_seconds_sum{function}",
+        ),
+        PrometheusQuery(
+            "function_scheduler_dispatch_submit_duration_all_count",
+            "sum(function_scheduler_dispatch_submit_duration_seconds_count)",
+        ),
+        PrometheusQuery(
+            "function_scheduler_dispatch_submit_duration_all_sum",
+            "sum(function_scheduler_dispatch_submit_duration_seconds_sum)",
+        ),
+        PrometheusQuery(
+            "function_dispatch_slot_hold_seconds_total",
+            f"function_dispatch_slot_hold_seconds_total{function}",
+        ),
+        PrometheusQuery(
+            "function_dispatch_slot_hold_events_total",
+            f"function_dispatch_slot_hold_events_total{function}",
+        ),
+        PrometheusQuery(
+            "function_dispatch_slot_hold_distribution_series",
+            'count({__name__=~"function_dispatch_slot_hold_.*(_max|_bucket)",'
+            f'function="{function_name}"}} or '
+            '{__name__=~"function_dispatch_slot_hold_.*",'
+            f'function="{function_name}",quantile=~".+"}}) or vector(0)',
+        ),
+        PrometheusQuery(
+            "function_scheduler_batch_limit_total",
+            f"function_scheduler_batch_limit_total{function}",
+        ),
+        PrometheusQuery(
+            "function_scheduler_slot_blocked_total",
+            f"function_scheduler_slot_blocked_total{function}",
+        ),
+        PrometheusQuery(
+            "function_scheduler_slot_blocked_all_total",
+            "sum(function_scheduler_slot_blocked_total)",
+        ),
+        PrometheusQuery(
+            "function_scheduler_signal_coalesced_total",
+            f"function_scheduler_signal_coalesced_total{function}",
+        ),
+        PrometheusQuery(
+            "function_scheduler_signal_coalesced_all_total",
+            "sum(function_scheduler_signal_coalesced_total)",
+        ),
+        # Untagged on purpose: one scheduler thread serves every function, so
+        # these two partition its wall clock and a `function` selector would
+        # return nothing. Their sum over a window must not exceed the window.
+        PrometheusQuery(
+            "scheduler_visit_duration_count", "scheduler_visit_duration_seconds_count"
+        ),
+        PrometheusQuery(
+            "scheduler_visit_duration_sum", "scheduler_visit_duration_seconds_sum"
+        ),
+        PrometheusQuery(
+            "scheduler_idle_duration_count", "scheduler_idle_duration_seconds_count"
+        ),
+        PrometheusQuery(
+            "scheduler_idle_duration_sum", "scheduler_idle_duration_seconds_sum"
         ),
     )
 
@@ -260,6 +572,45 @@ def hpa_queries(function_name: str) -> Queries:
     )
 
 
+# A query that answers nothing is not a fact about the run, it is a hole in it -
+# and holes have been expensive here. The Netty series were absent for a whole
+# Azure night because the image predated the config that publishes them, and
+# nothing said so; four reacquisition probes went on being asked for months after
+# the meters were deleted, returning empty results that read as "it never
+# happened". Measured over the 114 archived cells, 69 of 80 query names never
+# came back empty where they were asked, so silence is the exception and belongs
+# where exceptions belong: declared, with its reason.
+#
+# Keyed by query name, valued by why that name may legitimately answer nothing.
+_MAY_BE_ABSENT: Mapping[str, str] = {
+    "jvm_gc_collection_count": "SubstrateVM under G1 registers no GarbageCollectorMXBean",
+    "jvm_gc_collection_time": "SubstrateVM under G1 registers no GarbageCollectorMXBean",
+    "jvm_gc_pause_count": "Micrometer's notification binder does not exist on a native image",
+    "jvm_gc_pause_sum": "Micrometer's notification binder does not exist on a native image",
+    "jvm_gc_time_fraction": "polled binder, absent when the collector publishes no MXBean",
+    # process_cpu_usage and jvm_heap_used_bytes are governed by the run instead,
+    # through runtime_queries(required=...): on a single-build run their absence
+    # means the actuator scrape is broken, on a build comparison it means G1.
+    "process_cpu_usage": "governed per run by jvm_metrics_required",
+    "jvm_heap_used_bytes": "governed per run by jvm_metrics_required",
+}
+
+
+def _require_everything_that_can_answer(queries: Queries) -> Queries:
+    """Flip the default: a query is required unless it is declared absent-able.
+
+    The flag was opt-in, and five of seventy-five queries had opted in. Every
+    other one could return nothing and the run would still pass, which is how a
+    matrix reported a healthy system while the platform shed 13% of its load.
+    """
+    return tuple(
+        query
+        if query.name in _MAY_BE_ABSENT or query.required
+        else PrometheusQuery(query.name, query.expr, True)
+        for query in queries
+    )
+
+
 def queries_for(
     function_name: str,
     *,
@@ -287,7 +638,7 @@ def queries_for(
         queries.extend(hpa_queries(function_name))
     if neighbour is not None:
         queries.extend(neighbour_queries(neighbour, modules=selected))
-    return tuple(queries)
+    return _require_everything_that_can_answer(tuple(queries))
 
 
 def neighbour_queries(neighbour: str, *, modules: Iterable[str]) -> Queries:
@@ -329,6 +680,18 @@ def neighbour_queries(neighbour: str, *, modules: Iterable[str]) -> Queries:
             f"function_e2e_latency_p95_ms@{neighbour}",
             "histogram_quantile(0.95, sum by (le) "
             f"(rate(function_e2e_latency_ms_seconds_bucket{function}[30s]))) * 1000",
+        ),
+        # The co-tenant is driven through both doors too, so without these a mixed run
+        # sees which door displaced which on one function and nothing on the other.
+        # The queue depths arrive by the module loop below; these do not, because they
+        # are core meters and this list is written out rather than derived.
+        *(
+            PrometheusQuery(
+                f"function_{outcome}_{path}@{neighbour}",
+                f'function_{outcome}_total{{function="{neighbour}",path="{path}"}}',
+            )
+            for outcome in ("admitted", "refused", "replayed")
+            for path in ("sync", "async")
         ),
     ]
     for module in modules:

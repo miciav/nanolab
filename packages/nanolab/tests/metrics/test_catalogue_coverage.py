@@ -187,6 +187,97 @@ def test_async_queue_snapshot_collects_dispatch_capacity() -> None:
     )
 
 
+def test_async_queue_snapshot_collects_dispatch_diagnostics() -> None:
+    queries = {
+        query.name: query.expr
+        for query in queries_for("word-stats-java", modules=("async-queue",))
+    }
+    function = '{function="word-stats-java"}'
+
+    assert queries["function_dispatchable_backlog"] == f"function_dispatchable_backlog{function}"
+    assert queries["function_queue_offer_duration_count"] == (
+        f"function_queue_offer_duration_seconds_count{function}"
+    )
+    assert queries["function_queue_offer_duration_sum"] == (
+        f"function_queue_offer_duration_seconds_sum{function}"
+    )
+    assert queries["function_queue_poll_duration_count"] == (
+        f"function_queue_poll_duration_seconds_count{function}"
+    )
+    assert queries["function_queue_poll_duration_sum"] == (
+        f"function_queue_poll_duration_seconds_sum{function}"
+    )
+    assert queries["function_scheduler_wakeup_delay_count"] == (
+        f"function_scheduler_wakeup_delay_seconds_count{function}"
+    )
+    assert queries["function_scheduler_wakeup_delay_sum"] == (
+        f"function_scheduler_wakeup_delay_seconds_sum{function}"
+    )
+    assert queries["function_scheduler_poll_delay_count"] == (
+        f"function_scheduler_poll_delay_seconds_count{function}"
+    )
+    assert queries["function_scheduler_poll_delay_sum"] == (
+        f"function_scheduler_poll_delay_seconds_sum{function}"
+    )
+    assert queries["function_scheduler_activation_bookkeeping_duration_count"] == (
+        f"function_scheduler_activation_bookkeeping_duration_seconds_count{function}"
+    )
+    assert queries["function_scheduler_activation_bookkeeping_duration_sum"] == (
+        f"function_scheduler_activation_bookkeeping_duration_seconds_sum{function}"
+    )
+    assert queries["function_scheduler_signal_enqueue_duration_count"] == (
+        f"function_scheduler_signal_enqueue_duration_seconds_count{function}"
+    )
+    assert queries["function_scheduler_signal_enqueue_duration_sum"] == (
+        f"function_scheduler_signal_enqueue_duration_seconds_sum{function}"
+    )
+    assert queries["function_scheduler_dispatch_submit_duration_count"] == (
+        f"function_scheduler_dispatch_submit_duration_seconds_count{function}"
+    )
+    assert queries["function_scheduler_dispatch_submit_duration_sum"] == (
+        f"function_scheduler_dispatch_submit_duration_seconds_sum{function}"
+    )
+    assert queries["function_scheduler_dispatch_submit_duration_all_count"] == (
+        "sum(function_scheduler_dispatch_submit_duration_seconds_count)"
+    )
+    assert queries["function_scheduler_dispatch_submit_duration_all_sum"] == (
+        "sum(function_scheduler_dispatch_submit_duration_seconds_sum)"
+    )
+    assert queries["function_dispatch_slot_hold_seconds_total"] == (
+        f"function_dispatch_slot_hold_seconds_total{function}"
+    )
+    assert queries["function_dispatch_slot_hold_events_total"] == (
+        f"function_dispatch_slot_hold_events_total{function}"
+    )
+    assert queries["function_dispatch_slot_hold_distribution_series"] == (
+        'count({__name__=~"function_dispatch_slot_hold_.*(_max|_bucket)",'
+        'function="word-stats-java"} or '
+        '{__name__=~"function_dispatch_slot_hold_.*",'
+        'function="word-stats-java",quantile=~".+"}) or vector(0)'
+    )
+    assert "function_dispatch_slot_hold_duration_count" not in queries
+    assert "function_dispatch_slot_hold_duration_sum" not in queries
+    # The four reacquisition series are gone on purpose: the probe was falsified
+    # and the meters deleted from QueueManager, so asking for them collected an
+    # empty series that reads as "it never happened".
+    assert not [k for k in queries if "reacquisition" in k]
+    assert queries["function_scheduler_batch_limit_total"] == (
+        f"function_scheduler_batch_limit_total{function}"
+    )
+    assert queries["function_scheduler_slot_blocked_total"] == (
+        f"function_scheduler_slot_blocked_total{function}"
+    )
+    assert queries["function_scheduler_slot_blocked_all_total"] == (
+        "sum(function_scheduler_slot_blocked_total)"
+    )
+    assert queries["function_scheduler_signal_coalesced_total"] == (
+        f"function_scheduler_signal_coalesced_total{function}"
+    )
+    assert queries["function_scheduler_signal_coalesced_all_total"] == (
+        "sum(function_scheduler_signal_coalesced_total)"
+    )
+
+
 def test_queries_use_the_name_prometheus_serves_not_the_one_the_code_registers() -> None:
     """Micrometer renames on export, and the rename is invisible in the source.
 

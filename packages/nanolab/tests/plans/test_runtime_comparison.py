@@ -13,7 +13,9 @@ from nanolab.plans import runtime_comparison as comparison_mod
 from nanolab.plans.loadtest import _resolve_functions
 from nanolab.plans.runtime_comparison import (
     NO_STAGES,
+    MIXED_SCRIPT_NAME,
     SCRIPT_NAME,
+    script_for,
     _variant_image,
     container_queries,
     build_runtime_comparison_plan,
@@ -37,6 +39,21 @@ def _config(**overrides) -> ScenarioConfig:
 
 def test_recognises_its_own_profile() -> None:
     assert is_runtime_comparison(_config())
+
+
+def test_the_mixed_profile_is_this_plan_with_a_different_generator() -> None:
+    """Same modules, same fixed pair, same absence of a governor.
+
+    Only the script changes, and it has to actually change: routed to the
+    comparison generator, a mixed run would send 100% synchronous traffic under a
+    scenario name promising otherwise, and every table drawn from it would be
+    answering the old question.
+    """
+    mixed = _config(loadProfile="mixed")
+
+    assert is_runtime_comparison(mixed)
+    assert script_for(mixed) == MIXED_SCRIPT_NAME
+    assert script_for(_config()) == SCRIPT_NAME
     assert not is_runtime_comparison(_config(loadProfile="cycle", functions=PAIR))
 
 
@@ -123,12 +140,21 @@ def test_container_cost_is_queried_for_the_control_plane_and_every_function() ->
     assert "container_memory_bytes@control-plane" in names
     assert "container_memory_bytes@word-stats-java" in names
     assert "container_memory_bytes@word-stats-javascript" in names
-    assert len(names) == 6
+    # Cores used says what the control plane got; these say what it was denied:
+    # a process pinned at its cgroup quota and one with work to spare both report
+    # a number below the limit, and only the throttled share separates them.
+    assert "container_cpu_periods@control-plane" in names
+    assert "container_cpu_throttled_periods@control-plane" in names
+    assert "container_cpu_throttled_seconds@control-plane" in names
+    # And the same rate without the sum, since a snapshot entry holds one series
+    # and _merge_samples adds the terminating pod to the starting one.
+    assert "container_cpu_cores_max@control-plane" in names
+    assert len(names) == 10
 
 
 def test_cpu_is_a_rate_not_a_counter() -> None:
     """A counter only rises, so charting it says nothing about when the work happened."""
-    cpu = next(q for q in container_queries(_config()) if q.name.startswith("container_cpu"))
+    cpu = next(q for q in container_queries(_config()) if q.name == "container_cpu_cores@control-plane")
 
     assert cpu.expr.startswith("rate(container_cpu_usage_seconds_total")
     assert "[30s]" in cpu.expr
@@ -229,7 +255,7 @@ def test_the_container_memory_series_is_the_guard_instead() -> None:
     assert required == ["container_memory_bytes@control-plane"]
 
 
-def test_comparison_registers_eight_slots_without_growing_the_queue(
+def test_comparison_pins_two_slots_and_twenty_queue_entries(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     captured: dict[str, object] = {}
@@ -250,7 +276,7 @@ def test_comparison_registers_eight_slots_without_growing_the_queue(
     )
 
     assert result is not None
-    assert captured["function_concurrency"] == 8
+    assert captured["function_concurrency"] == 2
     assert captured["function_queue_size"] == 20
 
 
@@ -267,3 +293,26 @@ def test_fixed_function_limits_reach_the_registration_shape(nanofaas_root: Path)
     )
 
     assert {(function.concurrency, function.queue_size) for function in functions} == {(8, 20)}
+
+
+def test_a_two_function_comparison_records_both_functions_refusals() -> None:
+    """One cell reported 30% of HTTP requests failed and 0.3% refused.
+
+    The two are not in contradiction: function_queue_rejected_total was
+    collected for the primary function only, so the second function's refusals -
+    a third of the offered load - were never recorded anywhere. The gate used to
+    be concurrency control, which a build comparison never enables.
+    """
+    from nanolab.plans.loadtest import _default_prometheus_queries, neighbour_name
+
+    config = _config()
+    assert len(config.functions) == 2
+    names = [
+        q.name
+        for q in _default_prometheus_queries(
+            config.functions[0], neighbour_name(config), modules=("async-queue",)
+        )
+    ]
+
+    assert "function_queue_rejected_total" in names
+    assert f"function_queue_rejected_total@{config.functions[1]}" in names

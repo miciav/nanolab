@@ -31,6 +31,7 @@ def control_plane_helm_values(
     sync_queue_admission_enabled: bool = False,
     sync_queue_max_depth: int | None = None,
     container_metrics: bool = False,
+    control_plane_resources: Mapping[str, Mapping[str, float | int | str]] | None = None,
 ) -> dict[str, str]:
     repository, tag = _image_parts(control_plane_image)
     callback_url = f"http://control-plane.{namespace}.svc.cluster.local:8080/v1/internal/executions"  # NOSONAR (S5332): in-cluster service DNS
@@ -83,6 +84,25 @@ def control_plane_helm_values(
         values["prometheus.create"] = "true"
         values["prometheus.service.type"] = "NodePort"
         values["prometheus.service.nodePort"] = str(TWO_VM_PROMETHEUS_NODE_PORT)
+    # Il chart mette 1 CPU di default, e un load test lo eredita in silenzio: un
+    # run che non dichiara la risorsa piu' scarsa della cosa che misura lascia
+    # decidere il risultato a un default di packaging. Qui i limiti arrivano
+    # dallo scenario, CPU e memoria insieme - un solo modo di dirlo, perche' due
+    # prima o poi si contraddicono.
+    if control_plane_resources:
+        # requests e limits arrivano nella forma dello schema di scenario
+        # ({"limits": {"cpu": 2, "memoryMiB": 1024}}); il chart li vuole come
+        # quantita Kubernetes, e senza la conversione un `2` finirebbe nel
+        # manifest come due millicore.
+        for section, quantities in control_plane_resources.items():
+            for name, value in (quantities or {}).items():
+                if name == "cpu":
+                    rendered = f"{value:g}" if isinstance(value, (int, float)) else str(value)
+                elif name in ("memoryMiB", "memory_mib"):
+                    name, rendered = "memory", f"{int(value)}Mi"
+                else:
+                    continue
+                values[f"controlPlane.resources.{section}.{name}"] = rendered
     if container_metrics:
         # What every container cost in memory and CPU, which nothing else records:
         # Prometheus scrapes the control plane's own actuator, so the functions'

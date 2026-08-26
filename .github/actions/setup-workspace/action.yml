@@ -26,26 +26,29 @@ runs:
       uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       with:
         repository: miciav/nanofaas
-        # nanofaas main at the concurrency-governor merge (nanofaas issue #180).
+        # nanofaas main at the August baseline campaign merge.
         # Same Java 25 / GraalVM 25.2.4 toolchain as the previous pin, and it
-        # keeps everything that pin carried (the handler-envelope example
-        # functions, the IPv4 local registry default, the autoscaling scenario
-        # support, and the per-function payload sets under
-        # functions/<runtime>/<family>/payloads/ that the container async
-        # validate workflow reads). New with this pin:
-        #   - `concurrency-control`, an optional control-plane module holding
-        #     the per-function concurrency governor. It has its own tick loop,
-        #     so it no longer depends on the autoscaler or on
-        #     ScalingStrategy.INTERNAL and can be selected on its own through
-        #     -PcontrolPlaneModules.
-        #   - PATCH /v1/functions/{name}, which changes concurrency, timeoutMs,
-        #     maxRetries and concurrencyControl without re-registering the
-        #     function or touching its deployment.
-        #   - sync-queue declares its beans explicitly instead of scanning its
-        #     own package, which is what unbroke `./gradlew build` upstream.
+        # keeps everything that pin carried. New with this pin, in the order
+        # that matters to this repository:
+        #   - the shared queue says which door work came in by:
+        #     function_admitted/refused/replayed carry a `path` tag and
+        #     function_queue_depth_by_path splits the backlog. The catalogue
+        #     collects all of them, and the coverage test is what would have
+        #     caught their absence.
+        #   - execution_store_size and idempotency_keys_held, the two gauges the
+        #     retention rewrite exists for. A finished execution is now kept only
+        #     while someone can still read it, which changes steady-state memory
+        #     and therefore what a load test measures.
+        #   - jvm_gc_collection_count/_time, polled from the MXBean rather than
+        #     from GC notifications, so a natively compiled build reports its
+        #     collector instead of reporting silence.
+        #   - the management endpoints get event loops of their own, so a busy
+        #     control plane no longer fails its own liveness probe.
+        #   - blank idempotency keys are treated as absent, and a full queue
+        #     refuses before an execution is built.
         # Tests read the version and the matrix from this checkout rather than
         # assuming them, so moving the pin needs no test edits.
-        ref: 4e4c9c37bb3288b3f413b2ca3d6fd8806c051919
+        ref: c6fa85f6399265e3e6284a8f57a66e2814f7f753
         path: .nanofaas-source
         token: ${{ inputs.nanofaas-token }}
 

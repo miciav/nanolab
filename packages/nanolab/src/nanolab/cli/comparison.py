@@ -34,7 +34,7 @@ from nanolab.cli.progress import ConsoleProgressSink
 from nanolab.comparison.matrix import ComparisonCell, build_matrix, pending, write_manifest
 from nanolab.comparison.prepare import prepare_operations, prepare_workflow
 from nanolab.config.environment import EnvironmentConfig
-from nanolab.config.scenario import ScenarioConfig
+from nanolab.config.scenario import CONTROL_PLANE_RESOURCES, ScenarioConfig
 from nanolab.images.control_plane_variants import VARIANTS_BY_KEY, resolve_variants
 from nanolab.plans.functions import resolve_function
 from nanolab.plans.runtime_comparison import COMPARISON_MODULES
@@ -243,8 +243,10 @@ def register(app: typer.Typer) -> None:
 
         scenario_config = _scenario(scenario)
         environment_config = _environment(environment)
-        if scenario_config.load_profile != "comparison":
-            raise typer.BadParameter("compare requires a scenario with loadProfile: comparison")
+        if scenario_config.load_profile not in ("comparison", "mixed"):
+            raise typer.BadParameter(
+                "compare requires a scenario with loadProfile: comparison or mixed"
+            )
         selected = tuple(part.strip() for part in variants.split(",") if part.strip())
         resolve_variants(selected)  # fail here, not forty minutes into the matrix
         paths = default_tool_paths()
@@ -255,6 +257,24 @@ def register(app: typer.Typer) -> None:
             cells,
             functions=tuple(scenario_config.functions),
             registry=LOCAL_REGISTRY,
+            regime={
+                # Tutti i limiti, non la sola CPU: il braccio di memoria di
+                # agosto ha misurato tre tetti diversi, e un archivio che non
+                # dice sotto quale tetto e' stata presa una cella non e'
+                # rileggibile.
+                "control_plane_resources": (
+                    scenario_config.resources[CONTROL_PLANE_RESOURCES].model_dump(
+                        by_alias=True, exclude_none=True
+                    )
+                    if CONTROL_PLANE_RESOURCES in scenario_config.resources
+                    else None
+                ),
+                "load_scale": scenario_config.load_scale,
+                "load_vus": scenario_config.load_vus,
+                "load_profile": scenario_config.load_profile,
+                "backend": scenario_config.backend,
+                "scenario": str(scenario),
+            },
         )
 
         # One cluster and one registry for the whole matrix. Tearing down between

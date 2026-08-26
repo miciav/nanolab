@@ -55,6 +55,39 @@ VARIANTS: tuple[ControlPlaneVariant, ...] = (
         ),
         build_env=_env(),
     ),
+    # The three below turn the JVM baseline into a 2x2: collector on one axis, JIT
+    # tiering on the other. The baseline sets both to what a single core wants,
+    # and until the CPU sweep of 2026-08-23 nobody had noticed that the build
+    # called "JVM" was neither G1 nor fully JIT-compiled - while the build it was
+    # compared against, native-o3-g1, did get G1.
+    #
+    # Dropping TieredStopAtLevel restores the default of 4 on its own, so the
+    # flag is written out where C1-only is meant and omitted where it is not.
+    ControlPlaneVariant(
+        key="jvm-g1",
+        label="JVM (G1, C1 only)",
+        rationale="Isolates the collector: G1 against the baseline's serial, JIT held at C1.",
+        build_env=_env(JVM_TUNING="-XX:+UseG1GC -XX:TieredStopAtLevel=1"),
+    ),
+    # Misurato in A1c su questo codice: a un core il solo livello di tiering vale
+    # 225 contro 300 dispatch al secondo, shed dal 20,8% allo 0,7% e p95 da 151 a
+    # 4,3 ms. A due core il throughput pareggia e il prezzo si sposta sulla CPU:
+    # 0,65 contro 0,37 core per lo stesso lavoro.
+    ControlPlaneVariant(
+        key="jvm-c2",
+        label="JVM (serial GC, full tiering)",
+        rationale="Isolates the JIT: C2 restored, collector held at the baseline's serial.",
+        build_env=_env(JVM_TUNING="-XX:+UseSerialGC"),
+    ),
+    ControlPlaneVariant(
+        key="jvm-g1-c2",
+        label="JVM (G1, full tiering)",
+        rationale=(
+            "The JVM as it would be deployed on more than one core, and the only "
+            "JVM build that meets native-o3-g1 on equal terms."
+        ),
+        build_env=_env(JVM_TUNING="-XX:+UseG1GC"),
+    ),
     ControlPlaneVariant(
         key="native-os",
         label="Native, -Os, serial GC",
@@ -118,7 +151,11 @@ def build_operations(
     a locally tagged image is invisible to containerd.
     """
     image = variant.image(registry)
-    if variant.key == "jvm":
+    if variant.key.startswith("jvm"):
+        tuning = variant.build_env.get("JVM_TUNING")
+        # Only passed when the variant asks for it, so the baseline's build line
+        # stays exactly what it was and its cache key does not move.
+        tuning_args = ("--build-arg", f"JVM_TUNING={tuning}") if tuning else ()
         return (
             RemoteCommandOperation(
                 operation_id=f"variant.{variant.key}.boot_jar",
@@ -141,6 +178,7 @@ def build_operations(
                     "build",
                     "-f",
                     "platform/control-plane/Dockerfile",
+                    *tuning_args,
                     "-t",
                     image,
                     "platform/control-plane",

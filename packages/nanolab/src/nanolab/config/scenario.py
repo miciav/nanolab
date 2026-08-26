@@ -10,6 +10,13 @@ BuildStrategy = Literal["docker", "buildpack"]
 AutoscalingStrategy = Literal["INTERNAL", "HPA"]
 
 
+# The one key in `resources` that is not a function. The control plane's limits
+# are otherwise unreachable from a scenario: nothing sets them, so the chart
+# default of one core applies to every load test, and that single core was the
+# ceiling a whole investigation spent itself finding.
+CONTROL_PLANE_RESOURCES = "control-plane"
+
+
 class ResourceQuantity(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
@@ -68,7 +75,7 @@ ConcurrencyMode = Literal["ADAPTIVE_PER_POD", "BUDGETED", "SOJOURN"]
 # driving two functions at once. A flat rate is the one regime where the builds are
 # hardest to distinguish — a JIT reaches its peak and stays there, and a native image
 # starts at its own — so the differences live in the transitions.
-LoadProfile = Literal["cycle", "saturation", "burst", "openloop", "comparison"]
+LoadProfile = Literal["cycle", "saturation", "burst", "openloop", "comparison", "mixed"]
 # Which control-plane build to run. `native` uses a GraalVM image compiled
 # beforehand by `scripts/native-java-image.sh control-plane`, so the run does not
 # rebuild it — measured at rest, the JVM build held 212 MiB against the native
@@ -110,6 +117,12 @@ class ScenarioConfig(BaseModel):
     # hold, which is the only condition under which a request is ever rejected. Whether one
     # controller sheds fewer than another cannot be asked of a run where neither shed any.
     load_profile: LoadProfile = Field(default="cycle", alias="loadProfile")
+    # La composizione del carico misto. Con entrambe a zero il generatore misto e'
+    # il generatore puramente sincrono, che e' come si guida un braccio di
+    # confronto: uno script solo, il mix come parametri, cosi' ogni braccio e'
+    # misurato dallo stesso codice.
+    async_share: float | None = Field(default=None, alias="asyncShare", ge=0.0, le=1.0)
+    idem_share: float | None = Field(default=None, alias="idemShare", ge=0.0, le=1.0)
     control_plane_runtime: ControlPlaneRuntime = Field(
         default="jvm", alias="controlPlaneRuntime"
     )
@@ -123,6 +136,21 @@ class ScenarioConfig(BaseModel):
     control_plane_variant: str | None = Field(
         default=None, alias="controlPlaneVariant"
     )
+    # The CPU budget of the control plane under test. Unset means the chart's
+    # own default, which is 1 CPU: every comparison so far ran against that
+    # without saying so, and `process_cpu_usage` sat at 1.00 in all fourteen
+    # cells - the process pinned to the whole of the single core it was allowed.
+    # Multiplies every stage of the comparison profile. 1.0 is the shape every
+    # matrix so far has used; the CPU model of 2026-08-23 puts the control
+    # plane's own ceiling near 5.7x and the concurrency limit near 4.2x, so the
+    # interesting range starts well above the increments intuition suggests.
+    load_scale: float = Field(default=1.0, alias="loadScale", gt=0)
+    # The VU pool, declared rather than derived. A VU is held for a whole
+    # iteration, so the pool a run needs is its rate times its latency - and past
+    # the knee that latency is what the run is trying to find out. Deriving it
+    # from a latency budget censored the 2x and 3x arms of 2026-08-23 at 98% and
+    # 100% of their pool, which makes "VUs used" a floor rather than a demand.
+    load_vus: int | None = Field(default=None, alias="loadVus", gt=0)
     release: ReleaseConfig | None = None
 
     @model_validator(mode="after")
@@ -131,8 +159,11 @@ class ScenarioConfig(BaseModel):
             raise ValueError(f"backend is required for {self.workflow} workflow")
         if self.workflow == "offload" and self.backend is not None:
             raise ValueError("offload workflow does not take a backend")
-        if set(self.resources) - set(self.functions):
-            raise ValueError("resources must refer to selected functions")
+        if set(self.resources) - set(self.functions) - {CONTROL_PLANE_RESOURCES}:
+            raise ValueError(
+                "resources must refer to selected functions, or to "
+                f"{CONTROL_PLANE_RESOURCES!r}"
+            )
         if self.autoscaling and self.workflow != "loadtest":
             raise ValueError("autoscaling is only supported by the loadtest workflow")
         if self.concurrency_control and self.workflow != "loadtest":
@@ -141,7 +172,11 @@ class ScenarioConfig(BaseModel):
             raise ValueError("concurrencyMode requires concurrencyControl=true")
         if self.concurrency_control and self.autoscaling:
             raise ValueError("concurrencyControl cannot run together with autoscaling")
-        if self.load_profile == "comparison":
+        if self.load_profile != "mixed" and (self.async_share is not None or self.idem_share is not None):
+            raise ValueError("asyncShare and idemShare belong to loadProfile: mixed")
+        if (self.async_share or 0.0) + (self.idem_share or 0.0) > 1.0:
+            raise ValueError("asyncShare + idemShare cannot exceed 1.0")
+        if self.load_profile in ("comparison", "mixed"):
             # The script drives a named pair, and holds the functions fixed so the
             # control-plane build is the only thing that varies between runs.
             if len(self.functions) != 2:
