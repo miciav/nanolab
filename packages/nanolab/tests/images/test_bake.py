@@ -69,6 +69,7 @@ def test_bake_rendering_uses_repo_relative_context_and_dockerfile() -> None:
         "context": "functions/java/word-stats",
         "dockerfile": "Dockerfile",
         "platforms": ["linux/amd64"],
+        "args": {"JVM_TUNING": "-XX:+UseSerialGC"},
         "tags": [
             "registry.test:5000/nanofaas/java-word-stats:v0.18.0-amd64-jvm"
         ],
@@ -149,16 +150,17 @@ def test_native_cells_render_with_root_context_and_build_args() -> None:
     assert target["args"] == {
         "NATIVE_TASK": ":control-plane:nativeCompile",
         "NATIVE_BINARY": "platform/control-plane/build/native/nativeCompile/control-plane",
-        "GRADLE_ARGS": "-PcontrolPlaneModules=all",
+        "GRADLE_ARGS": (
+            "-PcontrolPlaneModules=all -PnativeOptimization=3 -PnativeGc=G1"
+        ),
+        "GRAALVM_DISTRIBUTION": "oracle",
     }
     assert target["platforms"] == ["linux/amd64"]
 
 
-def test_jvm_cells_render_without_an_args_key() -> None:
+def test_jvm_cells_render_with_the_jvm_c2_tuning() -> None:
     target = render_bake(_plan())["target"]["control-plane-amd64-jvm"]
-    assert target["context"] == "platform/control-plane"
-    assert target["dockerfile"] == "Dockerfile"
-    assert "args" not in target
+    assert target["args"] == {"JVM_TUNING": "-XX:+UseSerialGC"}
 
 
 def test_every_native_java_cell_reaches_the_bake_groups() -> None:

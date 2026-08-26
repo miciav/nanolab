@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Literal
 
 from nanolab.functions.catalog import FunctionDefinition, list_functions
+from nanolab.images.control_plane_variants import VARIANTS_BY_KEY
 from nanolab.release.versioning import normalize_version
 from sonata_tasks.deployment import LOCAL_REGISTRY
 
@@ -17,6 +18,8 @@ DEFAULT_ARCHITECTURES: tuple[ImageArchitecture, ...] = ("amd64", "arm64")
 DEFAULT_REGISTRY = f"{LOCAL_REGISTRY}/nanofaas"
 
 NATIVE_JAVA_DOCKERFILE = Path("deploy/native-java/Dockerfile")
+JVM_RELEASE_PROFILE = VARIANTS_BY_KEY["jvm-c2"]
+NATIVE_RELEASE_PROFILE = VARIANTS_BY_KEY["native-o3-g1"]
 
 
 @dataclass(frozen=True)
@@ -77,13 +80,23 @@ class ImageCell:
 
     @property
     def build_args(self) -> dict[str, str]:
+        if self.flavor == "jvm":
+            return {"JVM_TUNING": JVM_RELEASE_PROFILE.build_env["JVM_TUNING"]}
         native = self.native_build
         if native is None:
             return {}
+        profile = NATIVE_RELEASE_PROFILE.build_env
         return {
             "NATIVE_TASK": native.task,
             "NATIVE_BINARY": native.binary.as_posix(),
-            "GRADLE_ARGS": " ".join(native.gradle_args),
+            "GRADLE_ARGS": " ".join(
+                (
+                    *native.gradle_args,
+                    f"-PnativeOptimization={profile['NATIVE_OPTIMIZATION']}",
+                    f"-PnativeGc={profile['NATIVE_GC']}",
+                )
+            ),
+            "GRAALVM_DISTRIBUTION": "oracle",
         }
 
     @property

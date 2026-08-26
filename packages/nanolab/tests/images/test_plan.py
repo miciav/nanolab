@@ -249,7 +249,12 @@ def test_java_native_cells_build_from_the_shared_native_dockerfile() -> None:
     for cell in native:
         assert cell.dockerfile == NATIVE_JAVA_DOCKERFILE
         assert cell.context == Path(".")
-        assert set(cell.build_args) == {"NATIVE_TASK", "NATIVE_BINARY", "GRADLE_ARGS"}
+        assert set(cell.build_args) == {
+            "NATIVE_TASK",
+            "NATIVE_BINARY",
+            "GRADLE_ARGS",
+            "GRAALVM_DISTRIBUTION",
+        }
 
 
 def test_control_plane_native_cell_carries_the_script_build_args() -> None:
@@ -262,8 +267,23 @@ def test_control_plane_native_cell_carries_the_script_build_args() -> None:
     assert cell.build_args == {
         "NATIVE_TASK": ":control-plane:nativeCompile",
         "NATIVE_BINARY": "platform/control-plane/build/native/nativeCompile/control-plane",
-        "GRADLE_ARGS": "-PcontrolPlaneModules=all",
+        "GRADLE_ARGS": (
+            "-PcontrolPlaneModules=all -PnativeOptimization=3 -PnativeGc=G1"
+        ),
+        "GRAALVM_DISTRIBUTION": "oracle",
     }
+
+
+def test_java_release_cells_use_jvm_c2_and_native_o3_g1_profiles() -> None:
+    plan = _plan(architectures=("amd64",))
+
+    for cell in plan.cells:
+        if cell.flavor == "jvm":
+            assert cell.build_args == {"JVM_TUNING": "-XX:+UseSerialGC"}
+        elif cell.flavor == "native" and cell.target.native_build is not None:
+            assert "-PnativeOptimization=3" in cell.build_args["GRADLE_ARGS"]
+            assert "-PnativeGc=G1" in cell.build_args["GRADLE_ARGS"]
+            assert cell.build_args["GRAALVM_DISTRIBUTION"] == "oracle"
 
 
 def test_java_function_native_cells_derive_task_and_binary_from_the_family() -> None:
@@ -296,4 +316,6 @@ def test_jvm_and_default_cells_keep_their_own_dockerfile_and_context() -> None:
             continue
         assert cell.dockerfile == cell.target.dockerfile
         assert cell.context == cell.target.context
-        assert cell.build_args == {}
+        assert cell.build_args == (
+            {"JVM_TUNING": "-XX:+UseSerialGC"} if cell.flavor == "jvm" else {}
+        )
