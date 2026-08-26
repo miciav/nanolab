@@ -1,0 +1,33 @@
+# La stessa matrice di confronto, su ARM invece che su x86.
+#
+# Identico a azure-comparison.yaml tranne la macchina: stesso gruppo, stessa
+# regione, stessi dischi, stessi nomi di ruolo. Cambiare una cosa sola e' il
+# punto - se cambiassero anche le dimensioni o l'immagine di base, una
+# differenza nei risultati avrebbe due spiegazioni invece di una.
+#
+# Standard_D8ps_v5 e' Ampere Altra a 8 vCPU, cioe' lo stesso conteggio di
+# Standard_D8s_v5 usato su x86. Le celle continuano a limitare il control plane
+# a 1 o 2 core via cgroup, quindi la dimensione della VM conta solo per la
+# compilazione nativa e per non far competere k3s con il carico.
+#
+# Le immagini native si compilano SULLA macchina che le esegue, quindi qui
+# nascono binari aarch64 senza che nulla vada cambiato nel percorso di build:
+# e' la ragione per cui il confronto fra architetture e' possibile affatto.
+provider: azure
+roles:
+  stack:
+    name: nanofaas-comparison
+    disk: 128G
+    user: azureuser
+  loadgen:
+    name: nanofaas-comparison-loadgen
+    disk: 30G
+    user: azureuser
+azure:
+  resource_group: maurinoRicerca-rg
+  location: westeurope
+  vm_size: Standard_D8ps_v5
+  loadgen_vm_size: Standard_D2ps_v5
+  image_urn: Canonical:ubuntu-24_04-lts:server-arm64:24.04.202607140
+  operator_source_cidr: auto
+  ssh_key_path: /home/you/.ssh/id_rsa.pub
