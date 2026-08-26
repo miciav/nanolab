@@ -11,14 +11,34 @@ from sonata_tasks.deployment import DEFAULT_NAMESPACE
 from sonata_tasks.vm.models import VmRequest, vm_remote_home
 
 
+# What NOT to ship to a VM that is about to build the source itself.
+#
+# The list is not cosmetic. Measured on the nanoFaaS checkout of 2026-08-26 it
+# decides between 2.77 GB and 45 MB per sync - and the sync runs twice per
+# comparison, once for the control plane and once for the load generator. It is
+# also the step most likely to break: A1 of the 0.19.0 campaign died inside it
+# with "Can't assign requested address" after twenty-five minutes.
+#
+# Anything the VM regenerates belongs here. `target/`, `out/` and `dist/` were
+# already listed, but `build/` was not - and in a Gradle project that is THE
+# output directory: class files and jars compiled on an arm64 laptop, shipped to
+# an amd64 node that recompiles them anyway.
 REPO_SYNC_EXCLUDE_PATTERNS = (
     ".git", ".git/", ".gitnexus", ".gradle/", ".gradle-local/", ".DS_Store",
     ".idea/", ".vscode/", ".env", "*.log", "*.class", ".worktrees/",
     "__pycache__/", "*.egg-info/", "*.pyc", "*.pyo", "*.pyd",
     ".pytest_cache/", ".venv/", ".uv/", "node_modules/", "dist/",
-    "/building/", "out/", "target/", "building-test/", "k6/results/",
+    "/building/", "out/", "target/", "build/", "building-test/", "k6/results/",
     "experiments/k6/results/", "experiments/loadtest/results/",
     "experiments/.image-cache/", "tools/controlplane/runs/",
+    # Binary snapshots of past staging experiments. The metadata beside them
+    # (version.yaml, hypothesis.md) is tracked, tiny, and stays; the snapshots
+    # are untracked local debris - 2.1 GB of a Rust build from February, still
+    # being uploaded to Azure six months later.
+    "experiments/control-plane-staging/versions/*/snapshot/",
+    # Archived campaign results. A VM that builds the platform has no use for
+    # the measurements of previous campaigns, and they only grow.
+    "docs/experiments/*/raw/",
     "recovery/",
 )
 _SSH_CREDENTIALS_UNRESOLVED = object()
