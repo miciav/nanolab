@@ -257,32 +257,40 @@ def runtime_queries(_function_name: str, *, required: bool = True) -> Queries:
         # heap makes a build faster - fewer young collections and fewer full ones
         # mean opposite things.
         #
-        # The names are the MXBean's, per collector: HotSpot serial calls them
-        # Copy and MarkSweepCompact, G1 calls them G1 Young Generation and G1
-        # Old/Concurrent. Matching on names rather than asking for `by (gc)`
-        # keeps one series per query, which is what a snapshot entry holds.
+        # The names are the MXBean's, per collector, and they are NOT the same on
+        # every VM: HotSpot serial calls them Copy and MarkSweepCompact, G1 calls
+        # them G1 Young Generation and G1 Old/Concurrent, and SubstrateVM's serial
+        # collector calls them "young generation scavenger" and "complete
+        # scavenger". Read off a running 0.19.0 native image on 2026-08-26; the
+        # first version of these queries knew only the HotSpot names, so the
+        # per-generation split came back empty for every native build and the
+        # August campaign could not say whether a smaller heap meant fewer young
+        # collections or fewer full ones - which is the whole question there.
+        #
+        # Matching on names rather than asking for `by (gc)` keeps one series per
+        # query, which is what a snapshot entry holds.
         PrometheusQuery(
             "jvm_gc_young_count",
             "jvm_gc_collection_count_total"
-            + CONTROL_PLANE_SELECTOR.replace("}", ',gc=~"Copy|PS Scavenge|G1 Young Generation"}'),
+            + CONTROL_PLANE_SELECTOR.replace("}", ',gc=~"Copy|PS Scavenge|G1 Young Generation|young generation scavenger"}'),
         ),
         PrometheusQuery(
             "jvm_gc_full_count",
             "jvm_gc_collection_count_total"
             + CONTROL_PLANE_SELECTOR.replace(
-                "}", ',gc=~"MarkSweepCompact|PS MarkSweep|G1 Old Generation|G1 Concurrent GC"}'
+                "}", ',gc=~"MarkSweepCompact|PS MarkSweep|G1 Old Generation|G1 Concurrent GC|complete scavenger"}'
             ),
         ),
         PrometheusQuery(
             "jvm_gc_young_time",
             "jvm_gc_collection_time_seconds_total"
-            + CONTROL_PLANE_SELECTOR.replace("}", ',gc=~"Copy|PS Scavenge|G1 Young Generation"}'),
+            + CONTROL_PLANE_SELECTOR.replace("}", ',gc=~"Copy|PS Scavenge|G1 Young Generation|young generation scavenger"}'),
         ),
         PrometheusQuery(
             "jvm_gc_full_time",
             "jvm_gc_collection_time_seconds_total"
             + CONTROL_PLANE_SELECTOR.replace(
-                "}", ',gc=~"MarkSweepCompact|PS MarkSweep|G1 Old Generation|G1 Concurrent GC"}'
+                "}", ',gc=~"MarkSweepCompact|PS MarkSweep|G1 Old Generation|G1 Concurrent GC|complete scavenger"}'
             ),
         ),
         # What happens to a request before the application sees it. At the peak of
