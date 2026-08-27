@@ -650,6 +650,18 @@ _MAY_BE_ABSENT: Mapping[str, str] = {
     "jvm_gc_pause_count": "Micrometer's notification binder does not exist on a native image",
     "jvm_gc_pause_sum": "Micrometer's notification binder does not exist on a native image",
     "jvm_gc_time_fraction": "polled binder, absent when the collector publishes no MXBean",
+    # Spring registers http_server_requests per observed outcome, so the
+    # status="429" series does not exist until something has actually been
+    # refused. Requiring it made the run fail precisely when the control plane
+    # rejected nothing - the best possible result read as a missing measurement.
+    # A1b died that way on its fourteenth cell of fifteen, on jvm-c2 at two
+    # cores, after two hours and fifty minutes.
+    #
+    # Absence here is a reading: nobody got a 429. It is not a blind spot either,
+    # because http_server_ok_count stays required - if the whole
+    # http_server_requests family were missing, that is what would fail.
+    "http_server_rejected_count": "no 429 was served, so Spring never created the series",
+    "http_server_rejected_sum": "no 429 was served, so Spring never created the series",
     "gc_metrics_source_mxbean": "absent IS the reading: the build has no usable collector MXBean",
     "jfr_vm_operation_count": "the JFR stream is opened only where the MXBeans cannot answer",
     "jfr_gc_operation_time": "no JFR stream, or SubstrateVM names its GC operation otherwise",
