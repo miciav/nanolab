@@ -420,7 +420,7 @@ def test_async_load_enables_async_modules_on_the_compose_control_plane(
     plan.run()
 
     compose = next(spec for spec in host.seen if spec.argv[:2] == ("docker", "compose"))
-    assert compose.env["NANOFAAS_CONTROL_PLANE_MODULES"] == "all"
+    assert compose.env["NANOFAAS_CONTROL_PLANE_MODULES"] == "container-deployment-provider,async-queue"
 
 
 def test_async_load_builds_an_async_check_for_every_payload_file(

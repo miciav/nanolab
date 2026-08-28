@@ -48,7 +48,7 @@ _HANDLER_ENVELOPE_TARGETS = (
     _BINARY_ENVELOPE_PROBE, "word-stats-java",
 )
 _EMPTY_INPUT_PAYLOAD = '{"input":{}}'
-_ASYNC_CONTROL_PLANE_MODULES = "all"
+_ASYNC_CONTROL_PLANE_MODULES = "container-deployment-provider,async-queue"
 
 
 def _handler_envelope_checks(functions: dict[str, SonataFunction]) -> tuple[EnvelopeCheck, ...]:
