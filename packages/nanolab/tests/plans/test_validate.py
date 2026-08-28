@@ -128,7 +128,7 @@ def test_validate_plan_dispatches_k8s_tasks_to_stack_binding() -> None:
 def test_validate_plan_selects_the_queue_modules_kubernetes_validation_exercises() -> None:
     build = _argv(_plan("k8s"), "Build control plane")
 
-    assert "-PcontrolPlaneModules=k8s-deployment-provider,async-queue,sync-queue" in build
+    assert "-PcontrolPlaneModules=k8s-deployment-provider,async-queue" in build
 
 
 def test_kubernetes_validation_runs_the_queue_burst_with_k6() -> None:
@@ -420,9 +420,7 @@ def test_async_load_enables_async_modules_on_the_compose_control_plane(
     plan.run()
 
     compose = next(spec for spec in host.seen if spec.argv[:2] == ("docker", "compose"))
-    assert compose.env["NANOFAAS_CONTROL_PLANE_MODULES"] == (
-        "container-deployment-provider,async-queue,sync-queue"
-    )
+    assert compose.env["NANOFAAS_CONTROL_PLANE_MODULES"] == "all"
 
 
 def test_async_load_builds_an_async_check_for_every_payload_file(

@@ -48,7 +48,7 @@ _HANDLER_ENVELOPE_TARGETS = (
     _BINARY_ENVELOPE_PROBE, "word-stats-java",
 )
 _EMPTY_INPUT_PAYLOAD = '{"input":{}}'
-_ASYNC_CONTROL_PLANE_MODULES = "container-deployment-provider,async-queue,sync-queue"
+_ASYNC_CONTROL_PLANE_MODULES = "all"
 
 
 def _handler_envelope_checks(functions: dict[str, SonataFunction]) -> tuple[EnvelopeCheck, ...]:
@@ -214,7 +214,7 @@ def build_validate_plan(
         functions=tuple(functions.values()),
         envelope_checks=_handler_envelope_checks(functions) if config.handler_envelope else (),
         async_checks=_async_checks(functions, config, repo_root) if config.async_load else (),
-        additional_modules=("async-queue", "sync-queue") if kubernetes else (),
+        additional_modules=("async-queue",) if kubernetes else (),
         source_fingerprint=source_fingerprint(root),
         build_control_plane=kubernetes,
         push_function_images=not kubernetes,
