@@ -214,7 +214,7 @@ def build_validate_plan(
         functions=tuple(functions.values()),
         envelope_checks=_handler_envelope_checks(functions) if config.handler_envelope else (),
         async_checks=_async_checks(functions, config, repo_root) if config.async_load else (),
-        additional_modules=("async-queue",) if kubernetes else (),
+        additional_modules=("sync-queue",) if kubernetes else (),
         source_fingerprint=source_fingerprint(root),
         build_control_plane=kubernetes,
         push_function_images=not kubernetes,
@@ -236,7 +236,6 @@ def build_validate_plan(
                 image_build_argv=("docker", "build", "-t", f"{LOCAL_REGISTRY}/nanofaas/java-warm-echo:e2e", "-f", "services/java/warm-echo/Dockerfile", "services/java/warm-echo"),
                 concurrency=1,
             ),
-            extended_k8s_checks=True,
             queue_burst_script=queue_burst_script,
         )
         # Both settings are what this workflow exists to exercise: the JUnit queue

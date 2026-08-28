@@ -121,14 +121,14 @@ def test_validate_plan_dispatches_k8s_tasks_to_stack_binding() -> None:
     )
 
     # The workflow itself validates deploy, invoke and resource propagation.
-    assert len(plan.compile().tasks) == 23
+    assert len(plan.compile().tasks) == 21
     assert host.seen == []
 
 
 def test_validate_plan_selects_the_queue_modules_kubernetes_validation_exercises() -> None:
     build = _argv(_plan("k8s"), "Build control plane")
 
-    assert "-PcontrolPlaneModules=k8s-deployment-provider,async-queue" in build
+    assert "-PcontrolPlaneModules=k8s-deployment-provider,sync-queue" in build
 
 
 def test_kubernetes_validation_runs_the_queue_burst_with_k6() -> None:

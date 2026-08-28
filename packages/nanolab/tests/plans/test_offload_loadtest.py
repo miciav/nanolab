@@ -74,6 +74,7 @@ def test_platform_returns_helm_arguments_in_the_platform_request() -> None:
     assert isinstance(request, PlatformRequest)
     assert request.helm_values == tuple(request.helm_values)
     assert "--set" in request.helm_values
+    assert request.additional_modules == ("offload", "sync-queue")
 
 
 @pytest.fixture(autouse=True)

@@ -165,7 +165,7 @@ def _platform(
         backend="k8s",
         build=build,  # pyright: ignore[reportArgumentType]
         functions=functions,
-        additional_modules=("offload", "async-queue", "sync-queue"),
+        additional_modules=("offload", "sync-queue"),
         source_fingerprint=source_fingerprint(repo_root),
         execution_role=role,
         label=label,

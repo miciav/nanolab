@@ -351,7 +351,7 @@ def _additional_modules(
     if autoscaling:
         if not hpa:
             modules.append("autoscaler")
-        modules.extend(("async-queue", "sync-queue"))
+        modules.append("async-queue")
     if concurrency_control:
         # No autoscaler: the governor has had its own tick loop since nanofaas
         # #180 and no longer needs ScalingStrategy.INTERNAL. No sync-queue
@@ -522,10 +522,9 @@ def compose_control_plane_modules(additional_modules: tuple[str, ...]) -> str:
     This is a build arg, not a runtime toggle, so it decides what the image
     contains rather than what it enables. The deployment provider is always
     needed to run functions at all; the rest is whatever the scenario asked for,
-    falling back to the historical autoscaling set for scenarios that ask for
-    nothing.
+    falling back to a valid autoscaling set for scenarios that ask for nothing.
     """
-    selected = additional_modules or ("autoscaler", "async-queue", "sync-queue")
+    selected = additional_modules or ("autoscaler", "async-queue")
     return ",".join(("container-deployment-provider",) + tuple(selected))
 
 

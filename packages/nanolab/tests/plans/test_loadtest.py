@@ -511,7 +511,7 @@ def test_autoscaling_loadtest_builds_registers_and_observes_scaler(tmp_path: Pat
     k6 = next(command for command in commands if command.startswith("k6 run"))
 
     assert (
-        "-PcontrolPlaneModules=k8s-deployment-provider,autoscaler,async-queue,sync-queue"
+        "-PcontrolPlaneModules=k8s-deployment-provider,autoscaler,async-queue"
         in build
     )
     for expected in ("scalingConfig", "INTERNAL", "timeoutMs", "30000", "queueSize", "100"):

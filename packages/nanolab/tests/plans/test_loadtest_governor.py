@@ -100,6 +100,13 @@ def test_the_autoscaler_is_not_compiled_in() -> None:
     assert "sync-queue" not in modules
 
 
+def test_autoscaling_uses_only_the_queue_that_supplies_scaling_metrics() -> None:
+    assert _additional_modules(autoscaling=True, hpa=False) == (
+        "autoscaler",
+        "async-queue",
+    )
+
+
 def test_replicas_are_pinned_so_the_reading_is_attributable() -> None:
     scaling = _concurrency_control_setup(CONCURRENCY_SCENARIO)
 
@@ -177,9 +184,9 @@ def test_the_container_image_is_built_with_only_the_needed_modules() -> None:
     }
 
 
-def test_scenarios_that_ask_for_nothing_keep_the_historical_module_set() -> None:
+def test_scenarios_that_ask_for_nothing_get_a_valid_autoscaling_module_set() -> None:
     assert compose_control_plane_modules(()) == (
-        "container-deployment-provider,autoscaler,async-queue,sync-queue"
+        "container-deployment-provider,autoscaler,async-queue"
     )
 
 
