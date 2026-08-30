@@ -86,3 +86,37 @@ def test_the_baseline_jvm_build_line_is_left_exactly_as_it_was() -> None:
     build = next(op for op in ops if op.operation_id.endswith(".image"))
 
     assert "--build-arg" not in build.argv
+
+
+def test_every_variant_carries_its_key_into_the_build() -> None:
+    """Without this, a built image's /modules/build-metadata cannot say which
+    comparison variant produced it: the key has to travel with the build
+    itself, not be reconstructed later from the image tag.
+    """
+    for variant in VARIANTS:
+        ops = build_operations(variant, registry=REGISTRY, modules=MODULES)
+        values = [value for op in ops for value in (*op.argv, *op.env.values())]
+        assert any(variant.key in value for value in values), variant.key
+
+
+def test_jvm_variants_pass_build_type_and_optimization() -> None:
+    ops = build_operations(_variant("jvm-c2"), registry=REGISTRY, modules=MODULES)
+    boot_jar = next(op for op in ops if op.operation_id.endswith(".boot_jar"))
+
+    assert "-PnanofaasBuildType=jvm" in boot_jar.argv
+    assert "-PnanofaasBuildVariant=jvm-c2" in boot_jar.argv
+    assert "-PnanofaasBuildOptimization=c2" in boot_jar.argv
+
+
+def test_jvm_c1_only_variants_report_c1_optimization() -> None:
+    """jvm and jvm-g1 both omit TieredStopAtLevel's absence-of-flag reversal:
+    only the two variants without the C1-only flag get full tiering."""
+    for key in ("jvm", "jvm-g1"):
+        ops = build_operations(_variant(key), registry=REGISTRY, modules=MODULES)
+        boot_jar = next(op for op in ops if op.operation_id.endswith(".boot_jar"))
+        assert "-PnanofaasBuildOptimization=c1" in boot_jar.argv
+
+
+def test_native_variants_pass_the_variant_key_through_the_environment() -> None:
+    ops = build_operations(_variant("native-o3-g1"), registry=REGISTRY, modules=MODULES)
+    assert ops[0].env["NANOFAAS_BUILD_VARIANT"] == "native-o3-g1"

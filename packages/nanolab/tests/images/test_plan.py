@@ -191,6 +191,9 @@ def test_spring_jvm_cells_require_boot_jar_before_bake() -> None:
             "./gradlew",
             ":control-plane:bootJar",
             "-PcontrolPlaneModules=all",
+            "-PnanofaasBuildType=jvm",
+            "-PnanofaasBuildVariant=jvm-c2",
+            "-PnanofaasBuildOptimization=c2",
         ),
         "java-warm-echo": ("./gradlew", ":services:java:warm-echo:bootJar"),
         "java-roman-numeral": ("./gradlew", ":functions:java:roman-numeral:bootJar"),
@@ -268,10 +271,28 @@ def test_control_plane_native_cell_carries_the_script_build_args() -> None:
         "NATIVE_TASK": ":control-plane:nativeCompile",
         "NATIVE_BINARY": "platform/control-plane/build/native/nativeCompile/control-plane",
         "GRADLE_ARGS": (
-            "-PcontrolPlaneModules=all -PnativeOptimization=3 -PnativeGc=G1"
+            "-PcontrolPlaneModules=all -PnativeOptimization=3 -PnativeGc=G1 "
+            "-PnanofaasBuildType=native -PnanofaasBuildVariant=native-o3-g1 "
+            "-PnanofaasBuildOptimization=3"
         ),
         "GRAALVM_DISTRIBUTION": "oracle",
     }
+
+
+def test_function_images_do_not_receive_control_plane_build_metadata() -> None:
+    """The control plane's identity travels with its own build only: a function
+    rebuilt with -PnanofaasBuildType etc. would be a second moving part in every
+    comparison the variant matrix is trying to isolate (see control_plane_variants).
+    """
+    plan = _plan(architectures=("amd64",))
+    for cell in plan.cells:
+        if cell.target.name == "control-plane":
+            continue
+        if cell.flavor == "jvm":
+            assert cell.prerequisite_command is not None
+            assert not any("-Pnanofaas" in arg for arg in cell.prerequisite_command)
+        elif cell.flavor == "native" and cell.target.native_build is not None:
+            assert "-Pnanofaas" not in cell.build_args["GRADLE_ARGS"]
 
 
 def test_java_release_cells_use_jvm_c2_and_native_o3_g1_profiles() -> None:

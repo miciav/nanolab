@@ -151,7 +151,9 @@ def test_native_cells_render_with_root_context_and_build_args() -> None:
         "NATIVE_TASK": ":control-plane:nativeCompile",
         "NATIVE_BINARY": "platform/control-plane/build/native/nativeCompile/control-plane",
         "GRADLE_ARGS": (
-            "-PcontrolPlaneModules=all -PnativeOptimization=3 -PnativeGc=G1"
+            "-PcontrolPlaneModules=all -PnativeOptimization=3 -PnativeGc=G1 "
+            "-PnanofaasBuildType=native -PnanofaasBuildVariant=native-o3-g1 "
+            "-PnanofaasBuildOptimization=3"
         ),
         "GRAALVM_DISTRIBUTION": "oracle",
     }

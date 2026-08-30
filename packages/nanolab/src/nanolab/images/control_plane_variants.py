@@ -42,6 +42,19 @@ def _env(**values: str) -> Mapping[str, str]:
     return MappingProxyType(dict(values))
 
 
+# Mirrors the ARG default in platform/control-plane/Dockerfile: a variant that
+# passes no JVM_TUNING gets this at build time, so its effective tiering is
+# derived from here rather than assumed to be "full" just because the variant
+# is silent about it.
+DEFAULT_JVM_TUNING = "-XX:+UseSerialGC -XX:TieredStopAtLevel=1"
+
+
+def jvm_optimization(variant: ControlPlaneVariant) -> str:
+    """c1 or c2, derived once from the effective JVM_TUNING rather than per call site."""
+    tuning = variant.build_env.get("JVM_TUNING", DEFAULT_JVM_TUNING)
+    return "c1" if "TieredStopAtLevel=1" in tuning else "c2"
+
+
 # Serial is not written out for the Community builds: it is the only collector
 # GraalVM CE offers besides epsilon, and naming it would suggest a choice was
 # made. G1 is Oracle-only, which is why that variant also switches distribution.
@@ -164,6 +177,9 @@ def build_operations(
                     "./gradlew",
                     ":control-plane:bootJar",
                     f"-PcontrolPlaneModules={modules}",
+                    "-PnanofaasBuildType=jvm",
+                    f"-PnanofaasBuildVariant={variant.key}",
+                    f"-PnanofaasBuildOptimization={jvm_optimization(variant)}",
                     "--no-daemon",
                     "-q",
                 ),
@@ -207,7 +223,15 @@ def build_operations(
             operation_id=f"variant.{variant.key}.image",
             summary=f"Compile native image for {variant.label}",
             argv=("./scripts/native-java-image.sh", "control-plane", image),
-            env=_env(CONTROL_PLANE_MODULES=modules, **dict(variant.build_env), **limits),
+            # NANOFAAS_BUILD_VARIANT only: the script itself reads NATIVE_OPTIMIZATION
+            # for the optimisation level and always appends -PnanofaasBuildType=native,
+            # so passing those here as -P args would duplicate what it already does.
+            env=_env(
+                CONTROL_PLANE_MODULES=modules,
+                NANOFAAS_BUILD_VARIANT=variant.key,
+                **dict(variant.build_env),
+                **limits,
+            ),
             execution_target="vm",
         ),
         _push(variant, image),

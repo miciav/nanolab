@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Literal
 
 from nanolab.functions.catalog import FunctionDefinition, list_functions
-from nanolab.images.control_plane_variants import VARIANTS_BY_KEY
+from nanolab.images.control_plane_variants import VARIANTS_BY_KEY, jvm_optimization
 from nanolab.release.versioning import normalize_version
 from sonata_tasks.deployment import LOCAL_REGISTRY
 
@@ -86,6 +86,18 @@ class ImageCell:
         if native is None:
             return {}
         profile = NATIVE_RELEASE_PROFILE.build_env
+        # Only the control plane's own build carries its identity into the
+        # binary; function images are held fixed across variants and must not
+        # pick up control-plane metadata (see control_plane_variants module doc).
+        identity_args = (
+            (
+                "-PnanofaasBuildType=native",
+                f"-PnanofaasBuildVariant={NATIVE_RELEASE_PROFILE.key}",
+                f"-PnanofaasBuildOptimization={profile['NATIVE_OPTIMIZATION']}",
+            )
+            if self.target.name == "control-plane"
+            else ()
+        )
         return {
             "NATIVE_TASK": native.task,
             "NATIVE_BINARY": native.binary.as_posix(),
@@ -94,6 +106,7 @@ class ImageCell:
                     *native.gradle_args,
                     f"-PnativeOptimization={profile['NATIVE_OPTIMIZATION']}",
                     f"-PnativeGc={profile['NATIVE_GC']}",
+                    *identity_args,
                 )
             ),
             "GRAALVM_DISTRIBUTION": "oracle",
@@ -103,7 +116,16 @@ class ImageCell:
     def prerequisite_command(self) -> tuple[str, ...] | None:
         if self.flavor != "jvm":
             return None
-        return ("./gradlew", *self.target.jvm_prerequisite_arguments)
+        identity_args = (
+            (
+                "-PnanofaasBuildType=jvm",
+                f"-PnanofaasBuildVariant={JVM_RELEASE_PROFILE.key}",
+                f"-PnanofaasBuildOptimization={jvm_optimization(JVM_RELEASE_PROFILE)}",
+            )
+            if self.target.name == "control-plane"
+            else ()
+        )
+        return ("./gradlew", *self.target.jvm_prerequisite_arguments, *identity_args)
 
 
 @dataclass(frozen=True)
