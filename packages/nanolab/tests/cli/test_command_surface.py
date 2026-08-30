@@ -66,7 +66,7 @@ def test_top_level_exposes_only_the_intended_product_commands() -> None:
 
     assert result.exit_code == 0
     commands = {command.name for command in app.registered_commands}
-    assert commands == {"run", "plan", "list", "inspect", "doctor", "tui", "compare"}
+    assert commands == {"run", "plan", "list", "workflow", "workflows", "inspect", "doctor", "tui", "compare"}
 
 
 def test_list_does_not_require_nanofaas_root(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -76,6 +76,43 @@ def test_list_does_not_require_nanofaas_root(monkeypatch: pytest.MonkeyPatch) ->
 
     assert result.exit_code == 0, result.output
     assert "deployment-lifecycle-container.yaml" in result.output
+
+
+def test_workflows_lists_supported_environment_providers() -> None:
+    result = CliRunner().invoke(app, ["workflows"])
+
+    assert result.exit_code == 0, result.output
+    assert "validate" in result.output
+    assert "local, multipass, external, azure, proxmox" in result.output
+    assert "release" in result.output
+    assert "azure" in result.output
+
+
+def test_workflow_lists_scenarios_in_a_formatted_table() -> None:
+    result = CliRunner().invoke(app, ["workflow"])
+
+    assert result.exit_code == 0, result.output
+    assert "Workflow" in result.output
+    assert "Scenarios" in result.output
+    assert "autoscaling-cycle-container.yaml" in result.output
+
+
+def test_workflows_discovers_added_and_removed_scenarios(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scenarios = tmp_path / "scenarios-v2"
+    scenarios.mkdir()
+    scenario = scenarios / "temporary.yaml"
+    scenario.write_text("workflow: temporary\nbackend: k8s\n", encoding="utf-8")
+    monkeypatch.setattr(product_module, "discover_tool_root", lambda: tmp_path)
+
+    result = CliRunner().invoke(app, ["workflows"])
+    assert "temporary" in result.output
+    assert "local, multipass, external, azure, proxmox" in result.output
+
+    scenario.unlink()
+    result = CliRunner().invoke(app, ["workflows"])
+    assert "temporary:" not in result.output
 
 
 def test_doctor_uses_shared_diagnostics(monkeypatch) -> None:

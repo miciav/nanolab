@@ -92,6 +92,7 @@ the environment variable named by `password_env`. Do not store secrets in YAML.
 | Command | Purpose |
 |---|---|
 | `list` | List bundled scenarios. |
+| `workflow` | List workflows, supported environment providers, and scenarios. (`workflows` is an alias.) |
 | `inspect <scenario>` | Print validated scenario data. |
 | `plan <scenario>` | Render the ordered operations without executing them. |
 | `run <scenario>` | Execute a scenario in its selected environment. |

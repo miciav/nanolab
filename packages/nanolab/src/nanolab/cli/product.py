@@ -10,6 +10,8 @@ from typing import cast
 
 import typer
 import yaml
+from rich.console import Console
+from rich.table import Table
 from sonata_engine import (
     CompiledWorkflow,
     Selection,
@@ -65,6 +67,7 @@ from nanolab.workspace.provenance import git_provenance
 
 _JOURNAL_FILENAME = "sonata.jsonl"
 _LOCAL_PROMETHEUS_URL = "http://127.0.0.1:9090"
+_ENVIRONMENT_PROVIDERS = ("local", "multipass", "external", "azure", "proxmox")
 
 
 def _read(path: Path) -> dict[str, object]:
@@ -84,6 +87,30 @@ def _environment(path: Path | None) -> EnvironmentConfig:
         if path
         else EnvironmentConfig(provider="local")
     )
+
+
+def _workflow_catalog(
+    scenarios_dir: Path,
+) -> dict[str, tuple[tuple[str, ...], tuple[str, ...]]]:
+    workflows: dict[str, set[str]] = {}
+    scenarios: dict[str, list[str]] = {}
+    for path in scenarios_dir.glob("*.yaml"):
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict) or not isinstance(data.get("workflow"), str):
+            continue
+        workflow = data["workflow"]
+        environments = ("local",) if data.get("backend") == "container" else _ENVIRONMENT_PROVIDERS
+        if workflow == "release":
+            environments = ("azure",)
+        workflows.setdefault(workflow, set()).update(environments)
+        scenarios.setdefault(workflow, []).append(path.name)
+    return {
+        workflow: (
+            tuple(provider for provider in _ENVIRONMENT_PROVIDERS if provider in environments),
+            tuple(sorted(scenarios[workflow])),
+        )
+        for workflow, environments in sorted(workflows.items())
+    }
 
 
 def _workflow_observers(scenario_path: Path) -> tuple[WorkflowObserver, ...]:
@@ -917,6 +944,18 @@ def install_product_commands(app: typer.Typer) -> None:  # NOSONAR (S3776): nest
     def list_command() -> None:
         for path in sorted((discover_tool_root() / "scenarios-v2").glob("*.yaml")):
             typer.echo(path)
+
+    @app.command("workflow")
+    @app.command("workflows")
+    def workflows_command() -> None:
+        scenarios_dir = discover_tool_root() / "scenarios-v2"
+        table = Table(title="Nanolab workflows")
+        table.add_column("Workflow", style="cyan", no_wrap=True)
+        table.add_column("Environments", no_wrap=True)
+        table.add_column("Scenarios", no_wrap=True)
+        for workflow, (environments, scenarios) in _workflow_catalog(scenarios_dir).items():
+            table.add_row(workflow, ", ".join(environments), "\n".join(scenarios))
+        Console(width=240).print(table)
 
     @app.command("inspect")
     def inspect_command(scenario: Path = typer.Argument(..., exists=True)) -> None:
