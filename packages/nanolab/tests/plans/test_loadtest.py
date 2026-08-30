@@ -283,7 +283,12 @@ def test_explicit_remote_run_directory_is_cleaned_before_k6(tmp_path: Path) -> N
     assert cleanup < k6
     assert str(remote_run_dir) in commands[cleanup]
     assert str(remote_run_dir / "k6-summary.json") in commands[k6]
-    assert fetcher.fetched == [(str(remote_run_dir / "k6-summary.json"), tmp_path)]
+    # The control-plane log comes back too: it is the only place four different
+    # reasons for an autoscaler that never ran are distinguishable.
+    assert fetcher.fetched == [
+        (str(remote_run_dir / "k6-summary.json"), tmp_path),
+        (str(remote_run_dir / "control-plane.log"), tmp_path),
+    ]
 
 
 @pytest.mark.parametrize(

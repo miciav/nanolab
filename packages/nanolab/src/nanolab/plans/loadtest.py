@@ -14,6 +14,7 @@ from sonata_tasks.loadtest.resources import (
     ResourceWatcherGroup,
 )
 from sonata_tasks.loadtest import (
+    SideCommandTask,
     ReportCoTenancyTask,
     VerifyConcurrencyTask,
     CapturePrometheusTask,
@@ -852,6 +853,7 @@ def _build_concurrency_watchers(
 def _build_steps_after(
     *,
     remote: bool,
+    executor: RoleBoundCommandTaskExecutor,
     summary_path: Path,
     run_dir: Path,
     fetcher: RemoteFileFetcher | object | None,
@@ -915,6 +917,42 @@ def _build_steps_after(
                     probe=replica_probe,
                     expected_final_replicas=replica_floor,
                 )
+            )
+        )
+    if remote:
+        # Four different reasons why the internal scaler never evaluates a
+        # function - module absent, no deployment coordinator, no managed target,
+        # an exception swallowed per tick - are indistinguishable in metrics and
+        # one line apart in this log. The VM is destroyed at teardown, so it has
+        # to be taken here or not at all.
+        log_path = summary_path.parent / "control-plane.log"
+        after.append(
+            SideCommandTask(
+                title="Collect the control-plane log",
+                command=CommandTask(
+                    title="Collect the control-plane log",
+                    argv=(
+                        "bash",
+                        "-lc",
+                        f"sudo kubectl -n {request.namespace} logs "
+                        f"deploy/nanofaas-control-plane --tail=-1 > {log_path} 2>&1 || true",
+                    ),
+                    executor=executor,
+                    role="stack",
+                    remote_dir=_REMOTE_DIR,
+                ),
+            )
+        )
+        after.append(
+            FetchResultsTask(
+                fetch=FetchVmResults(
+                    task_id="",
+                    title="Fetch the control-plane log",
+                    fetcher=cast(RemoteFileFetcher, fetcher),
+                    remote_source=str(log_path),
+                    local_dest=run_dir,
+                ),
+                title="Fetch the control-plane log",
             )
         )
     after.extend(
@@ -1313,6 +1351,7 @@ def build_loadtest_plan(
     )
     after = _build_steps_after(
         remote=remote,
+        executor=executor,
         summary_path=summary_path,
         run_dir=run_dir,
         fetcher=fetcher,

@@ -356,6 +356,25 @@ class EvaluateGateTask(Task[LoadtestOutcome]):
         return TaskOutcome(value=outcome)
 
 
+class SideCommandTask(Task[LoadtestOutcome]):
+    """Run a command for its side effect and pass the load outcome through.
+
+    A bare CommandTask cannot sit in this chain: it returns a TaskResult, and
+    load_outcome reads the immediately preceding value, so the next step would
+    fail with "expected the load run's outcome".
+    """
+
+    def __init__(self, *, command: Task[Any], title: str) -> None:
+        self.title = title
+        self._command = command
+
+    @override
+    def run(self, inputs: TaskInputs) -> TaskOutcome[LoadtestOutcome]:
+        outcome = load_outcome(inputs, self.title)
+        _ = self._command.run(inputs)
+        return TaskOutcome(value=outcome)
+
+
 class FetchResultsTask(Task[LoadtestOutcome]):
     """Bring a remote loadgen's summary back to the run directory."""
 

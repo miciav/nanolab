@@ -21,6 +21,7 @@ from sonata_tasks.kubectl import ClusterIpEndpointTask, KubectlTask, k8s_deploym
 from sonata_tasks.loadtest import (
     CapturePrometheusTask,
     EvaluateGateTask,
+    SideCommandTask,
     FetchResultsTask,
     LoadtestOutcome,
     RunK6Task,
@@ -129,6 +130,7 @@ __all__ = [
     "build_validate_workflow",
     "CapturePrometheusTask",
     "EvaluateGateTask",
+    "SideCommandTask",
     "FetchResultsTask",
     "LoadtestOutcome",
     "RunK6Task",
