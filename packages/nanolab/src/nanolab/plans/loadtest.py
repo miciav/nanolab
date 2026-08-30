@@ -128,6 +128,21 @@ def _validate_loadtest(config: ScenarioConfig, environment: EnvironmentConfig) -
     backend: Backend = config.backend or "k8s"
     if backend == "container" and environment.provider != "local":
         raise ValueError("container load-test requires a local environment")
+    # An HPA with minReplicas 0 is rejected by the API server unless the cluster
+    # was provisioned with feature-gates=HPAScaleToZero=true, and that gate comes
+    # from the environment role (provision-k3s.yml), not from the scenario. Paired
+    # wrongly the run reaches the function registration and dies there on a 500
+    # retried eleven times, with the real cause only in the control-plane log.
+    if backend == "k8s" and config.hpa_scale_to_zero:
+        if not environment.target("stack").hpa_scale_to_zero:
+            raise ValueError(
+                "scenario asks for hpaScaleToZero but the environment's stack role "
+                "does not: the cluster is provisioned without "
+                "feature-gates=HPAScaleToZero=true and the API server will refuse "
+                "an HPA with minReplicas 0. Use an environment that sets "
+                "hpaScaleToZero on its stack role, such as "
+                "environments/multipass-hpa-scale-to-zero.yaml"
+            )
     return backend
 
 

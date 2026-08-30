@@ -228,6 +228,59 @@ def test_container_loadtest_rejects_remote_environment(tmp_path: Path) -> None:
         )
 
 
+def test_scale_to_zero_scenario_rejects_an_environment_without_the_feature_gate(
+    tmp_path: Path,
+) -> None:
+    # hpaScaleToZero asks for an HPA with minReplicas 0, which the API server
+    # rejects unless k3s was provisioned with feature-gates=HPAScaleToZero=true -
+    # and that gate comes from the environment role, not the scenario. Paired
+    # wrongly, the run got as far as registering the function and died on an
+    # opaque 500 retried eleven times.
+    with pytest.raises(ValueError, match="HPAScaleToZero"):
+        build_loadtest_plan(
+            ScenarioConfig(
+                workflow="loadtest",
+                functions=["word-stats-java"],
+                autoscaling=True,
+                autoscalingStrategy="HPA",
+                hpaScaleToZero=True,
+            ),
+            EnvironmentConfig.model_validate(
+                {"provider": "multipass", "roles": {"stack": {"name": "stack"}}}
+            ),
+            RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor()),
+            control_plane_url="http://127.0.0.1:8080",
+            prometheus_client=NoopPrometheus(),
+            run_dir=tmp_path,
+        )
+
+
+def test_scale_to_zero_scenario_accepts_an_environment_that_provides_the_gate(
+    tmp_path: Path,
+) -> None:
+    plan = build_loadtest_plan(
+        ScenarioConfig(
+            workflow="loadtest",
+            functions=["word-stats-java"],
+            autoscaling=True,
+            autoscalingStrategy="HPA",
+            hpaScaleToZero=True,
+        ),
+        EnvironmentConfig.model_validate(
+            {
+                "provider": "multipass",
+                "roles": {"stack": {"name": "stack", "hpaScaleToZero": True}},
+            }
+        ),
+        RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor()),
+        control_plane_url="http://127.0.0.1:8080",
+        prometheus_client=NoopPrometheus(),
+        run_dir=tmp_path,
+    )
+
+    assert plan is not None
+
+
 def test_dedicated_loadgen_uses_the_staged_nanolab_k6_asset(tmp_path: Path) -> None:
     executor = RecordingExecutor()
     environment = EnvironmentConfig.model_validate(
@@ -592,7 +645,12 @@ def test_hpa_scale_to_zero_loadtest_registers_a_zero_replica_floor(tmp_path: Pat
     workflow = build_loadtest_plan(
         config,
         EnvironmentConfig.model_validate(
-            {"provider": "multipass", "roles": {"stack": {"name": "stack"}}}
+            # The gate has to be on the environment too: a zero floor without it is
+            # the pairing _validate_loadtest now refuses.
+            {
+                "provider": "multipass",
+                "roles": {"stack": {"name": "stack", "hpaScaleToZero": True}},
+            }
         ),
         RoleBindings(host=executor, stack=executor),
         control_plane_url="http://stack:30080",
