@@ -338,13 +338,19 @@ class EvaluateGateTask(Task[LoadtestOutcome]):
                 "still flowing, dropping it to zero and fetching it back. See "
                 "replica_samples in summary.json"
             )
-        if outcome.snapshot_gaps:
-            raise RuntimeError(outcome.snapshot_gaps)
+        # Both, and the verdict first: a run whose replicas never moved and whose
+        # scaling series are empty has one story, and reporting only the missing
+        # series buries the fact that the autoscaler did nothing.
+        reasons: list[str] = []
         if autoscaling is not None and autoscaling.verdict_error:
             # Recorded by VerifyAutoscalingReplicas, decided here: everything that
             # explains the verdict - the replica trajectory, the scaling decisions,
             # the snapshot - is written by the tasks between the two.
-            raise RuntimeError(f"{autoscaling.verdict_error}; see summary.json")
+            reasons.append(f"{autoscaling.verdict_error}; see summary.json")
+        if outcome.snapshot_gaps:
+            reasons.append(outcome.snapshot_gaps)
+        if reasons:
+            raise RuntimeError(" | ".join(reasons))
         if not outcome.k6.passed:
             raise RuntimeError("k6 thresholds failed; see report.html")
         return TaskOutcome(value=outcome)
