@@ -58,6 +58,11 @@ class LoadtestOutcome:
     autoscaling: AutoscalingSummary | None = None
     concurrency: ConcurrencySummary | None = None
     prometheus_snapshot: Path | None = None
+    # Required series the snapshot could not fill. Carried rather than raised,
+    # for the same reason as the autoscaling verdict: the report and the summary
+    # - including the replica trajectory - are written by the tasks after this
+    # one, and they are what explains an empty series.
+    snapshot_gaps: str | None = None
     report: Path | None = None
     summary: Path | None = None
 
@@ -236,9 +241,19 @@ class CapturePrometheusTask(Task[LoadtestOutcome]):
     def run(self, inputs: TaskInputs) -> TaskOutcome[LoadtestOutcome]:
         outcome = load_outcome(inputs, self.title)
         window = TimeWindow(start=outcome.k6.started_at, end=outcome.k6.ended_at)
-        return TaskOutcome(
-            value=replace(outcome, prometheus_snapshot=self._snapshot(window).run())
-        )
+        snapshot = self._snapshot(window)
+        try:
+            path = snapshot.run()
+        except RuntimeError as exc:
+            # The file is written before run() raises, so the snapshot is on disk.
+            return TaskOutcome(
+                value=replace(
+                    outcome,
+                    prometheus_snapshot=snapshot.output_dir / "metrics" / "prometheus-snapshot.json",
+                    snapshot_gaps=str(exc),
+                )
+            )
+        return TaskOutcome(value=replace(outcome, prometheus_snapshot=path))
 
 
 class WriteReportTask(Task[LoadtestOutcome]):
@@ -323,6 +338,8 @@ class EvaluateGateTask(Task[LoadtestOutcome]):
                 "still flowing, dropping it to zero and fetching it back. See "
                 "replica_samples in summary.json"
             )
+        if outcome.snapshot_gaps:
+            raise RuntimeError(outcome.snapshot_gaps)
         if autoscaling is not None and autoscaling.verdict_error:
             # Recorded by VerifyAutoscalingReplicas, decided here: everything that
             # explains the verdict - the replica trajectory, the scaling decisions,

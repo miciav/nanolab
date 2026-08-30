@@ -216,6 +216,21 @@ def test_the_gate_fails_a_run_whose_autoscaling_verdict_failed() -> None:
         )
 
 
+def test_the_gate_fails_a_run_whose_snapshot_had_gaps() -> None:
+    # Same reason as the autoscaling verdict: the report and the summary, which
+    # carry the replica trajectory, are written after the snapshot.
+    with pytest.raises(RuntimeError, match="internal_scaling_ratio_milli"):
+        _ = EvaluateGateTask().run(
+            _inputs(
+                LoadtestOutcome(
+                    k6=_k6(),
+                    snapshot_gaps="required queries with no usable data (1): "
+                    "'internal_scaling_ratio_milli' returned no data",
+                )
+            )
+        )
+
+
 def test_the_gate_passes_a_clean_run() -> None:
     outcome = EvaluateGateTask().run(_inputs(LoadtestOutcome(k6=_k6()))).value
 
