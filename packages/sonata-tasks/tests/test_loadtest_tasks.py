@@ -447,6 +447,38 @@ def test_write_loadtest_summary_combines_k6_prometheus_and_autoscaling(
     }
 
 
+def test_snapshot_is_written_even_when_a_required_query_is_empty(tmp_path) -> None:
+    # The other queries are the context that explains the empty one, so they have
+    # to survive it; the run still fails, at the end, naming every gap it found.
+    class _PartialClient:
+        def query_range(self, expr: str, window):  # pyright: ignore[reportMissingParameterType]
+            return [] if "scaling" in expr else [[0, "1"]]
+
+    task = CapturePrometheusSnapshot(
+        task_id="",
+        title="Capture Prometheus snapshot",
+        client=_PartialClient(),  # pyright: ignore[reportArgumentType]
+        queries=(
+            PrometheusQuery("function_dispatch_total", "function_dispatch_total", True),
+            PrometheusQuery("internal_scaling_ratio_milli", "function_scaling_ratio_milli", True),
+        ),
+        window=TimeWindow(
+            start=datetime(2026, 8, 30, 7, 0, tzinfo=timezone.utc),
+            end=datetime(2026, 8, 30, 7, 1, tzinfo=timezone.utc),
+        ),
+        output_dir=tmp_path,
+    )
+
+    with pytest.raises(RuntimeError, match="internal_scaling_ratio_milli"):
+        _ = task.run()
+
+    snapshot = json.loads(
+        (tmp_path / "metrics" / "prometheus-snapshot.json").read_text(encoding="utf-8")
+    )
+    assert snapshot["queries"]["function_dispatch_total"]["points"] == [[0, "1"]]
+    assert snapshot["queries"]["internal_scaling_ratio_milli"]["points"] == []
+
+
 class _ClockOffsetPrometheusClient:
     """Prometheus client whose clock is offset from the host (simulates VM drift)."""
 

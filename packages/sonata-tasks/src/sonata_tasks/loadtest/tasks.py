@@ -128,23 +128,27 @@ class CapturePrometheusSnapshot:
         metrics_dir = self.output_dir / "metrics"
         metrics_dir.mkdir(parents=True, exist_ok=True)
 
+        # Every query is asked and every answer is written before anything is
+        # raised. Failing on the first empty required series discarded the forty
+        # others already collected, and those are what explain the empty one: the
+        # b3 run of 2026-08-30 died on internal_scaling_recommended_replicas and
+        # left an empty metrics directory behind.
         result: dict[str, dict] = {}
+        failures: list[str] = []
         for q in self.queries:
             entry: dict[str, object] = {"query": q.expr, "required": q.required, "points": []}
             try:
                 points = self.client.query_range(q.expr, window)
             except RuntimeError as exc:
-                if q.required:
-                    raise RuntimeError(
-                        f"required query '{q.name}' failed: {exc}{_unreachable_hint(exc)}"
-                    ) from exc
                 entry["error"] = str(exc)
                 result[q.name] = entry
+                if q.required:
+                    failures.append(f"'{q.name}' failed: {exc}{_unreachable_hint(exc)}")
                 continue
-            if q.required and not points:
-                raise RuntimeError(f"required query '{q.name}' returned no data")
             entry["points"] = points
             result[q.name] = entry
+            if q.required and not points:
+                failures.append(f"'{q.name}' returned no data")
 
         snapshot = {
             "start": window.start.isoformat(),
@@ -153,6 +157,14 @@ class CapturePrometheusSnapshot:
         }
         dest = metrics_dir / _PROMETHEUS_SNAPSHOT
         dest.write_text(json.dumps(snapshot, indent=2), encoding="utf-8")
+        if failures:
+            # All of them, not the first: one missing series is a blind spot, five
+            # of them from the same publisher is a module that never started.
+            raise RuntimeError(
+                f"required queries with no usable data ({len(failures)}): "
+                + "; ".join(failures)
+                + f" - snapshot kept at {dest}"
+            )
         return dest
 
 
