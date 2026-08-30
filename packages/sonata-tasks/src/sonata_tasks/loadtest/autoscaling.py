@@ -119,6 +119,12 @@ class AutoscalingSummary:
     # invisible until the series itself was kept.
     replica_samples: tuple[ReplicaSample, ...] = ()
     releases_under_load: int = 0
+    # Why the run should fail, or None when it should not. Carried rather than
+    # raised: the Prometheus snapshot and the report that explain this verdict
+    # are produced by later tasks, and EvaluateGateTask is what fails the run.
+    # Raising here left a failed autoscaling run with a k6 summary and nothing
+    # else - no replica trajectory, no scaling decisions, no snapshot.
+    verdict_error: str | None = None
 
 
 @dataclass(frozen=True)
@@ -350,7 +356,9 @@ class VerifyAutoscalingReplicas:
             raise RuntimeError("VerifyAutoscalingReplicas.run() has not been called")
         return self._result
 
-    def _complete(self, max_replicas: int, final_desired: int) -> AutoscalingSummary:
+    def _complete(
+        self, max_replicas: int, final_desired: int, verdict_error: str | None = None
+    ) -> AutoscalingSummary:
         # getattr, like `errors` above: a sampler that reports only a peak is
         # still a valid Watcher, and requiring the series of every double would
         # buy nothing the summary cannot express as "no samples".
@@ -361,6 +369,7 @@ class VerifyAutoscalingReplicas:
             final_desired_replicas=final_desired,
             replica_samples=samples,
             releases_under_load=releases_under_load(samples),
+            verdict_error=verdict_error,
         )
         return self._result
 
@@ -380,13 +389,14 @@ class VerifyAutoscalingReplicas:
 
     def run(self) -> AutoscalingSummary:
         max_replicas = self.watcher.max_observed if self.watcher is not None else 0
+        last_desired = 0
         if max_replicas <= 1:
             # Fallback: no watcher (or it observed nothing) — poll residual state.
             for _ in range(self.scale_up_polls):
                 time.sleep(self.poll_interval_seconds)
                 ready = self._ready_replicas()
-                desired = self._desired_replicas()
-                max_replicas = max(max_replicas, ready, desired)
+                last_desired = self._desired_replicas()
+                max_replicas = max(max_replicas, ready, last_desired)
                 if max_replicas > 1:
                     break
 
@@ -395,7 +405,7 @@ class VerifyAutoscalingReplicas:
             watcher_errors = list(getattr(self.watcher, "errors", []) or [])
             if watcher_errors:
                 message += f" (watcher probe errors: {watcher_errors[-1]!r}, {len(watcher_errors)} total)"
-            raise RuntimeError(message)
+            return self._complete(max_replicas, last_desired, verdict_error=message)
 
         time.sleep(self.scale_down_initial_delay_seconds)
         final_desired = self._desired_replicas()
@@ -407,9 +417,13 @@ class VerifyAutoscalingReplicas:
             if final_desired == self.expected_final_replicas:
                 return self._complete(max_replicas, final_desired)
 
-        raise RuntimeError(
-            f"Scale-down to {self.expected_final_replicas} not observed: "
-            f"desired replicas = {final_desired}"
+        return self._complete(
+            max_replicas,
+            final_desired,
+            verdict_error=(
+                f"Scale-down to {self.expected_final_replicas} not observed: "
+                f"desired replicas = {final_desired}"
+            ),
         )
 
 

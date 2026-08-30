@@ -200,6 +200,22 @@ def test_the_gate_fails_a_run_that_breached_its_thresholds() -> None:
         _ = EvaluateGateTask().run(_inputs(LoadtestOutcome(k6=_k6(passed=False))))
 
 
+def test_the_gate_fails_a_run_whose_autoscaling_verdict_failed() -> None:
+    # The verifier records rather than raises, so the snapshot and the report can
+    # be written first; without this check the run would pass with a failed verdict.
+    verdict = AutoscalingSummary(
+        deployment_name="fn-word-stats-java",
+        max_replicas_observed=1,
+        final_desired_replicas=1,
+        verdict_error="Scale-up not observed: max replicas stayed at 1",
+    )
+
+    with pytest.raises(RuntimeError, match="Scale-up not observed"):
+        _ = EvaluateGateTask().run(
+            _inputs(LoadtestOutcome(k6=_k6(), autoscaling=verdict))
+        )
+
+
 def test_the_gate_passes_a_clean_run() -> None:
     outcome = EvaluateGateTask().run(_inputs(LoadtestOutcome(k6=_k6()))).value
 

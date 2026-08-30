@@ -176,12 +176,11 @@ def test_verify_autoscaling_replicas_fails_when_scale_up_never_exceeds_one(monke
         poll_interval_seconds=1,
     )
 
-    try:
-        task.run()
-    except RuntimeError as exc:
-        assert "Scale-up not observed" in str(exc)
-        return
-    raise AssertionError("expected RuntimeError")
+    # Recorded, not raised: the snapshot and the report that explain the verdict
+    # run after this task, and EvaluateGateTask is what fails the run.
+    summary = task.run()
+    assert summary.verdict_error is not None
+    assert "Scale-up not observed" in summary.verdict_error
 
 
 def test_verify_autoscaling_replicas_fails_when_scale_down_never_reaches_zero(monkeypatch) -> None:
@@ -200,12 +199,9 @@ def test_verify_autoscaling_replicas_fails_when_scale_down_never_reaches_zero(mo
         poll_interval_seconds=1,
     )
 
-    try:
-        task.run()
-    except RuntimeError as exc:
-        assert "Scale-down to 0 not observed" in str(exc)
-        return
-    raise AssertionError("expected RuntimeError")
+    summary = task.run()
+    assert summary.verdict_error is not None
+    assert "Scale-down to 0 not observed" in summary.verdict_error
 
 
 class _FailingRunner:
@@ -373,13 +369,10 @@ def test_scale_up_failure_message_includes_watcher_probe_errors(monkeypatch) -> 
         watcher=_WatcherStub(),
     )
 
-    try:
-        task.run()
-    except RuntimeError as exc:
-        assert "Scale-up not observed" in str(exc)
-        assert "Unable to connect" in str(exc)
-        return
-    raise AssertionError("expected RuntimeError")
+    summary = task.run()
+    assert summary.verdict_error is not None
+    assert "Scale-up not observed" in summary.verdict_error
+    assert "Unable to connect" in summary.verdict_error
 
 
 def test_fetch_autoscaling_summary_creates_parent_and_fetches(tmp_path) -> None:

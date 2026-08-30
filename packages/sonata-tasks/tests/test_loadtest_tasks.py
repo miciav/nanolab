@@ -443,6 +443,7 @@ def test_write_loadtest_summary_combines_k6_prometheus_and_autoscaling(
         # which is why schema_version stays at 1.
         "replica_samples": [],
         "releases_under_load": 0,
+        "verdict_error": None,
     }
 
 
