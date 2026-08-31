@@ -36,7 +36,7 @@ jobs:
       NANOFAAS_ROOT: ${{ github.workspace }}/.nanofaas-source
     steps:
       - name: Check out nanolab
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up the workspace
         id: sync
@@ -65,7 +65,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Check out nanolab
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up the workspace
         uses: ./.github/actions/setup-workspace
@@ -80,7 +80,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Check out nanolab
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up the workspace
         uses: ./.github/actions/setup-workspace
@@ -113,7 +113,7 @@ jobs:
       NANOFAAS_ROOT: ${{ github.workspace }}/.nanofaas-source
     steps:
       - name: Check out nanolab
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up the workspace
         id: sync
@@ -172,7 +172,7 @@ jobs:
       NANOFAAS_ROOT: ${{ github.workspace }}/.nanofaas-source
     steps:
       - name: Check out nanolab
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up the workspace
         id: sync
