@@ -352,7 +352,7 @@ def runtime_queries(_function_name: str, *, required: bool = True) -> Queries:
         ),
         PrometheusQuery(
             "jvm_threads_runnable",
-            f'jvm_threads_states_threads{{app="nanofaas-control-plane",state="runnable"}}',
+            'jvm_threads_states_threads{app="nanofaas-control-plane",state="runnable"}',
         ),
         # Time spent INSIDE the application, split by what the caller got. Spring
         # Boot publishes this already and nobody had asked for it.
@@ -367,19 +367,19 @@ def runtime_queries(_function_name: str, *, required: bool = True) -> Queries:
         # exception and a templated uri, and only the status matters here.
         PrometheusQuery(
             "http_server_ok_count",
-            f'sum(http_server_requests_seconds_count{{app="nanofaas-control-plane",status="200"}})',
+            'sum(http_server_requests_seconds_count{app="nanofaas-control-plane",status="200"})',
         ),
         PrometheusQuery(
             "http_server_ok_sum",
-            f'sum(http_server_requests_seconds_sum{{app="nanofaas-control-plane",status="200"}})',
+            'sum(http_server_requests_seconds_sum{app="nanofaas-control-plane",status="200"})',
         ),
         PrometheusQuery(
             "http_server_rejected_count",
-            f'sum(http_server_requests_seconds_count{{app="nanofaas-control-plane",status="429"}})',
+            'sum(http_server_requests_seconds_count{app="nanofaas-control-plane",status="429"})',
         ),
         PrometheusQuery(
             "http_server_rejected_sum",
-            f'sum(http_server_requests_seconds_sum{{app="nanofaas-control-plane",status="429"}})',
+            'sum(http_server_requests_seconds_sum{app="nanofaas-control-plane",status="429"})',
         ),
     )
 
