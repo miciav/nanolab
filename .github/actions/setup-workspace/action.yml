@@ -26,29 +26,27 @@ runs:
       uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       with:
         repository: miciav/nanofaas
-        # nanofaas main at the August baseline campaign merge.
+        # nanofaas main at the build-metadata and modular OpenAPI merge.
         # Same Java 25 / GraalVM 25.2.4 toolchain as the previous pin, and it
         # keeps everything that pin carried. New with this pin, in the order
         # that matters to this repository:
-        #   - the shared queue says which door work came in by:
-        #     function_admitted/refused/replayed carry a `path` tag and
-        #     function_queue_depth_by_path splits the backlog. The catalogue
-        #     collects all of them, and the coverage test is what would have
-        #     caught their absence.
-        #   - execution_store_size and idempotency_keys_held, the two gauges the
-        #     retention rewrite exists for. A finished execution is now kept only
-        #     while someone can still read it, which changes steady-state memory
-        #     and therefore what a load test measures.
-        #   - jvm_gc_collection_count/_time, polled from the MXBean rather than
-        #     from GC notifications, so a natively compiled build reports its
-        #     collector instead of reporting silence.
-        #   - the management endpoints get event loops of their own, so a busy
-        #     control plane no longer fails its own liveness probe.
-        #   - blank idempotency keys are treated as absent, and a full queue
-        #     refuses before an execution is built.
+        #   - GET /modules/build-metadata reports what the artifact actually is:
+        #     version, full git revision, dirty state, the modules compiled into
+        #     it, build type/variant/optimization, its builder and runtime base
+        #     images, and the architecture, kernel and VM underneath. The build
+        #     half comes from this repo — images/ passes the variant key down —
+        #     so a comparison run can name the binary it measured instead of
+        #     inferring it from an image tag.
+        #   - the OpenAPI contract is composed at build time from the modules
+        #     selected for that artifact and packaged as /openapi.yaml, so a
+        #     route absent from the build is absent from the contract too.
+        #   - the native image starts again. Caffeine's generated cache classes
+        #     were unreachable under native-image and the control plane died
+        #     building its first cache, which took every native scenario with
+        #     it; that predates this campaign and is fixed in this pin.
         # Tests read the version and the matrix from this checkout rather than
         # assuming them, so moving the pin needs no test edits.
-        ref: 65573223c291b192739efdd340c242c8869ec8c0
+        ref: ade574baf16d90537016707834e66f0f28a236c8
         path: .nanofaas-source
         token: ${{ inputs.nanofaas-token }}
 
