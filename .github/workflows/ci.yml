@@ -179,6 +179,9 @@ jobs:
         uses: ./.github/actions/setup-workspace
         with:
           nanofaas-token: ${{ secrets.NANOFAAS_CHECKOUT_TOKEN }}
+          # The only job that builds the control plane, so the only one with a
+          # Gradle home worth carrying between runs.
+          gradle-cache: 'true'
 
       - name: Run cli-container smoke test
         if: ${{ steps.sync.outputs.nanofaas == 'true' }}

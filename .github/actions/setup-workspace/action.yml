@@ -12,6 +12,13 @@ inputs:
       checkout and reports it through the `nanofaas` output.
     required: false
     default: ""
+  gradle-cache:
+    description: >
+      Cache the Gradle home. Only jobs that actually build nanoFaaS gain
+      anything; everywhere else setup-java's post step finds no ~/.gradle and
+      warns that it has nothing to save, on every run.
+    required: false
+    default: "false"
 
 outputs:
   nanofaas:
@@ -60,7 +67,7 @@ runs:
         # (plans/_local_control_plane.argv), so a lower runtime here builds
         # green and then dies with UnsupportedClassVersionError in one second.
         java-version: '25'
-        cache: 'gradle'
+        cache: ${{ inputs.gradle-cache == 'true' && 'gradle' || '' }}
 
     - name: Verify the JDK matches the pinned nanoFaaS source
       if: ${{ inputs.nanofaas-token != '' }}
