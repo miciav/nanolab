@@ -24,6 +24,54 @@ def test_validate_requires_backend() -> None:
         ScenarioConfig(workflow="validate", functions=["word-stats-java"])
 
 
+@pytest.mark.parametrize("backend", ["container", "k8s"])
+def test_persistent_recovery_is_opt_in_for_validate(backend: str) -> None:
+    config = ScenarioConfig.model_validate(
+        {
+            "workflow": "validate",
+            "backend": backend,
+            "functions": ["word-stats-java"],
+            "persistentRecovery": True,
+        }
+    )
+
+    assert config.persistent_recovery is True
+
+
+def test_persistent_recovery_defaults_to_false() -> None:
+    config = ScenarioConfig(
+        workflow="validate", backend="container", functions=["word-stats-java"]
+    )
+
+    assert config.persistent_recovery is False
+
+
+@pytest.mark.parametrize(
+    ("workflow", "extra"),
+    [
+        ("cli", {"backend": "k8s"}),
+        ("loadtest", {"backend": "k8s"}),
+        ("offload", {}),
+        ("offload-loadtest", {}),
+        ("release", {"release": {"version": "v0.0.0"}}),
+    ],
+)
+def test_persistent_recovery_requires_validate_workflow(
+    workflow: str, extra: dict[str, object]
+) -> None:
+    with pytest.raises(
+        ValidationError, match="persistentRecovery is only supported by the validate workflow"
+    ):
+        ScenarioConfig.model_validate(
+            {
+                "workflow": workflow,
+                "functions": ["word-stats-java"],
+                "persistentRecovery": True,
+                **extra,
+            }
+        )
+
+
 def test_cli_requires_backend() -> None:
     with pytest.raises(ValidationError, match="backend is required"):
         ScenarioConfig(workflow="cli", functions=["word-stats-java"])

@@ -101,6 +101,7 @@ class ScenarioConfig(BaseModel):
         alias="asyncLoad",
         validation_alias=AliasChoices("asyncLoad", "async_load"),
     )
+    persistent_recovery: bool = Field(default=False, alias="persistentRecovery")
     autoscaling: bool = False
     # The concurrency governor is not the autoscaler: it holds the replica count
     # still and moves the per-replica in-flight limit instead. Running both would
@@ -199,6 +200,8 @@ class ScenarioConfig(BaseModel):
             raise ValueError("HPA scale-to-zero requires autoscalingStrategy=HPA")
         if self.async_load and (self.workflow != "validate" or self.backend != "container"):
             raise ValueError("async load requires the validate workflow with the container backend")
+        if self.persistent_recovery and self.workflow != "validate":
+            raise ValueError("persistentRecovery is only supported by the validate workflow")
         if self.workflow == "release" and self.release is None:
             raise ValueError("release workflow requires a 'release' config block")
         return self
