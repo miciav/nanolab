@@ -395,10 +395,10 @@ def test_plan_provisioned_k8s_cli_shows_the_whole_contract_workflow() -> None:
 
     assert result.exit_code == 0, result.output
     lines = [line for line in result.stdout.splitlines() if line.strip()]
-    assert len(lines) == 23
+    assert len(lines) == 24
     assert "001.build-nanofaas-cli" in result.stdout
     assert "002.acquire-stack-vm" in result.stdout
-    assert "023.release-stack-vm" in result.stdout
+    assert "024.release-stack-vm" in result.stdout
     assert "registry" not in result.stdout
 
 

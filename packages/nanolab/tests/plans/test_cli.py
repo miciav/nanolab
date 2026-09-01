@@ -351,6 +351,7 @@ def test_provisioned_k8s_plan_compiles_the_expected_12_task_topology() -> None:
         "Provision base VM dependencies",
         "Install k3s",
         "Sync repository into VM",
+        "Sync nanofaas CLI into VM",
         "Acquire control-plane Helm release",
         "Acquire word-stats-java",
         "List functions",
@@ -449,7 +450,7 @@ def test_provisioned_k8s_plan_compilation_does_not_discover_ssh_credentials(
         environment=_multipass_environment(),
     )
 
-    assert len(plan.compile().tasks) == 23
+    assert len(plan.compile().tasks) == 24
 
 
 def test_provisioned_k8s_builds_the_cli_on_host_and_runs_everything_else_on_stack() -> None:
@@ -463,6 +464,7 @@ def test_provisioned_k8s_builds_the_cli_on_host_and_runs_everything_else_on_stac
         "Provision base VM dependencies",
         "Install k3s",
         "Sync repository into VM",
+        "Sync nanofaas CLI into VM",
     ]
     assert [spec.summary for spec in stack.seen] == [
         "Install Helm release control-plane",
@@ -522,8 +524,8 @@ def test_provisioned_k8s_helm_requires_the_vm_and_the_function_requires_helm() -
     plan = _provisioned_plan(RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor()))
 
     tasks = {task.task_id: task for task in plan.compile().tasks}
-    helm_acquire = tasks["006.acquire-control-plane-helm-release"]
-    function_acquire = tasks["007.acquire-word-stats-java"]
+    helm_acquire = tasks["007.acquire-control-plane-helm-release"]
+    function_acquire = tasks["008.acquire-word-stats-java"]
     assert helm_acquire.resource is not None
     assert function_acquire.resource is not None
     assert [resource.title for resource in helm_acquire.resource.requires] == ["Acquire stack VM"]

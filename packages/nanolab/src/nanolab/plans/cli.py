@@ -22,6 +22,7 @@ from sonata_tasks.components.bootstrap import (
     plan_k3s_install,
     plan_repo_sync_to_vm,
     plan_vm_provision_base,
+    remote_project_dir,
     retarget_bootstrap_operation,
 )
 from sonata_tasks.components.context import ScenarioExecutionContext
@@ -31,7 +32,7 @@ from sonata_tasks.components.operations import RemoteCommandOperation, ScenarioO
 from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
 from sonata_tasks.execution.roles import ExecutionRole
 from sonata_tasks.vm.models import VmInfo, VmRequest
-from sonata_tasks.vm.multipass import _find_ssh_private_key_path
+from sonata_tasks.vm.multipass import _find_ssh_private_key_path, repo_sync_ssh_rsh
 
 from nanolab.cli.vm_provider import provider_for_environment, vm_request_for_role
 from nanolab.config.environment import EnvironmentConfig
@@ -67,6 +68,12 @@ _LOCAL_REGISTRY = LOCAL_REGISTRY
 _HELM_CHART = "deploy/helm/nanofaas"
 _HELM_RELEASE = "control-plane"
 _FUNCTION_READINESS_TIMEOUT_SECONDS = 120
+
+# The CLI is built on the host and run inside the VM, and the repository sync
+# obeys nanoFaaS' .gitignore, which excludes every build directory — so the
+# binary this workflow exists to exercise is the one thing the sync cannot
+# carry. It gets its own step.
+_CLI_INSTALL_DIR = "clients/cli/build/install"
 
 # (task title, planner) — the bootstrap sequence the CLI-provisioned workflow
 # reuses from the legacy provisioning components. Titles are chosen so their
@@ -182,6 +189,33 @@ def _bootstrap_tasks(
                 env=base_operation.env,
             )
         )
+
+    def resolve_cli_sync_argv(inputs: TaskInputs) -> tuple[str, ...]:
+        info = inputs.resource(vm)
+        destination = remote_project_dir(
+            vm_request.model_copy(update={"user": info.user, "home": info.home})
+        )
+        # `--relative` with the `/./` marker recreates clients/cli/build/install
+        # under the destination, so nothing has to mkdir -p ahead of it.
+        return (
+            "rsync",
+            "-az",
+            "--delete",
+            "--relative",
+            "-e",
+            repo_sync_ssh_rsh(resolve_private_key()),
+            f"{repo_root}/./{_CLI_INSTALL_DIR}/",
+            f"{info.user}@{info.host}:{destination}/",
+        )
+
+    tasks.append(
+        CommandTask(
+            title="Sync nanofaas CLI into VM",
+            argv=resolve_cli_sync_argv,
+            executor=executor,
+            role="host",
+        )
+    )
     return tuple(tasks)
 
 
