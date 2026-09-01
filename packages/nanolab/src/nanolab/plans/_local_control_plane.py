@@ -33,7 +33,14 @@ def jar_path(repo_root: Path) -> Path:
     return repo_root / "platform/control-plane/build/libs/app.jar"
 
 
-def argv(repo_root: Path) -> tuple[str, ...]:
+def argv(repo_root: Path, *, admin_runtime_config: bool = False) -> tuple[str, ...]:
+    """The control-plane command line.
+
+    `admin_runtime_config` turns on `/v1/admin/runtime-config`, which the `cli`
+    workflow needs to exercise `nanofaas control-plane config`. Off by default:
+    it is an unauthenticated admin API, and no other workflow reads it.
+    """
+    admin = ("--nanofaas.admin.runtime-config.enabled=true",) if admin_runtime_config else ()
     return (
         "java",
         "-jar",
@@ -44,6 +51,7 @@ def argv(repo_root: Path) -> tuple[str, ...]:
         "--nanofaas.deployment.default-backend=container-local",
         "--nanofaas.container-local.runtime-adapter=docker",
         "--nanofaas.container-local.bind-host=127.0.0.1",
+        *admin,
     )
 
 

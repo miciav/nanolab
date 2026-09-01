@@ -8,18 +8,32 @@ from sonata_tasks.execution.bindings import RoleBindings
 from sonata_tasks.execution.roles import ExecutionRole
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
-from sonata_tasks.cli import CliFunction, CliWorkflowRequest, build_cli_workflow
+from sonata_tasks.cli import (
+    RUNTIME_CONFIG_NAMESPACE,
+    CliFunction,
+    CliWorkflowRequest,
+    build_cli_workflow,
+)
+from sonata_tasks.testing import (
+    CLI_CONTRACT_STEPS as CONTRACT_STEPS,
+    INVOCATION_SUCCESS,
+    cli_function_steps as _function_steps,
+    cli_response,
+    cli_task_ids as _ids,
+    passed as _passed,
+)
 from sonata_tasks.command import CommandTask
 
-SUCCESS = '{"status":"success","output":{"words":2}}'
+SUCCESS = INVOCATION_SUCCESS
 
 
 @dataclass
 class ScriptedExecutor:
     """Records specs and replays a result per matched argv fragment.
 
-    `responses` maps a substring of the joined argv to the result to return;
-    anything unmatched passes with empty output.
+    `responses` maps a substring of the joined argv to the result to return; what
+    it does not cover falls back to `cli_response`, the answers of a control
+    plane that honours the whole CLI surface.
     """
 
     responses: dict[str, TaskResult] = field(default_factory=dict)
@@ -31,15 +45,16 @@ class ScriptedExecutor:
         for fragment, result in self.responses.items():
             if fragment in joined:
                 return result
-        return TaskResult(task_id="", status="passed", return_code=0, stdout=SUCCESS)
+        return cli_response(task.argv)
 
     @property
     def titles(self) -> list[str]:
         return [spec.summary for spec in self.seen]
 
 
+WORD_STATS = "word-stats-java"
 FUNCTION = CliFunction(
-    name="word-stats-java",
+    name=WORD_STATS,
     image="localhost:5000/nanofaas/java-word-stats:e2e",
     payload='{"text":"hello world"}',
 )
@@ -62,13 +77,14 @@ def test_a_single_function_compiles_to_the_expected_topology() -> None:
 
     compiled = workflow.compile()
 
-    assert [task.task_id for task in compiled.tasks] == [
-        "001.build-nanofaas-cli",
-        "002.acquire-word-stats-java",
-        "003.list-functions",
-        "004.invoke-word-stats-java",
-        "005.release-word-stats-java",
-    ]
+    assert [task.task_id for task in compiled.tasks] == _ids(
+        "Build nanofaas-cli",
+        "Acquire word-stats-java",
+        "List functions",
+        *CONTRACT_STEPS,
+        *_function_steps(WORD_STATS),
+        "Release word-stats-java",
+    )
 
 
 def test_running_it_applies_before_listing_and_deletes_last() -> None:
@@ -83,7 +99,8 @@ def test_running_it_applies_before_listing_and_deletes_last() -> None:
         "Build nanofaas-cli",
         "Apply word-stats-java",
         "List functions",
-        "Invoke word-stats-java",
+        *CONTRACT_STEPS,
+        *_function_steps(WORD_STATS),
         "Delete word-stats-java",
     ]
 
@@ -219,16 +236,17 @@ def test_two_functions_release_each_one_after_its_last_consumer() -> None:
 
     compiled = workflow.compile()
 
-    assert [task.task_id for task in compiled.tasks] == [
-        "001.build-nanofaas-cli",
-        "002.acquire-word-stats-java",
-        "003.acquire-json-transform-python",
-        "004.list-functions",
-        "005.invoke-word-stats-java",
-        "006.release-word-stats-java",
-        "007.invoke-json-transform-python",
-        "008.release-json-transform-python",
-    ]
+    assert [task.task_id for task in compiled.tasks] == _ids(
+        "Build nanofaas-cli",
+        "Acquire word-stats-java",
+        "Acquire json-transform-python",
+        "List functions",
+        *CONTRACT_STEPS,
+        *_function_steps(WORD_STATS),
+        "Release word-stats-java",
+        *_function_steps("json-transform-python"),
+        "Release json-transform-python",
+    )
 
 
 def test_selecting_one_invoke_keeps_that_function_lifecycle_only() -> None:
@@ -246,7 +264,7 @@ def test_selecting_one_invoke_keeps_that_function_lifecycle_only() -> None:
     ]
 
 
-def test_the_endpoint_and_namespace_reach_every_cli_call() -> None:
+def test_the_endpoint_reaches_every_cli_call_and_the_namespace_does_not() -> None:
     executor = ScriptedExecutor()
     workflow = build_cli_workflow(
         CliWorkflowRequest(
@@ -261,7 +279,8 @@ def test_the_endpoint_and_namespace_reach_every_cli_call() -> None:
 
     cli_calls = [spec for spec in executor.seen if spec.summary != "Build nanofaas-cli"]
     assert all("http://stack.example:8080" in " ".join(spec.argv) for spec in cli_calls)
-    assert all("research" in " ".join(spec.argv) for spec in cli_calls)
+    # The CLI dropped --namespace: passing it would abort every call as an unknown option.
+    assert all("--namespace" not in spec.argv for spec in cli_calls)
 
 
 def test_apply_builds_the_manifest_on_the_target_not_in_this_process() -> None:
@@ -315,7 +334,8 @@ def test_keep_still_deletes_the_function() -> None:
         "Build nanofaas-cli",
         "Apply word-stats-java",
         "List functions",
-        "Invoke word-stats-java",
+        *CONTRACT_STEPS,
+        *_function_steps(WORD_STATS),
         "Delete word-stats-java",
     ]
 
@@ -357,15 +377,16 @@ def test_an_external_resource_wraps_the_whole_workflow() -> None:
         requires=(control_plane,),
     )
 
-    assert [task.task_id for task in workflow.compile().tasks] == [
-        "001.build-nanofaas-cli",
-        "002.acquire-local-control-plane",
-        "003.acquire-word-stats-java",
-        "004.list-functions",
-        "005.invoke-word-stats-java",
-        "006.release-word-stats-java",
-        "007.release-local-control-plane",
-    ]
+    assert [task.task_id for task in workflow.compile().tasks] == _ids(
+        "Build nanofaas-cli",
+        "Acquire local control plane",
+        "Acquire word-stats-java",
+        "List functions",
+        *CONTRACT_STEPS,
+        *_function_steps(WORD_STATS),
+        "Release word-stats-java",
+        "Release local control plane",
+    )
 
     workflow.run()
     assert events == ["start", "stop"]
@@ -434,15 +455,16 @@ def test_a_function_with_dockerfile_build_gets_artifact_and_image_tasks() -> Non
         CliWorkflowRequest(functions=(function,)), _bindings(executor)
     )
 
-    assert [task.task_id for task in workflow.compile().tasks] == [
-        "001.build-nanofaas-cli",
-        "002.build-application-artifact-word-stats-java",
-        "003.build-image-word-stats-java",
-        "004.acquire-word-stats-java",
-        "005.list-functions",
-        "006.invoke-word-stats-java",
-        "007.release-word-stats-java",
-    ]
+    assert [task.task_id for task in workflow.compile().tasks] == _ids(
+        "Build nanofaas-cli",
+        "Build application artifact word-stats-java",
+        "Build image word-stats-java",
+        "Acquire word-stats-java",
+        "List functions",
+        *CONTRACT_STEPS,
+        *_function_steps(WORD_STATS),
+        "Release word-stats-java",
+    )
 
 
 def test_the_control_plane_build_runs_before_images_and_acquire() -> None:
@@ -462,17 +484,18 @@ def test_the_control_plane_build_runs_before_images_and_acquire() -> None:
         requires=(control_plane,),
     )
 
-    assert [task.task_id for task in workflow.compile().tasks] == [
-        "001.build-nanofaas-cli",
-        "002.build-local-control-plane",
-        "003.build-image-word-stats-java",
-        "004.acquire-local-control-plane",
-        "005.acquire-word-stats-java",
-        "006.list-functions",
-        "007.invoke-word-stats-java",
-        "008.release-word-stats-java",
-        "009.release-local-control-plane",
-    ]
+    assert [task.task_id for task in workflow.compile().tasks] == _ids(
+        "Build nanofaas-cli",
+        "Build local control plane",
+        "Build image word-stats-java",
+        "Acquire local control plane",
+        "Acquire word-stats-java",
+        "List functions",
+        *CONTRACT_STEPS,
+        *_function_steps(WORD_STATS),
+        "Release word-stats-java",
+        "Release local control plane",
+    )
 
 
 def test_the_image_build_runs_before_the_function_is_registered() -> None:
@@ -495,15 +518,16 @@ def test_requested_function_images_are_pushed_before_registration() -> None:
         CliWorkflowRequest(functions=(function,), push_function_images=True), _bindings(ScriptedExecutor())
     )
 
-    assert [task.task_id for task in workflow.compile().tasks] == [
-        "001.build-nanofaas-cli",
-        "002.build-image-word-stats-java",
-        "003.push-image-localhost-5000-nanofaas-java-word-stats-e2e",
-        "004.acquire-word-stats-java",
-        "005.list-functions",
-        "006.invoke-word-stats-java",
-        "007.release-word-stats-java",
-    ]
+    assert [task.task_id for task in workflow.compile().tasks] == _ids(
+        "Build nanofaas-cli",
+        "Build image word-stats-java",
+        "Push image localhost-5000-nanofaas-java-word-stats-e2e",
+        "Acquire word-stats-java",
+        "List functions",
+        *CONTRACT_STEPS,
+        *_function_steps(WORD_STATS),
+        "Release word-stats-java",
+    )
 
 
 def test_without_build_argv_nothing_extra_is_emitted() -> None:
@@ -537,7 +561,8 @@ def test_build_role_is_independent_of_cli_role() -> None:
     assert [spec.summary for spec in stack.seen] == [
         "Apply word-stats-java",
         "List functions",
-        "Invoke word-stats-java",
+        *CONTRACT_STEPS,
+        *_function_steps(WORD_STATS),
         "Delete word-stats-java",
     ]
 
@@ -578,17 +603,18 @@ def test_bootstrap_tasks_run_between_build_and_the_first_resource() -> None:
         bootstrap_requires=(vm,),
     )
 
-    assert [task.task_id for task in workflow.compile().tasks] == [
-        "001.build-nanofaas-cli",
-        "002.acquire-stack-vm",
-        "003.provision-base-vm-dependencies",
-        "004.sync-repository-into-vm",
-        "005.acquire-word-stats-java",
-        "006.list-functions",
-        "007.invoke-word-stats-java",
-        "008.release-word-stats-java",
-        "009.release-stack-vm",
-    ]
+    assert [task.task_id for task in workflow.compile().tasks] == _ids(
+        "Build nanofaas-cli",
+        "Acquire stack VM",
+        "Provision base VM dependencies",
+        "Sync repository into VM",
+        "Acquire word-stats-java",
+        "List functions",
+        *CONTRACT_STEPS,
+        *_function_steps(WORD_STATS),
+        "Release word-stats-java",
+        "Release stack VM",
+    )
 
     workflow.run()
 
@@ -598,7 +624,8 @@ def test_bootstrap_tasks_run_between_build_and_the_first_resource() -> None:
         "Sync repository into VM",
         "Apply word-stats-java",
         "List functions",
-        "Invoke word-stats-java",
+        *CONTRACT_STEPS,
+        *_function_steps(WORD_STATS),
         "Delete word-stats-java",
     ]
     assert events == ["acquire-vm", "release-vm"]
@@ -626,7 +653,8 @@ def test_readiness_runs_after_apply_and_before_the_function_is_usable() -> None:
         "Wait for deployment/fn-word-stats-java",
         "Roll out deployment/fn-word-stats-java",
         "List functions",
-        "Invoke word-stats-java",
+        *CONTRACT_STEPS,
+        *_function_steps(WORD_STATS),
         "Delete word-stats-java",
     ]
     rollout = next(
@@ -683,15 +711,16 @@ def test_function_requires_is_a_real_compiled_edge() -> None:
     )
     assert function_acquire.resource is not None
     assert function_acquire.resource.requires == (helm,)
-    assert [task.task_id for task in compiled.tasks] == [
-        "001.build-nanofaas-cli",
-        "002.acquire-helm-release",
-        "003.acquire-word-stats-java",
-        "004.list-functions",
-        "005.invoke-word-stats-java",
-        "006.release-word-stats-java",
-        "007.release-helm-release",
-    ]
+    assert [task.task_id for task in compiled.tasks] == _ids(
+        "Build nanofaas-cli",
+        "Acquire Helm release",
+        "Acquire word-stats-java",
+        "List functions",
+        *CONTRACT_STEPS,
+        *_function_steps(WORD_STATS),
+        "Release word-stats-java",
+        "Release Helm release",
+    )
 
     workflow.run()
 
@@ -734,6 +763,116 @@ def test_without_readiness_timeout_no_extra_commands_are_emitted() -> None:
         "Build nanofaas-cli",
         "Apply word-stats-java",
         "List functions",
-        "Invoke word-stats-java",
+        *CONTRACT_STEPS,
+        *_function_steps(WORD_STATS),
         "Delete word-stats-java",
     ]
+
+
+def test_the_new_cli_surface_is_exercised_against_the_control_plane() -> None:
+    executor = ScriptedExecutor()
+    workflow = build_cli_workflow(
+        CliWorkflowRequest(functions=(FUNCTION,), runtime_config_namespace=RUNTIME_CONFIG_NAMESPACE),
+        _bindings(executor),
+    )
+
+    workflow.run()
+
+    joined = [" ".join(spec.argv) for spec in executor.seen]
+    for command in (
+        "control-plane info",
+        "control-plane contract",
+        "control-plane config get",
+        "control-plane config validate control-plane",
+        "control-plane config patch control-plane",
+        "fn update word-stats-java",
+        "fn replicas set word-stats-java 2",
+        "fn replicas get word-stats-java",
+        "fn apply --replace",
+    ):
+        assert any(command in call for call in joined), command
+
+
+def test_runtime_config_is_skipped_where_no_namespace_is_available() -> None:
+    """The k8s workflow talks to a control plane whose admin API may be off; a
+    check that quietly passed against it would be worse than no check."""
+    executor = ScriptedExecutor()
+    workflow = build_cli_workflow(
+        CliWorkflowRequest(functions=(FUNCTION,)), _bindings(executor)
+    )
+
+    workflow.run()
+
+    assert not any("control-plane config" in " ".join(spec.argv) for spec in executor.seen)
+
+
+def test_update_fails_when_the_control_plane_ignored_the_patch() -> None:
+    executor = ScriptedExecutor(
+        responses={"fn update": _passed('{"concurrency":3,"timeoutMs":5000,"maxRetries":1}')}
+    )
+    workflow = build_cli_workflow(
+        CliWorkflowRequest(functions=(FUNCTION,)), _bindings(executor)
+    )
+
+    with pytest.raises(RuntimeError, match="timeoutMs is 5000, expected 9000"):
+        workflow.run()
+
+
+def test_scaling_fails_when_the_desired_count_did_not_change() -> None:
+    executor = ScriptedExecutor(
+        responses={"fn replicas get": _passed('{"name":"word-stats-java","desiredReplicas":1,"readyReplicas":1}')}
+    )
+    workflow = build_cli_workflow(
+        CliWorkflowRequest(functions=(FUNCTION,)), _bindings(executor)
+    )
+
+    with pytest.raises(RuntimeError, match="desiredReplicas is 1, expected 2"):
+        workflow.run()
+
+
+def test_an_apply_that_replaces_without_being_asked_fails_the_run() -> None:
+    """The point of the refusal check: a CLI that silently replaced on a changed
+    immutable field would exit 0 here, and the delete-then-register it did would
+    never be noticed."""
+    executor = ScriptedExecutor(responses={'"queueSize":21': _passed("")})
+    workflow = build_cli_workflow(
+        CliWorkflowRequest(functions=(FUNCTION,)), _bindings(executor)
+    )
+
+    with pytest.raises(RuntimeError, match="without asking for --replace"):
+        workflow.run()
+
+
+def test_replace_fails_when_the_immutable_field_did_not_change() -> None:
+    executor = ScriptedExecutor(
+        responses={"fn apply --replace": _passed('{"name":"word-stats-java","queueSize":20}')}
+    )
+    workflow = build_cli_workflow(
+        CliWorkflowRequest(functions=(FUNCTION,)), _bindings(executor)
+    )
+
+    with pytest.raises(RuntimeError, match="queueSize is 20, expected 21"):
+        workflow.run()
+
+
+def test_a_control_plane_missing_an_optional_capability_fails_early() -> None:
+    executor = ScriptedExecutor(
+        responses={"control-plane info": _passed('{"capabilities":{"functionUpdate":true,"replicas":false}}')}
+    )
+    workflow = build_cli_workflow(
+        CliWorkflowRequest(functions=(FUNCTION,)), _bindings(executor)
+    )
+
+    with pytest.raises(RuntimeError, match="does not advertise replicas"):
+        workflow.run()
+
+
+def test_an_invalid_runtime_config_that_is_accepted_fails_the_run() -> None:
+    executor = ScriptedExecutor(responses={'"rateMaxPerSecond":-1': _passed('{"valid":true}')})
+    workflow = build_cli_workflow(
+        CliWorkflowRequest(functions=(FUNCTION,), runtime_config_namespace=RUNTIME_CONFIG_NAMESPACE),
+        _bindings(executor),
+    )
+
+    with pytest.raises(RuntimeError, match="not reported as invalid"):
+        workflow.run()

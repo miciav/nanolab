@@ -16,6 +16,11 @@ from sonata_tasks.cli_function import (
     CliFunctionApplyTask,
     CliFunctionDeleteTask,
     CliFunctionInvokeTask,
+    control_plane_contract_tasks,
+    function_replace_tasks,
+    function_replicas_tasks,
+    function_update_task,
+    runtime_config_tasks,
 )
 from sonata_tasks.command import CommandTask
 from sonata_tasks.deployment import DEFAULT_NAMESPACE
@@ -24,6 +29,20 @@ from sonata_tasks.function import function_resource
 from sonata_tasks.gradle import GradleTask
 from sonata_tasks.kubectl import k8s_deployment_readiness
 from sonata_tasks.manifest import FunctionManifest
+
+
+# Mutable settings `fn update` patches, chosen to differ from every
+# `FunctionManifest` default so a control plane that ignored the patch cannot
+# still match.
+FUNCTION_PATCH = {"concurrency": 3, "timeoutMs": 9000, "maxRetries": 1}
+
+# `control-plane` is the namespace the runtime-config module registers itself, so
+# it is available wherever the admin API is. The patched rate ceiling is a
+# hair under the default 1000000: high enough that no lab workload notices,
+# different enough that the control plane cannot pass by ignoring the patch.
+RUNTIME_CONFIG_NAMESPACE = "control-plane"
+RUNTIME_CONFIG_PATCH = {"rateMaxPerSecond": 999999}
+INVALID_RUNTIME_CONFIG_PATCH = {"rateMaxPerSecond": -1}
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,6 +68,12 @@ class CliWorkflowRequest:
     endpoint: str = "http://127.0.0.1:8080"
     binary: str = "clients/cli/build/install/nanofaas-cli/bin/nanofaas-cli"
     push_function_images: bool = False
+    # The namespace `control-plane config` is exercised against, or None where the
+    # control plane exposes no runtime-config namespace (the admin API is off, or
+    # the build carries no module that registers one). Not a default: a workflow
+    # that silently skipped the check would look exactly like one that passed it.
+    runtime_config_namespace: str | None = None
+    replicas: int = 2
 
     def __post_init__(self) -> None:
         if self.cli_role not in ("host", "stack"):
@@ -60,13 +85,13 @@ class CliWorkflowRequest:
 
 
 def _cli_argv(request: CliWorkflowRequest, *arguments: str) -> tuple[str, ...]:
-    return (
-        request.binary,
-        "--endpoint",
-        request.endpoint,
-        "--namespace",
-        request.namespace,
-        *arguments,
+    # The CLI has no --namespace flag; the namespace only addresses k8s readiness checks.
+    return (request.binary, "--endpoint", request.endpoint, *arguments)
+
+
+def _manifest(request: CliWorkflowRequest, function: CliFunction) -> FunctionManifest:
+    return FunctionManifest(
+        name=function.name, image=function.image, resources=function.resources
     )
 
 
@@ -86,9 +111,7 @@ def _function_resource(
     register, readiness — belongs to `function_resource`, which every other
     workflow reuses with its own register and delete commands.
     """
-    manifest = FunctionManifest(
-        name=function.name, image=function.image, resources=function.resources
-    )
+    manifest = _manifest(request, function)
     prefix = _cli_argv(request)
     apply_task = CliFunctionApplyTask(
         manifest, cli_argv=prefix, executor=executor, role=request.cli_role, cwd=cwd
@@ -225,16 +248,64 @@ def build_cli_workflow(
         ),
         requires=(*requires, *resources),
     )
+    prefix = _cli_argv(request)
+    role = request.cli_role
+    for task in control_plane_contract_tasks(
+        cli_argv=prefix, executor=executor, role=role, cwd=cwd
+    ):
+        workflow.add(task, requires=requires)
+    if request.runtime_config_namespace is not None:
+        for task in runtime_config_tasks(
+            request.runtime_config_namespace,
+            patch=RUNTIME_CONFIG_PATCH,
+            invalid_patch=INVALID_RUNTIME_CONFIG_PATCH,
+            cli_argv=prefix,
+            executor=executor,
+            role=role,
+            cwd=cwd,
+        ):
+            workflow.add(task, requires=requires)
     for function, resource in zip(request.functions, resources):
+        function_requires_resource = (*requires, resource)
         workflow.add(
             CliFunctionInvokeTask(
                 function.name,
                 payload=function.payload,
-                cli_argv=_cli_argv(request),
+                cli_argv=prefix,
                 executor=executor,
                 role=request.cli_role,
                 cwd=cwd,
             ),
-            requires=(*requires, resource),
+            requires=function_requires_resource,
         )
+        workflow.add(
+            function_update_task(
+                function.name,
+                patch=FUNCTION_PATCH,
+                cli_argv=prefix,
+                executor=executor,
+                role=role,
+                cwd=cwd,
+            ),
+            requires=function_requires_resource,
+        )
+        for task in function_replicas_tasks(
+            function.name,
+            replicas=request.replicas,
+            cli_argv=prefix,
+            executor=executor,
+            role=role,
+            cwd=cwd,
+        ):
+            workflow.add(task, requires=function_requires_resource)
+        # Last of the three: replacing re-registers the function from its manifest,
+        # which discards the patch and the replica count the two steps above set.
+        for task in function_replace_tasks(
+            _manifest(request, function),
+            cli_argv=prefix,
+            executor=executor,
+            role=role,
+            cwd=cwd,
+        ):
+            workflow.add(task, requires=function_requires_resource)
     return workflow

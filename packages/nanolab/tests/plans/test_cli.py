@@ -12,6 +12,14 @@ from sonata_tasks.components import bootstrap
 from sonata_tasks.command import CommandTask
 from sonata_tasks.execution.bindings import RoleBindings
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
+from sonata_tasks.testing import (
+    CLI_CONTRACT_STEPS,
+    CLI_RUNTIME_CONFIG_STEPS,
+    INVOCATION_SUCCESS,
+    cli_function_steps,
+    cli_response,
+    cli_task_ids,
+)
 from sonata_tasks.vm import multipass
 from sonata_tasks.vm.models import VmInfo, VmRequest
 
@@ -27,14 +35,16 @@ from nanolab.release.publish import (
 from nanolab.release.versioning import normalize_version, read_project_version
 from nanolab.workspace.paths import default_tool_paths
 
-SUCCESS = '{"status":"success","output":{"words":2}}'
+SUCCESS = INVOCATION_SUCCESS
+
+
 @dataclass
 class RecordingExecutor:
     seen: list[CommandTaskSpec] = field(default_factory=list)
 
     def run(self, task: CommandTaskSpec, *, dry_run: bool = False) -> TaskResult:
         self.seen.append(task)
-        return TaskResult(task_id="", status="passed", return_code=0, stdout=SUCCESS)
+        return cli_response(task.argv)
 
 
 @dataclass
@@ -152,7 +162,8 @@ def test_cli_plan_uses_the_selected_role_binding() -> None:
         "Build nanofaas-cli",
         "Apply word-stats-java",
         "List functions",
-        "Invoke word-stats-java",
+        *CLI_CONTRACT_STEPS,
+        *cli_function_steps("word-stats-java"),
         "Delete word-stats-java",
     ]
 
@@ -167,16 +178,17 @@ def test_cli_plan_compiles_every_selected_function() -> None:
         endpoint="http://stack.example:8080",
     )
 
-    assert [task.task_id for task in plan.compile().tasks] == [
-        "001.build-nanofaas-cli",
-        "002.acquire-word-stats-java",
-        "003.acquire-json-transform-python",
-        "004.list-functions",
-        "005.invoke-word-stats-java",
-        "006.release-word-stats-java",
-        "007.invoke-json-transform-python",
-        "008.release-json-transform-python",
-    ]
+    assert [task.task_id for task in plan.compile().tasks] == cli_task_ids(
+        "Build nanofaas-cli",
+        "Acquire word-stats-java",
+        "Acquire json-transform-python",
+        "List functions",
+        *CLI_CONTRACT_STEPS,
+        *cli_function_steps("word-stats-java"),
+        "Release word-stats-java",
+        *cli_function_steps("json-transform-python"),
+        "Release json-transform-python",
+    )
 
 
 def test_cli_plan_passes_the_endpoint_and_resolved_resources_through() -> None:
@@ -240,21 +252,25 @@ def test_container_backend_wraps_the_workflow_in_a_local_control_plane() -> None
         RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor()),
     )
 
-    assert [task.task_id for task in plan.compile().tasks] == [
-        "001.build-nanofaas-cli",
-        "002.build-local-control-plane",
-        "003.build-application-artifact-word-stats-java",
-        "004.build-image-word-stats-java",
-        "005.acquire-local-registry",
-        "006.push-image-127-0-0-1-5000-nanofaas-java-word-stats-e2e",
-        "007.acquire-local-control-plane",
-        "008.acquire-word-stats-java",
-        "009.list-functions",
-        "010.invoke-word-stats-java",
-        "011.release-word-stats-java",
-        "012.release-local-control-plane",
-        "013.release-local-registry",
-    ]
+    assert [task.task_id for task in plan.compile().tasks] == cli_task_ids(
+        "Build nanofaas-cli",
+        "Build local control plane",
+        "Build application artifact word-stats-java",
+        "Build image word-stats-java",
+        "Acquire local registry",
+        "Push image 127-0-0-1-5000-nanofaas-java-word-stats-e2e",
+        "Acquire local control plane",
+        "Acquire word-stats-java",
+        "List functions",
+        *CLI_CONTRACT_STEPS,
+        # The local control plane is the one this plan starts itself, so it is
+        # also the one whose runtime-config admin API is known to be on.
+        *CLI_RUNTIME_CONFIG_STEPS,
+        *cli_function_steps("word-stats-java"),
+        "Release word-stats-java",
+        "Release local control plane",
+        "Release local registry",
+    )
 
 
 def test_container_backend_builds_the_control_plane_with_the_container_module() -> None:
@@ -270,7 +286,9 @@ def test_container_backend_builds_the_control_plane_with_the_container_module() 
     assert _argv(build.task) == (
         "./gradlew",
         ":control-plane:bootJar",
-        "-PcontrolPlaneModules=container-deployment-provider",
+        # runtime-config serves `control-plane config` and registers the namespace
+        # the check patches.
+        "-PcontrolPlaneModules=container-deployment-provider,runtime-config",
         "--no-daemon",
     )
 
@@ -327,20 +345,22 @@ def test_container_backend_runs_only_on_the_host_role() -> None:
 def test_provisioned_k8s_plan_compiles_the_expected_12_task_topology() -> None:
     plan = _provisioned_plan(RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor()))
 
-    assert [task.task_id for task in plan.compile().tasks] == [
-        "001.build-nanofaas-cli",
-        "002.acquire-stack-vm",
-        "003.provision-base-vm-dependencies",
-        "004.install-k3s",
-        "005.sync-repository-into-vm",
-        "006.acquire-control-plane-helm-release",
-        "007.acquire-word-stats-java",
-        "008.list-functions",
-        "009.invoke-word-stats-java",
-        "010.release-word-stats-java",
-        "011.release-control-plane-helm-release",
-        "012.release-stack-vm",
-    ]
+    assert [task.task_id for task in plan.compile().tasks] == cli_task_ids(
+        "Build nanofaas-cli",
+        "Acquire stack VM",
+        "Provision base VM dependencies",
+        "Install k3s",
+        "Sync repository into VM",
+        "Acquire control-plane Helm release",
+        "Acquire word-stats-java",
+        "List functions",
+        *CLI_CONTRACT_STEPS,
+        *CLI_RUNTIME_CONFIG_STEPS,
+        *cli_function_steps("word-stats-java"),
+        "Release word-stats-java",
+        "Release control-plane Helm release",
+        "Release stack VM",
+    )
 
 
 def test_provisioned_k8s_bootstrap_sets_up_no_local_registry() -> None:
@@ -429,7 +449,7 @@ def test_provisioned_k8s_plan_compilation_does_not_discover_ssh_credentials(
         environment=_multipass_environment(),
     )
 
-    assert len(plan.compile().tasks) == 12
+    assert len(plan.compile().tasks) == 23
 
 
 def test_provisioned_k8s_builds_the_cli_on_host_and_runs_everything_else_on_stack() -> None:
@@ -450,7 +470,9 @@ def test_provisioned_k8s_builds_the_cli_on_host_and_runs_everything_else_on_stac
         "Wait for deployment/fn-word-stats-java",
         "Roll out deployment/fn-word-stats-java",
         "List functions",
-        "Invoke word-stats-java",
+        *CLI_CONTRACT_STEPS,
+        *CLI_RUNTIME_CONFIG_STEPS,
+        *cli_function_steps("word-stats-java"),
         "Delete word-stats-java",
         "Uninstall Helm release control-plane",
     ]

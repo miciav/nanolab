@@ -31,6 +31,7 @@ def control_plane_helm_values(
     sync_queue_admission_enabled: bool = False,
     sync_queue_max_depth: int | None = None,
     container_metrics: bool = False,
+    admin_runtime_config: bool = False,
     control_plane_resources: Mapping[str, Mapping[str, float | int | str]] | None = None,
 ) -> dict[str, str]:
     repository, tag = _image_parts(control_plane_image)
@@ -74,6 +75,12 @@ def control_plane_helm_values(
     ]
     if metrics_profile is not None:
         extra_env.append(("NANOFAAS_METRICS_PROFILE", metrics_profile))
+    if admin_runtime_config:
+        # Relaxed binding for `nanofaas.admin.runtime-config.enabled`: the hyphen
+        # disappears in the environment-variable form, so RUNTIMECONFIG is one word.
+        # Off unless asked: it is an unauthenticated admin API, and only the `cli`
+        # workflow reads it.
+        extra_env.append(("NANOFAAS_ADMIN_RUNTIMECONFIG_ENABLED", "true"))
     for index, (name, value) in enumerate(extra_env):
         values[f"controlPlane.extraEnv[{index}].name"] = name
         values[f"controlPlane.extraEnv[{index}].value"] = value

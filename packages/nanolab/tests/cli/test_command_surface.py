@@ -382,7 +382,7 @@ def test_run_provisioned_k8s_cli_skips_the_legacy_provisioning_context(
     )
 
 
-def test_plan_provisioned_k8s_cli_shows_the_twelve_task_workflow() -> None:
+def test_plan_provisioned_k8s_cli_shows_the_whole_contract_workflow() -> None:
     result = CliRunner().invoke(
         app,
         [
@@ -395,10 +395,10 @@ def test_plan_provisioned_k8s_cli_shows_the_twelve_task_workflow() -> None:
 
     assert result.exit_code == 0, result.output
     lines = [line for line in result.stdout.splitlines() if line.strip()]
-    assert len(lines) == 12
+    assert len(lines) == 23
     assert "001.build-nanofaas-cli" in result.stdout
     assert "002.acquire-stack-vm" in result.stdout
-    assert "012.release-stack-vm" in result.stdout
+    assert "023.release-stack-vm" in result.stdout
     assert "registry" not in result.stdout
 
 
@@ -596,7 +596,7 @@ def test_plan_renders_the_compiled_cli_workflow() -> None:
 
     assert result.exit_code == 0, result.output
     assert "001.build-nanofaas-cli" in result.stdout
-    assert "013.release-local-registry" in result.stdout
+    assert "024.release-local-registry" in result.stdout
 
 
 def test_plan_slices_the_cli_workflow_by_sonata_slug() -> None:

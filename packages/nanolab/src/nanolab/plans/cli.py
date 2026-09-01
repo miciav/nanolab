@@ -6,7 +6,12 @@ from typing import Any, cast
 
 from multipass import find_ssh_public_key
 from sonata_engine import Resource, TaskInputs, Workflow
-from sonata_tasks.cli import CliFunction, CliWorkflowRequest, build_cli_workflow
+from sonata_tasks.cli import (
+    RUNTIME_CONFIG_NAMESPACE,
+    CliFunction,
+    CliWorkflowRequest,
+    build_cli_workflow,
+)
 from sonata_tasks.command import CommandTask
 from sonata_tasks.deployment import CONTROL_PLANE_NODE_PORT, DEFAULT_NAMESPACE, LOCAL_REGISTRY
 from sonata_tasks.helm import HelmReleaseSpec, helm_release_resource
@@ -38,10 +43,13 @@ from nanolab.release.environment import secure_release_endpoints
 from nanolab.release.versioning import normalize_version, read_project_version
 
 LOCAL_ENDPOINT = _local_control_plane.ENDPOINT
+# The runtime-config module carries both the admin API `control-plane config`
+# drives and the `control-plane` namespace it patches, so nothing else has to be
+# built in for the check to have something to talk to.
 LOCAL_CONTROL_PLANE_BUILD_ARGV = (
     "./gradlew",
     ":control-plane:bootJar",
-    "-PcontrolPlaneModules=container-deployment-provider",
+    "-PcontrolPlaneModules=container-deployment-provider,runtime-config",
     "--no-daemon",
 )
 
@@ -85,7 +93,7 @@ def _local_control_plane_resource(
     return replace(
         managed_process_resource(
             title="Acquire local control plane",
-            argv=_local_control_plane.argv(repo_root),
+            argv=_local_control_plane.argv(repo_root, admin_runtime_config=True),
             cwd=repo_root,
             ready=_local_control_plane.ready,
         ),
@@ -200,6 +208,10 @@ def _control_plane_helm_resource(
         namespace=namespace,
         control_plane_image=control_plane_image,
         expose_node_port=True,
+        # The released image carries every module, so the runtime-config admin API
+        # is one property away; the CLI's `control-plane config` commands are
+        # unreachable without it.
+        admin_runtime_config=True,
     )
     spec = HelmReleaseSpec(
         release=_HELM_RELEASE,
@@ -282,6 +294,7 @@ def _build_k8s_plan(
         build_role="host",
         endpoint=PROVISIONED_ENDPOINT,
         namespace=namespace,
+        runtime_config_namespace=RUNTIME_CONFIG_NAMESPACE,
     )
     return build_cli_workflow(
         request,
@@ -346,6 +359,9 @@ def build_cli_plan(
         endpoint=target_endpoint,
         namespace=namespace,
         push_function_images=local,
+        # Only the control plane this plan starts itself is known to expose a
+        # runtime-config namespace; an endpoint someone passed in is not.
+        runtime_config_namespace=RUNTIME_CONFIG_NAMESPACE if local else None,
     )
     registry = (
         docker_registry_resource(
