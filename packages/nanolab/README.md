@@ -61,6 +61,16 @@ NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab run packages/na
 Sonata releases the functions, Compose project, and registry after the scenario,
 including when a verification fails.
 
+To verify persistent recovery instead, use the dedicated scenarios. They scale
+`word-stats-java` to two replicas, restart only the control plane, then verify
+the restored registration and unchanged managed resources before normal teardown:
+
+```bash
+NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab run packages/nanolab/scenarios-v2/persistent-recovery-container.yaml
+NANOFAAS_ROOT=/path/to/nanofaas uv run --package nanolab nanolab run packages/nanolab/scenarios-v2/persistent-recovery-k8s.yaml \
+  --environment packages/nanolab/environments/multipass.yaml
+```
+
 The interactive UI uses exactly the same plan/run implementation:
 
 ```bash
