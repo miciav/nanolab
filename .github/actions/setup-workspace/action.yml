@@ -33,27 +33,21 @@ runs:
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         repository: miciav/nanofaas
-        # nanofaas main at the build-metadata and modular OpenAPI merge.
+        # nanofaas main at the CLI control-plane alignment merge.
         # Same Java 25 / GraalVM 25.2.4 toolchain as the previous pin, and it
-        # keeps everything that pin carried. New with this pin, in the order
-        # that matters to this repository:
-        #   - GET /modules/build-metadata reports what the artifact actually is:
-        #     version, full git revision, dirty state, the modules compiled into
-        #     it, build type/variant/optimization, its builder and runtime base
-        #     images, and the architecture, kernel and VM underneath. The build
-        #     half comes from this repo — images/ passes the variant key down —
-        #     so a comparison run can name the binary it measured instead of
-        #     inferring it from an image tag.
-        #   - the OpenAPI contract is composed at build time from the modules
-        #     selected for that artifact and packaged as /openapi.yaml, so a
-        #     route absent from the build is absent from the contract too.
-        #   - the native image starts again. Caffeine's generated cache classes
-        #     were unreachable under native-image and the control plane died
-        #     building its first cache, which took every native scenario with
-        #     it; that predates this campaign and is fixed in this pin.
+        # keeps everything that pin carried (build-metadata, the modular
+        # OpenAPI contract at /openapi.yaml, the native-image Caffeine fix).
+        # New with this pin, in the order that matters to this repository:
+        #   - the CLI dropped --namespace and grew control-plane info|contract,
+        #     control-plane config get|validate|patch, fn update, fn replicas,
+        #     and the --replace gate on immutable fields. The cli workflow
+        #     drives all of them, so it cannot run against an older nanoFaaS.
+        #   - fn update sends a patch the control plane can read: Jackson used
+        #     to serialize FunctionPatch.isEmpty() into the body and every
+        #     update came back HTTP 400.
         # Tests read the version and the matrix from this checkout rather than
         # assuming them, so moving the pin needs no test edits.
-        ref: ade574baf16d90537016707834e66f0f28a236c8
+        ref: 4730063710e39a4c507f26b5e3c26df7e22bbdd0
         path: .nanofaas-source
         token: ${{ inputs.nanofaas-token }}
 
