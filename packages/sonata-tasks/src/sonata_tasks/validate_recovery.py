@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
+from collections.abc import Callable
 from pathlib import Path
+from time import monotonic, sleep
 from typing import Any
 
 from sonata_engine import Resource, Task, TaskInputs, TaskOutcome
@@ -16,6 +19,7 @@ from sonata_tasks.http_function import (
     HttpFunctionReplicaStatusTask,
     HttpFunctionSetReplicasTask,
 )
+from sonata_tasks.kubectl import KubectlTask
 from sonata_tasks.tasks.models import TaskResult
 
 
@@ -81,7 +85,7 @@ class RemoveManagedContainersTask(Task[None]):
         self.title = "Clear interrupted managed containers"
         self._names = names
         self._executor = executor
-        self._role = role
+        self._role: ExecutionRole = role
         self._cwd = cwd
 
     def run(self, inputs: TaskInputs) -> TaskOutcome[None]:
@@ -151,7 +155,7 @@ class ContainerPersistentRecoveryTask(Task[None]):
         self._project = project
         self._endpoint = endpoint
         self._executor = executor
-        self._role = role
+        self._role: ExecutionRole = role
         self._cwd = cwd
 
     def run(self, inputs: TaskInputs) -> TaskOutcome[None]:
@@ -224,5 +228,161 @@ class ContainerPersistentRecoveryTask(Task[None]):
             executor=self._executor,
             role=self._role,
             cwd=self._cwd,
+        ).run(inputs)
+        return TaskOutcome(value=None)
+
+
+def _uid(
+    resource: str,
+    *,
+    namespace: str,
+    executor: CommandTaskExecutor,
+    role: ExecutionRole,
+    cwd: Path | None,
+    inputs: TaskInputs,
+) -> str:
+    result = _result(
+        KubectlTask(
+            "get",
+            resource,
+            "-o=jsonpath={.metadata.uid}",
+            executor=executor,
+            role=role,
+            namespace=namespace,
+            title=f"Read {resource} UID",
+            cwd=cwd,
+        ).run(inputs),
+        f"Read {resource} UID",
+    )
+    uid = result.stdout.strip()
+    if not uid:
+        raise RuntimeError(f"{resource}: reported no UID")
+    return uid
+
+
+def _control_plane_pod(stdout: str) -> tuple[str, str, bool]:
+    try:
+        response = json.loads(stdout)
+    except json.JSONDecodeError as error:
+        raise RuntimeError("invalid control-plane pod response") from error
+    items = response.get("items")
+    if not isinstance(items, list) or len(items) != 1 or not isinstance(items[0], dict):
+        raise RuntimeError("expected exactly one control-plane pod")
+    pod = items[0]
+    metadata = pod.get("metadata")
+    status = pod.get("status")
+    if not isinstance(metadata, dict) or not isinstance(status, dict):
+        raise RuntimeError("control-plane pod carried no metadata or status")
+    name, uid = metadata.get("name"), metadata.get("uid")
+    if not isinstance(name, str) or not name or not isinstance(uid, str) or not uid:
+        raise RuntimeError("control-plane pod carried no name or UID")
+    conditions = status.get("conditions")
+    ready = isinstance(conditions, list) and any(
+        isinstance(condition, dict)
+        and condition.get("type") == "Ready"
+        and condition.get("status") == "True"
+        for condition in conditions
+    )
+    return name, uid, ready
+
+
+class KubernetesPersistentRecoveryTask(Task[None]):
+    """Prove a control-plane pod restart preserves managed K8s resources."""
+
+    def __init__(
+        self,
+        *,
+        name: str,
+        payload: str,
+        namespace: str,
+        endpoint: Endpoint,
+        executor: CommandTaskExecutor,
+        role: ExecutionRole,
+        timeout_seconds: float = 120,
+        poll_seconds: float = 1,
+        clock: Callable[[], float] = monotonic,
+        sleep_fn: Callable[[float], None] = sleep,
+        cwd: Path | None = None,
+    ) -> None:
+        self.title = f"Recover {name} after Kubernetes control-plane restart"
+        self._name = name
+        self._payload = payload
+        self._namespace = namespace
+        self._endpoint = endpoint
+        self._executor = executor
+        self._role: ExecutionRole = role
+        self._timeout_seconds = timeout_seconds
+        self._poll_seconds = poll_seconds
+        self._clock = clock
+        self._sleep = sleep_fn
+        self._cwd = cwd
+
+    def _pod(self, inputs: TaskInputs) -> tuple[str, str, bool]:
+        result = _result(
+            KubectlTask(
+                "get",
+                "pods",
+                "-l",
+                "app=nanofaas-control-plane",
+                "-o",
+                "json",
+                executor=self._executor,
+                role=self._role,
+                namespace=self._namespace,
+                title="Read control-plane pod",
+                cwd=self._cwd,
+            ).run(inputs),
+            "Read control-plane pod",
+        )
+        return _control_plane_pod(result.stdout)
+
+    def run(self, inputs: TaskInputs) -> TaskOutcome[None]:
+        _ = HttpFunctionSetReplicasTask(
+            self._name, replicas=2, endpoint=self._endpoint, executor=self._executor,
+            role=self._role, cwd=self._cwd,
+        ).run(inputs)
+        _ = HttpFunctionReplicaStatusTask(
+            self._name, replicas=2, endpoint=self._endpoint, executor=self._executor,
+            role=self._role, cwd=self._cwd,
+        ).run(inputs)
+        deployment = f"deployment/fn-{self._name}"
+        service = f"service/fn-{self._name}"
+        before = (
+            _uid(deployment, namespace=self._namespace, executor=self._executor, role=self._role, cwd=self._cwd, inputs=inputs),
+            _uid(service, namespace=self._namespace, executor=self._executor, role=self._role, cwd=self._cwd, inputs=inputs),
+        )
+        pod_name, pod_uid, ready = self._pod(inputs)
+        if not ready:
+            raise RuntimeError("control-plane pod is not Ready before restart")
+        _ = KubectlTask(
+            "delete", "pod", pod_name, "--wait=true", executor=self._executor,
+            role=self._role, namespace=self._namespace, title="Restart Kubernetes control plane", cwd=self._cwd,
+        ).run(inputs)
+        deadline = self._clock() + self._timeout_seconds
+        while True:
+            replacement_name, replacement_uid, replacement_ready = self._pod(inputs)
+            if replacement_uid != pod_uid and replacement_ready:
+                break
+            if self._clock() >= deadline:
+                raise RuntimeError("replacement control-plane pod did not become Ready in time")
+            self._sleep(self._poll_seconds)
+        _ = replacement_name
+        _ = HttpFunctionBackendTask(
+            self._name, backend="k8s", endpoint=self._endpoint, executor=self._executor,
+            role=self._role, cwd=self._cwd,
+        ).run(inputs)
+        _ = HttpFunctionReplicaStatusTask(
+            self._name, replicas=2, endpoint=self._endpoint, executor=self._executor,
+            role=self._role, cwd=self._cwd,
+        ).run(inputs)
+        after = (
+            _uid(deployment, namespace=self._namespace, executor=self._executor, role=self._role, cwd=self._cwd, inputs=inputs),
+            _uid(service, namespace=self._namespace, executor=self._executor, role=self._role, cwd=self._cwd, inputs=inputs),
+        )
+        if after != before:
+            raise RuntimeError(f"{self._name}: function resource UIDs changed from {before!r} to {after!r}")
+        _ = HttpFunctionInvokeTask(
+            self._name, payload=self._payload, endpoint=self._endpoint, executor=self._executor,
+            role=self._role, cwd=self._cwd,
         ).run(inputs)
         return TaskOutcome(value=None)

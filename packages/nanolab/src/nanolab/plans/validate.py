@@ -219,6 +219,7 @@ def build_validate_plan(
         source_fingerprint=source_fingerprint(root),
         build_control_plane=kubernetes,
         push_function_images=not kubernetes,
+        persistent_recovery=config.persistent_recovery,
     )
     if kubernetes:
         product_root = tool_root or discover_tool_root()
@@ -288,7 +289,7 @@ def build_validate_plan(
         )
         requires = (registry, compose) if cleanup is None else (registry, cleanup, compose)
         if config.persistent_recovery:
-            request = replace(request, persistent_recovery=project)
+            request = replace(request, recovery_project=project)
     return build_validate_workflow(
         request,
         bindings,

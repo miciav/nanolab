@@ -166,6 +166,13 @@ def test_persistent_recovery_container_plan_restarts_only_the_control_plane() ->
     assert "Recover word-stats-java after control-plane restart" in titles
 
 
+def test_persistent_recovery_k8s_plan_restarts_only_the_control_plane() -> None:
+    plan = _plan("k8s", persistentRecovery=True)
+
+    titles = [task.task.title for task in plan.compile().tasks]
+    assert "Recover word-stats-java after Kubernetes control-plane restart" in titles
+
+
 def test_handler_envelope_validation_adds_contract_tasks_for_each_selected_function() -> None:
     plan = build_validate_plan(
         ScenarioConfig.model_validate(

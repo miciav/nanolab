@@ -32,7 +32,10 @@ from sonata_tasks.platform import (
 )
 from sonata_tasks.resources import ContainerResourceCheckTask, K8sResourceCheckTask
 from sonata_tasks.compose import DockerComposeProject
-from sonata_tasks.validate_recovery import ContainerPersistentRecoveryTask
+from sonata_tasks.validate_recovery import (
+    ContainerPersistentRecoveryTask,
+    KubernetesPersistentRecoveryTask,
+)
 
 # `validate` is the platform half plus a question asked of it: does the function
 # answer, and did the limits it declared reach the object that runs it.
@@ -72,7 +75,8 @@ class ValidateWorkflowRequest(PlatformRequest):
     queue_burst_script: Path | None = None
     envelope_checks: tuple[EnvelopeCheck, ...] = ()
     async_checks: tuple[AsyncCheck, ...] = ()
-    persistent_recovery: DockerComposeProject | None = None
+    persistent_recovery: bool = False
+    recovery_project: DockerComposeProject | None = None
 
 
 def _inspection_task(
@@ -148,17 +152,30 @@ def build_validate_workflow(
     )
 
     for function, registered in zip(request.functions, platform.functions):
-        if request.persistent_recovery is not None:
-            workflow.add(
+        if request.persistent_recovery:
+            recovery = (
                 ContainerPersistentRecoveryTask(
                     name=function.name,
                     payload=function.payload,
-                    project=request.persistent_recovery,
+                    project=request.recovery_project,
                     endpoint=platform.endpoint,
                     executor=executor,
                     role=request.role,
                     cwd=cwd,
-                ),
+                )
+                if request.backend == "container" and request.recovery_project is not None
+                else KubernetesPersistentRecoveryTask(
+                    name=function.name,
+                    payload=function.payload,
+                    namespace=request.namespace,
+                    endpoint=platform.endpoint,
+                    executor=executor,
+                    role=request.role,
+                    cwd=cwd,
+                )
+            )
+            workflow.add(
+                recovery,
                 requires=(*requires, *platform.resources, registered),
             )
             continue

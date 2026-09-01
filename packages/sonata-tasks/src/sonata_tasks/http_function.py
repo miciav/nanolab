@@ -289,7 +289,7 @@ class HttpFunctionReplicaStatusTask(Task[None]):
         self._replicas = replicas
         self._endpoint = endpoint
         self._executor = executor
-        self._role = role
+        self._role: ExecutionRole = role
         self._timeout_seconds = timeout_seconds
         self._poll_seconds = poll_seconds
         self._clock = clock

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from importlib import import_module
+import json
 from pathlib import Path
 
 import pytest
@@ -104,3 +105,97 @@ def test_container_recovery_restarts_only_the_control_plane_and_keeps_ids() -> N
         executor.seen[2].argv,
         executor.seen[7].argv,
     ]
+
+
+def _pod(name: str, uid: str, *, ready: bool = True) -> str:
+    return json.dumps(
+        {
+            "items": [
+                {
+                    "metadata": {"name": name, "uid": uid},
+                    "status": {"conditions": [{"type": "Ready", "status": str(ready)}]},
+                }
+            ]
+        }
+    )
+
+
+def test_kubernetes_recovery_replaces_only_the_control_plane_pod() -> None:
+    module = _recovery_module()
+    executor = SequencedExecutor(
+        responses=[
+            "{}",
+            '{"desiredReplicas":2,"readyReplicas":2}',
+            "deployment-uid",
+            "service-uid",
+            _pod("control-plane-old", "old-uid"),
+            "",
+            _pod("control-plane-new", "new-uid"),
+            '{"deploymentBackend":"k8s"}',
+            '{"desiredReplicas":2,"readyReplicas":2}',
+            "deployment-uid",
+            "service-uid",
+            '{"status":"success","output":"ok"}',
+        ]
+    )
+
+    _ = module.KubernetesPersistentRecoveryTask(
+        name="word-stats-java",
+        payload='{"input":{"text":"a b"}}',
+        namespace="nanofaas",
+        endpoint="http://10.43.0.7:8080",
+        executor=executor,
+        role="stack",
+        poll_seconds=0,
+    ).run(TaskInputs.empty())
+
+    assert executor.seen[4].argv == (
+        "kubectl",
+        "-n",
+        "nanofaas",
+        "get",
+        "pods",
+        "-l",
+        "app=nanofaas-control-plane",
+        "-o",
+        "json",
+    )
+    assert executor.seen[5].argv == (
+        "kubectl",
+        "-n",
+        "nanofaas",
+        "delete",
+        "pod",
+        "control-plane-old",
+        "--wait=true",
+    )
+
+
+def test_kubernetes_recovery_rejects_recreated_function_resources() -> None:
+    module = _recovery_module()
+    executor = SequencedExecutor(
+        responses=[
+            "{}",
+            '{"desiredReplicas":2,"readyReplicas":2}',
+            "deployment-uid",
+            "service-uid",
+            _pod("control-plane-old", "old-uid"),
+            "",
+            _pod("control-plane-new", "new-uid"),
+            '{"deploymentBackend":"k8s"}',
+            '{"desiredReplicas":2,"readyReplicas":2}',
+            "new-deployment-uid",
+            "service-uid",
+        ]
+    )
+
+    with pytest.raises(RuntimeError, match="function resource UIDs changed"):
+        _ = module.KubernetesPersistentRecoveryTask(
+            name="word-stats-java",
+            payload='{"input":{"text":"a b"}}',
+            namespace="nanofaas",
+            endpoint="http://10.43.0.7:8080",
+            executor=executor,
+            role="stack",
+            poll_seconds=0,
+        ).run(TaskInputs.empty())
