@@ -7,6 +7,7 @@ from sonata_tasks.compose import DockerComposeProject, docker_compose_resource
 from sonata_tasks.deployment import LOCAL_REGISTRY
 from sonata_tasks.registry import docker_registry_resource
 from sonata_tasks.http_function import HttpFunctionExpectation
+from sonata_tasks.validate_recovery import managed_container_cleanup_resource
 from sonata_tasks.validate import AsyncCheck, EnvelopeCheck, ValidateFunction as SonataFunction
 from sonata_tasks.validate import ValidateWorkflowRequest, build_validate_workflow
 from sonata_tasks.components.helm import control_plane_helm_values, helm_set_args
@@ -259,25 +260,35 @@ def build_validate_plan(
             executor=RoleBoundCommandTaskExecutor(bindings),
             role="host",
         )
-        compose = docker_compose_resource(
-            DockerComposeProject(
-                name="nanofaas-validate",
-                file=Path("deploy/compose/compose.yaml"),
-                ready_url="http://127.0.0.1:8081/actuator/health/readiness",
-                env=(
-                    {"NANOFAAS_CONTROL_PLANE_MODULES": _ASYNC_CONTROL_PLANE_MODULES}
-                    if config.async_load
-                    else {}
-                ),
+        project = DockerComposeProject(
+            name="nanofaas-recovery" if config.persistent_recovery else "nanofaas-validate",
+            file=Path("deploy/compose/compose.yaml"),
+            ready_url="http://127.0.0.1:8081/actuator/health/readiness",
+            env=(
+                {"NANOFAAS_CONTROL_PLANE_MODULES": _ASYNC_CONTROL_PLANE_MODULES}
+                if config.async_load
+                else {}
             ),
+        )
+        cleanup = (
+            managed_container_cleanup_resource(
+                tuple(function.name for function in functions.values()),
+                executor=RoleBoundCommandTaskExecutor(bindings),
+                role="host",
+                cwd=root,
+            )
+            if config.persistent_recovery
+            else None
+        )
+        compose = docker_compose_resource(
+            project,
             executor=RoleBoundCommandTaskExecutor(bindings),
             cwd=root,
-            requires=(registry,),
+            requires=(registry,) if cleanup is None else (registry, cleanup),
         )
-        requires = (
-            registry,
-            compose,
-        )
+        requires = (registry, compose) if cleanup is None else (registry, cleanup, compose)
+        if config.persistent_recovery:
+            request = replace(request, persistent_recovery=project)
     return build_validate_workflow(
         request,
         bindings,

@@ -156,6 +156,16 @@ def test_validate_plan_keeps_container_validation_local() -> None:
     assert stack.seen == []
 
 
+def test_persistent_recovery_container_plan_restarts_only_the_control_plane() -> None:
+    plan = _plan("container", persistentRecovery=True)
+
+    tasks = plan.compile().tasks
+    titles = [task.task.title for task in tasks]
+    assert "Clear interrupted managed containers" in titles
+    assert "Acquire Docker Compose project nanofaas-recovery" in titles
+    assert "Recover word-stats-java after control-plane restart" in titles
+
+
 def test_handler_envelope_validation_adds_contract_tasks_for_each_selected_function() -> None:
     plan = build_validate_plan(
         ScenarioConfig.model_validate(

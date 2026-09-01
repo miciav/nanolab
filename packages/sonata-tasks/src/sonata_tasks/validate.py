@@ -31,6 +31,8 @@ from sonata_tasks.platform import (
     add_platform,
 )
 from sonata_tasks.resources import ContainerResourceCheckTask, K8sResourceCheckTask
+from sonata_tasks.compose import DockerComposeProject
+from sonata_tasks.validate_recovery import ContainerPersistentRecoveryTask
 
 # `validate` is the platform half plus a question asked of it: does the function
 # answer, and did the limits it declared reach the object that runs it.
@@ -70,6 +72,7 @@ class ValidateWorkflowRequest(PlatformRequest):
     queue_burst_script: Path | None = None
     envelope_checks: tuple[EnvelopeCheck, ...] = ()
     async_checks: tuple[AsyncCheck, ...] = ()
+    persistent_recovery: DockerComposeProject | None = None
 
 
 def _inspection_task(
@@ -145,6 +148,20 @@ def build_validate_workflow(
     )
 
     for function, registered in zip(request.functions, platform.functions):
+        if request.persistent_recovery is not None:
+            workflow.add(
+                ContainerPersistentRecoveryTask(
+                    name=function.name,
+                    payload=function.payload,
+                    project=request.persistent_recovery,
+                    endpoint=platform.endpoint,
+                    executor=executor,
+                    role=request.role,
+                    cwd=cwd,
+                ),
+                requires=(*requires, *platform.resources, registered),
+            )
+            continue
         workflow.add(
             HttpFunctionInvokeTask(
                 function.name,

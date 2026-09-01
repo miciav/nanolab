@@ -1,0 +1,6 @@
+workflow: validate
+backend: container
+build: docker
+functions:
+  - word-stats-java
+persistentRecovery: true
