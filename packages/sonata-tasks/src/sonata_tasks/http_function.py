@@ -195,6 +195,137 @@ class HttpFunctionDeleteTask(CommandTask):
         )
 
 
+class HttpFunctionSetReplicasTask(CommandTask):
+    """Set the desired replica target for one managed function."""
+
+    def __init__(
+        self,
+        name: str,
+        *,
+        replicas: int,
+        endpoint: Endpoint,
+        executor: CommandTaskExecutor,
+        role: ExecutionRole,
+        cwd: Path | None = None,
+    ) -> None:
+        super().__init__(
+            title=f"Set {name} replicas to {replicas}",
+            argv=_argv(
+                endpoint,
+                lambda base: (
+                    "curl",
+                    "-fsS",
+                    "-X",
+                    "PUT",
+                    "-H",
+                    _JSON_CONTENT_TYPE_HEADER,
+                    "--data",
+                    json.dumps({"replicas": replicas}, separators=(",", ":")),
+                    f"{base}/v1/functions/{name}/replicas",
+                ),
+            ),
+            executor=executor,
+            role=role,
+            cwd=cwd,
+        )
+
+
+class HttpFunctionBackendTask(CommandTask):
+    """Read a function registration and require its managed backend."""
+
+    def __init__(
+        self,
+        name: str,
+        *,
+        backend: str,
+        endpoint: Endpoint,
+        executor: CommandTaskExecutor,
+        role: ExecutionRole,
+        cwd: Path | None = None,
+    ) -> None:
+        def verify(result: TaskResult) -> None:
+            try:
+                response = json.loads(result.stdout)
+            except json.JSONDecodeError as error:
+                raise RuntimeError(f"{name}: invalid function response") from error
+            if response.get("deploymentBackend") != backend:
+                raise RuntimeError(
+                    f"{name}: deploymentBackend was {response.get('deploymentBackend')!r}, "
+                    f"expected {backend!r}"
+                )
+
+        super().__init__(
+            title=f"Verify {name} backend",
+            argv=_argv(
+                endpoint,
+                lambda base: ("curl", "-fsS", f"{base}/v1/functions/{name}"),
+            ),
+            executor=executor,
+            role=role,
+            cwd=cwd,
+            verify=verify,
+        )
+
+
+class HttpFunctionReplicaStatusTask(Task[None]):
+    """Wait until a managed function reaches its requested replica target."""
+
+    def __init__(
+        self,
+        name: str,
+        *,
+        replicas: int,
+        endpoint: Endpoint,
+        executor: CommandTaskExecutor,
+        role: ExecutionRole,
+        timeout_seconds: float = 30,
+        poll_seconds: float = 0.5,
+        clock: Callable[[], float] = monotonic,
+        sleep_fn: Callable[[float], None] = sleep,
+        cwd: Path | None = None,
+    ) -> None:
+        self.title = f"Wait for {name} replicas"
+        self._name = name
+        self._replicas = replicas
+        self._endpoint = endpoint
+        self._executor = executor
+        self._role = role
+        self._timeout_seconds = timeout_seconds
+        self._poll_seconds = poll_seconds
+        self._clock = clock
+        self._sleep = sleep_fn
+        self._cwd = cwd
+
+    def run(self, inputs: TaskInputs) -> TaskOutcome[None]:
+        command = CommandTask(
+            title=self.title,
+            argv=_argv(
+                self._endpoint,
+                lambda base: ("curl", "-fsS", f"{base}/v1/functions/{self._name}/replicas"),
+            ),
+            executor=self._executor,
+            role=self._role,
+            cwd=self._cwd,
+        )
+        deadline = self._clock() + self._timeout_seconds
+        last_response: object = None
+        while True:
+            result = _command_result(command.run(inputs), self.title)
+            try:
+                response = json.loads(result.stdout)
+            except json.JSONDecodeError as error:
+                raise RuntimeError(f"{self._name}: invalid replica status") from error
+            last_response = response
+            if (
+                response.get("desiredReplicas") == self._replicas
+                and response.get("readyReplicas") == self._replicas
+            ):
+                return TaskOutcome(value=None)
+            if self._clock() >= deadline:
+                raise RuntimeError(f"{self._name}: replicas did not become ready; last response {last_response!r}")
+            self._sleep(self._poll_seconds)
+
+
 class HttpFunctionEnqueueTask(Task[str]):
     """Enqueue one invocation and return its execution id.
 

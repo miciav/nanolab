@@ -7,6 +7,7 @@ import pytest
 from sonata_engine import TaskInputs
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
+import sonata_tasks.http_function as http_function
 from sonata_tasks.cli_function import CliFunctionApplyTask, CliFunctionDeleteTask
 from sonata_tasks.http_function import (
     HttpExecutionSuccessTask,
@@ -132,6 +133,89 @@ def test_http_register_posts_the_same_manifest() -> None:
     assert "--retry-max-time" in argv
     assert argv[-1] == "http://cp:8080/v1/functions"
     assert MANIFEST.json() in argv
+
+
+def test_http_set_replicas_sends_the_requested_target() -> None:
+    executor = RecordingExecutor()
+
+    _ = http_function.HttpFunctionSetReplicasTask(
+        "word-stats", replicas=2, endpoint="http://cp:8080", executor=executor, role="host"
+    ).run(TaskInputs.empty())
+
+    assert executor.seen[0].argv == (
+        "curl",
+        "-fsS",
+        "-X",
+        "PUT",
+        "-H",
+        "Content-Type: application/json",
+        "--data",
+        '{"replicas":2}',
+        "http://cp:8080/v1/functions/word-stats/replicas",
+    )
+
+
+def test_http_replica_status_waits_for_the_requested_ready_target() -> None:
+    executor = SequencedExecutor(
+        responses=['{"desiredReplicas":2,"readyReplicas":1}', '{"desiredReplicas":2,"readyReplicas":2}']
+    )
+
+    _ = http_function.HttpFunctionReplicaStatusTask(
+        "word-stats",
+        replicas=2,
+        endpoint="http://cp:8080",
+        executor=executor,
+        role="host",
+        poll_seconds=0,
+    ).run(TaskInputs.empty())
+
+    assert [task.argv[-1] for task in executor.seen] == [
+        "http://cp:8080/v1/functions/word-stats/replicas",
+        "http://cp:8080/v1/functions/word-stats/replicas",
+    ]
+
+
+def test_http_replica_status_rejects_malformed_json() -> None:
+    executor = RespondingExecutor(stdout="not json")
+
+    with pytest.raises(RuntimeError, match="invalid replica status"):
+        _ = http_function.HttpFunctionReplicaStatusTask(
+            "word-stats",
+            replicas=2,
+            endpoint="http://cp:8080",
+            executor=executor,
+            role="host",
+        ).run(TaskInputs.empty())
+
+
+def test_http_replica_status_times_out_when_target_is_not_ready() -> None:
+    executor = RespondingExecutor(stdout='{"desiredReplicas":2,"readyReplicas":1}')
+    ticks = iter((0.0, 1.0))
+
+    with pytest.raises(RuntimeError, match="last response"):
+        _ = http_function.HttpFunctionReplicaStatusTask(
+            "word-stats",
+            replicas=2,
+            endpoint="http://cp:8080",
+            executor=executor,
+            role="host",
+            timeout_seconds=0,
+            clock=lambda: next(ticks),
+        ).run(TaskInputs.empty())
+
+
+def test_http_backend_reads_the_restored_registration() -> None:
+    executor = RespondingExecutor(stdout='{"deploymentBackend":"container-local"}')
+
+    _ = http_function.HttpFunctionBackendTask(
+        "word-stats",
+        backend="container-local",
+        endpoint="http://cp:8080",
+        executor=executor,
+        role="host",
+    ).run(TaskInputs.empty())
+
+    assert executor.seen[0].argv[-1] == "http://cp:8080/v1/functions/word-stats"
 
 
 def test_k8s_register_requires_the_provider_derived_endpoint() -> None:
