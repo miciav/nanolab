@@ -15,7 +15,6 @@ from nanolab.plans.offload_loadtest import (
 )
 from sonata_tasks.execution.bindings import RoleBindings
 from sonata_tasks.platform import PlatformFunction, PlatformRequest
-from sonata_tasks.registry import docker_registry_resource
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 NANOFAAS_ROOT = Path(os.environ["NANOFAAS_ROOT"]).resolve()
@@ -37,9 +36,7 @@ class RecordingExecutor:
         # Each platform resolves its control plane's address before anything can
         # register against it.
         stdout = "10.43.0.7" if "get service control-plane" in " ".join(task.argv) else ""
-        return TaskResult(
-            task_id=task.task_id, status="passed", return_code=0, stdout=stdout
-        )
+        return TaskResult(task_id=task.task_id, status="passed", return_code=0, stdout=stdout)
 
 
 def _local_environment() -> EnvironmentConfig:
@@ -53,7 +50,6 @@ def _external_environment() -> EnvironmentConfig:
             "roles": {
                 "stack": {"host": "edge.example"},
                 "cloud": {"host": "cloud.example"},
-                "loadgen": {"host": "loadgen.example"},
             },
         }
     )
@@ -70,7 +66,6 @@ def test_platform_returns_helm_arguments_in_the_platform_request() -> None:
         role="stack",
         build="docker",
         repo_root=NANOFAAS_ROOT,
-        backend="k8s",
         offload_target="http://cloud:8080",
     )
     assert isinstance(request, PlatformRequest)
@@ -79,19 +74,27 @@ def test_platform_returns_helm_arguments_in_the_platform_request() -> None:
     assert request.additional_modules == ("offload", "sync-queue")
 
 
+def test_cloud_platform_disables_sync_queue() -> None:
+    request = offload_loadtest_plan._platform(
+        (PlatformFunction(name="f", image="image", payload="{}", build_argv=("true",)),),
+        label="cloud",
+        role="cloud",
+        build="docker",
+        repo_root=NANOFAAS_ROOT,
+    )
+    args = request.helm_values
+    enabled_name = next(value for value in args if str(value).endswith(".name=SYNC_QUEUE_ENABLED"))
+    index = str(enabled_name).split("extraEnv[")[1].split("]")[0]
+
+    assert f"controlPlane.extraEnv[{index}].value=false" in args
+
+
 @pytest.fixture(autouse=True)
 def _no_real_network(monkeypatch: pytest.MonkeyPatch) -> None:
     """The conservation check scrapes two Prometheus endpoints over urllib. These
     tests run the workflow rather than inspecting it, so without this each one
     waits out two connection timeouts — the file took two minutes."""
-    monkeypatch.setattr(
-        offload_loadtest_plan, "_fetch_text", lambda _url, **_kwargs: ""
-    )
-    monkeypatch.setattr(
-        offload_loadtest_plan,
-        "docker_registry_resource",
-        lambda **kwargs: docker_registry_resource(**kwargs, ready=lambda: True),
-    )
+    monkeypatch.setattr(offload_loadtest_plan, "_fetch_text", lambda _url, **_kwargs: "")
 
 
 def _run(workflow, executor: RecordingExecutor) -> list[CommandTaskSpec]:  # pyright: ignore[reportMissingParameterType]
@@ -104,7 +107,6 @@ def _run(workflow, executor: RecordingExecutor) -> list[CommandTaskSpec]:  # pyr
     except Exception:
         pass
     return executor.seen
-
 
 
 class _UnusedFetcher:
@@ -140,6 +142,53 @@ def test_rejects_wrong_function_count() -> None:
         )
 
 
+def test_rejects_local_environment() -> None:
+    with pytest.raises(ValueError, match="two virtual machines"):
+        build_offload_loadtest_plan(
+            SCENARIO,
+            _local_environment(),
+            _bindings(RecordingExecutor()),
+            run_dir=Path("/tmp/run"),
+            repo_root=NANOFAAS_ROOT,
+        )
+
+
+def test_requires_an_explicit_cloud_role() -> None:
+    environment = EnvironmentConfig.model_validate(
+        {"provider": "multipass", "roles": {"stack": {"name": "edge"}}}
+    )
+
+    with pytest.raises(ValueError, match="stack and cloud"):
+        build_offload_loadtest_plan(
+            SCENARIO,
+            environment,
+            _bindings(RecordingExecutor()),
+            run_dir=Path("/tmp/run"),
+            repo_root=NANOFAAS_ROOT,
+        )
+
+
+def test_requires_distinct_edge_and_cloud_vms() -> None:
+    environment = EnvironmentConfig.model_validate(
+        {
+            "provider": "multipass",
+            "roles": {
+                "stack": {"name": "same-vm"},
+                "cloud": {"name": "same-vm"},
+            },
+        }
+    )
+
+    with pytest.raises(ValueError, match="different virtual machines"):
+        build_offload_loadtest_plan(
+            SCENARIO,
+            environment,
+            _bindings(RecordingExecutor()),
+            run_dir=Path("/tmp/run"),
+            repo_root=NANOFAAS_ROOT,
+        )
+
+
 def test_deployment_then_registration_then_k6_then_evaluation_ordering(tmp_path: Path) -> None:
     workflow = build_offload_loadtest_plan(
         SCENARIO,
@@ -155,62 +204,16 @@ def test_deployment_then_registration_then_k6_then_evaluation_ordering(tmp_path:
     # The cloud is up before the edge, so the edge's chart comes up pointing at
     # something that answers. k6 and the reconciliation are steps of one unit,
     # so the plan names the load test rather than its internals.
-    cloud = next(task for task in ids if task.endswith("acquire-helm-release-nanofaas-on-the-cloud"))
+    cloud = next(
+        task for task in ids if task.endswith("acquire-helm-release-nanofaas-on-the-cloud")
+    )
     edge = next(task for task in ids if task.endswith("acquire-helm-release-nanofaas-on-the-edge"))
     function = next(task for task in ids if task.endswith("acquire-word-stats-java-on-the-edge"))
     load = next(task for task in ids if task.endswith("run-the-offload-load-test"))
     assert ids.index(cloud) < ids.index(edge) < ids.index(function) < ids.index(load)
 
 
-def test_local_provider_runs_k6_on_stack_without_fetch(tmp_path: Path) -> None:
-    tool_root = tmp_path / "nanolab"
-    executor = RecordingExecutor()
-    workflow = build_offload_loadtest_plan(
-        SCENARIO,
-        _local_environment(),
-        _bindings(executor),
-        run_dir=tmp_path,
-        repo_root=NANOFAAS_ROOT,
-        tool_root=tool_root,
-    )
-
-    commands = _run(workflow, executor)
-    preflight = next(spec for spec in commands if spec.argv == ("k6", "version"))
-    k6 = next(" ".join(spec.argv) for spec in commands if spec.argv[0] == "k6" and "run" in spec.argv)
-
-    assert preflight.execution_role == "stack"
-    assert str(tool_root / "assets/k6/offload-mixed.js") in k6
-
-
-def test_local_provider_uses_one_compose_platform_with_distinct_endpoints(tmp_path: Path) -> None:
-    executor = RecordingExecutor()
-    workflow = build_offload_loadtest_plan(
-        SCENARIO,
-        _local_environment(),
-        _bindings(executor),
-        run_dir=tmp_path,
-        repo_root=NANOFAAS_ROOT,
-    )
-
-    ids = [task.task_id for task in workflow.compile().tasks]
-    commands = _run(workflow, executor)
-    command_lines = [" ".join(command.argv) for command in commands]
-
-    assert any(task.endswith("acquire-local-registry") for task in ids)
-    assert any("acquire-docker-compose-project-nanofaas-offload-loadtest" in task for task in ids)
-    assert not any("kubectl" in task or "helm" in task for task in ids)
-    assert any("http://127.0.0.1:8080" in command for command in command_lines)
-    assert any("http://127.0.0.1:19090" in command for command in command_lines)
-    assert [task.split(".", 1)[1] for task in ids[-5:]] == [
-        "release-json-transform-java-on-the-edge",
-        "release-word-stats-java-on-the-edge",
-        "release-word-stats-java-on-the-cloud",
-        "release-docker-compose-project-nanofaas-offload-loadtest",
-        "release-local-registry",
-    ]
-
-
-def test_dedicated_loadgen_runs_k6_on_loadgen_and_fetches_results(tmp_path: Path) -> None:
+def test_stack_runs_k6_and_fetches_results(tmp_path: Path) -> None:
     fetched: list[tuple[str, Path]] = []
 
     class Fetcher:
@@ -232,14 +235,14 @@ def test_dedicated_loadgen_runs_k6_on_loadgen_and_fetches_results(tmp_path: Path
     k6_spec = next(spec for spec in commands if spec.argv[0] == "k6" and "run" in spec.argv)
     k6 = " ".join(k6_spec.argv)
 
-    assert preflight.execution_role == "loadgen"
+    assert preflight.execution_role == "stack"
     assert "/home/ubuntu/nanolab-assets/k6/offload-mixed.js" in k6
     assert "OFFLOADABLE_RATE=100" in k6_spec.argv
     # A remote load generator writes its summary there, so it has to come back.
     assert fetched == [("/home/ubuntu/nanofaas-loadtest/k6-summary.json", tmp_path)]
 
 
-def test_dedicated_loadgen_requires_a_fetcher(tmp_path: Path) -> None:
+def test_two_vm_loadtest_requires_a_fetcher(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="fetcher is required"):
         build_offload_loadtest_plan(
             SCENARIO,
@@ -311,7 +314,9 @@ def test_edge_offload_target_points_at_the_cloud_role(tmp_path: Path) -> None:
     )
 
     installs = [
-        " ".join(spec.argv) for spec in _run(workflow, executor) if "helm upgrade" in " ".join(spec.argv)
+        " ".join(spec.argv)
+        for spec in _run(workflow, executor)
+        if "helm upgrade" in " ".join(spec.argv)
     ]
     # Only the edge's chart is told where to offload to; the cloud is the target.
     assert sum("NANOFAAS_OFFLOAD_TARGETURL" in command for command in installs) == 1
@@ -329,13 +334,47 @@ def test_edge_offload_target_points_at_the_cloud_role(tmp_path: Path) -> None:
     assert f"controlPlane.extraEnv[{depth_index}].value=1 " in edge_install
 
 
+def test_azure_role_host_uses_provider_address(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Provider:
+        def connection_host(self, request) -> str:
+            return f"public-{request.name}"
+
+    monkeypatch.setattr(
+        offload_loadtest_plan, "provider_for", lambda *_args: Provider(), raising=False
+    )
+    environment = EnvironmentConfig.model_validate(
+        {
+            "provider": "azure",
+            "roles": {
+                "stack": {"name": "edge"},
+                "cloud": {"name": "cloud"},
+            },
+            "azure": {"resource_group": "rg", "location": "westeurope"},
+        }
+    )
+
+    assert (
+        offload_loadtest_plan._role_host(
+            environment, "stack", dry_run=False, repo_root=NANOFAAS_ROOT
+        )
+        == "public-edge"
+    )
+    assert (
+        offload_loadtest_plan._role_host(
+            environment, "cloud", dry_run=False, repo_root=NANOFAAS_ROOT
+        )
+        == "public-cloud"
+    )
+
+
 def test_cleanup_covers_both_control_planes(tmp_path: Path) -> None:
     workflow = build_offload_loadtest_plan(
         SCENARIO,
-        _local_environment(),
+        _external_environment(),
         _bindings(RecordingExecutor()),
         run_dir=tmp_path,
         repo_root=NANOFAAS_ROOT,
+        fetcher=_UnusedFetcher(),
     )
 
     ids = [task.task_id for task in workflow.compile().tasks]
@@ -345,9 +384,9 @@ def test_cleanup_covers_both_control_planes(tmp_path: Path) -> None:
     assert [task.split(".", 1)[1] for task in ids[-5:]] == [
         "release-json-transform-java-on-the-edge",
         "release-word-stats-java-on-the-edge",
+        "release-helm-release-nanofaas-on-the-edge",
         "release-word-stats-java-on-the-cloud",
-        "release-docker-compose-project-nanofaas-offload-loadtest",
-        "release-local-registry",
+        "release-helm-release-nanofaas-on-the-cloud",
     ]
 
 

@@ -26,9 +26,20 @@ def test_offload_loadtest_rejects_autoscaling() -> None:
         )
 
 
-def test_multipass_offload_environment_has_three_roles() -> None:
-    payload = yaml.safe_load(
-        (NANOLAB_ROOT / "environments/multipass-offload.yaml").read_text()
-    )
+@pytest.mark.parametrize(
+    ("filename", "provider"),
+    [
+        ("multipass-offload.yaml", "multipass"),
+        ("azure-offload.yaml.example", "azure"),
+    ],
+)
+def test_offload_environment_has_exactly_two_vms(filename: str, provider: str) -> None:
+    payload = yaml.safe_load((NANOLAB_ROOT / f"environments/{filename}").read_text())
     environment = EnvironmentConfig.model_validate(payload)
-    assert set(environment.roles) == {"stack", "cloud", "loadgen"}
+
+    assert environment.provider == provider
+    assert set(environment.roles) == {"stack", "cloud"}
+    assert environment.roles["stack"].name != environment.roles["cloud"].name
+    if provider == "azure":
+        assert environment.azure is not None
+        assert environment.azure.operator_source_cidr == "auto"

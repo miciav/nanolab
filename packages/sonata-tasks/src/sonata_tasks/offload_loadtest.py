@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol, override
+from typing import Protocol, override
 
-from sonata_engine import Resource, Steps, Task, TaskInputs, TaskOutcome, Workflow
+from sonata_engine import Steps, Task, TaskInputs, TaskOutcome, Workflow
 from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
 
 from sonata_tasks.loadtest import LoadtestOutcome, load_outcome
@@ -68,8 +68,7 @@ class OffloadLoadtestRequest:
     def __post_init__(self) -> None:
         if self.cloud.role == self.edge.role:
             raise ValueError(
-                "cloud and edge must run on different roles; "
-                f"both are {self.cloud.role!r}"
+                f"cloud and edge must run on different roles; both are {self.cloud.role!r}"
             )
 
 
@@ -80,9 +79,6 @@ def build_offload_loadtest_workflow(
     load: Steps,
     workflow_id: str = "offload-loadtest",
     cwd: Path | None = None,
-    requires: tuple[Resource[Any], ...] = (),
-    cloud_local_endpoint: str = "http://127.0.0.1:18080",
-    edge_local_endpoint: str = "http://127.0.0.1:18080",
 ) -> Workflow:
     """Two platforms, functions registered across them, then load over the hop.
 
@@ -97,16 +93,10 @@ def build_offload_loadtest_workflow(
     """
     executor = RoleBoundCommandTaskExecutor(bindings)
     workflow = Workflow(workflow_id=workflow_id)
-    cloud = add_platform(
-        workflow, request.cloud, executor=executor, cwd=cwd, requires=requires,
-        local_endpoint=cloud_local_endpoint,
-    )
-    edge = add_platform(
-        workflow, request.edge, executor=executor, cwd=cwd, requires=requires,
-        local_endpoint=edge_local_endpoint,
-    )
+    cloud = add_platform(workflow, request.cloud, executor=executor, cwd=cwd)
+    edge = add_platform(workflow, request.edge, executor=executor, cwd=cwd)
     workflow.add(
         load,
-        requires=(*requires, *cloud.resources, *cloud.functions, *edge.resources, *edge.functions),
+        requires=(*cloud.resources, *cloud.functions, *edge.resources, *edge.functions),
     )
     return workflow

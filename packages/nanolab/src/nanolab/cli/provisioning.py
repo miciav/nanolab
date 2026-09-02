@@ -47,9 +47,9 @@ def _stack_operations(
     dedicated_loadgen: bool,
     include_repo_sync: bool = True,
 ) -> tuple[RemoteCommandOperation, ...]:
-    planners: list[
-        Callable[[ScenarioExecutionContext], tuple[ScenarioOperation, ...]]
-    ] = [plan_vm_provision_base]
+    planners: list[Callable[[ScenarioExecutionContext], tuple[ScenarioOperation, ...]]] = [
+        plan_vm_provision_base
+    ]
     if scenario.backend == "k8s" or scenario.workflow in ("loadtest", "release"):
         planners.extend(
             [
@@ -58,7 +58,7 @@ def _stack_operations(
                 plan_k3s_configure_registry,
             ]
         )
-    if (scenario.workflow == "loadtest" and not dedicated_loadgen) or (
+    if (scenario.workflow in ("loadtest", "offload-loadtest") and not dedicated_loadgen) or (
         scenario.workflow == "validate" and scenario.backend == "k8s"
     ):
         planners.extend([plan_loadtest_install_k6, plan_assets_sync_to_vm])
@@ -220,9 +220,8 @@ def provision_environment(
         roles.append(ProvisionedRole(role=role, request=request, operations=operations))
 
     stack_request = next(entry.request for entry in roles if entry.role == "stack")
-    loadgen_request = next(
-        (entry.request for entry in roles if entry.role == "loadgen"), None
-    )
+    loadgen_request = next((entry.request for entry in roles if entry.role == "loadgen"), None)
+    cloud_request = next((entry.request for entry in roles if entry.role == "cloud"), None)
 
     def after_ensure(role: str, request: VmRequest) -> None:
         if post_ensure_verifier is not None:
@@ -230,12 +229,16 @@ def provision_environment(
         # `azure is not None` is guaranteed by EnvironmentConfig's validation for
         # this provider; saying it here is what lets the checker follow.
         if (
-            role == "stack"
-            and environment.provider == "azure"
+            environment.provider == "azure"
             and environment.azure is not None
             and environment.azure.operator_source_cidr
         ):
-            secure_release_endpoints(environment, provider, stack_request, loadgen_request)
+            if scenario.workflow == "offload-loadtest" and role in {"stack", "cloud"}:
+                endpoint = stack_request if role == "stack" else cloud_request
+                assert endpoint is not None
+                _ = secure_release_endpoints(environment, provider, endpoint, stack_request)
+            elif role == "stack":
+                _ = secure_release_endpoints(environment, provider, stack_request, loadgen_request)
 
     with provision_roles(
         provider,

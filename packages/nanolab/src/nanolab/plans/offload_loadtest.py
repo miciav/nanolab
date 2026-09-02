@@ -9,7 +9,6 @@ import urllib.request
 from multipass import MultipassClient
 from sonata_engine import Steps, Workflow
 from sonata_tasks.command import CommandTask
-from sonata_tasks.compose import DockerComposeProject, docker_compose_resource
 from sonata_tasks.deployment import CONTROL_PLANE_NODE_PORT
 from sonata_tasks.loadtest import FetchResultsTask, RunK6Task
 from sonata_tasks.offload_loadtest import (
@@ -18,7 +17,7 @@ from sonata_tasks.offload_loadtest import (
     build_offload_loadtest_workflow,
 )
 from sonata_tasks.platform import PlatformFunction, PlatformRequest
-from sonata_tasks.registry import docker_registry_resource
+from sonata_tasks.provisioning.providers import provider_for
 from sonata_tasks.components.helm import control_plane_helm_values, helm_set_args
 from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
 from sonata_tasks.k6 import K6Task
@@ -31,16 +30,12 @@ from sonata_tasks.vm.multipass import resolve_connection_host
 
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
-from nanolab.workspace.paths import discover_tool_root
+from nanolab.cli.vm_provider import vm_request_for_role
 from nanolab.workspace.provenance import source_fingerprint
 from nanolab.plans.functions import resolve_function, sonata_function
 
 _ACTUATOR_PORT = 30081
 _CONTROL_PLANE_PORT = CONTROL_PLANE_NODE_PORT
-_LOCAL_EDGE_CONTROL_PLANE_PORT = 8080
-_LOCAL_CLOUD_CONTROL_PLANE_PORT = 19090
-_LOCAL_EDGE_ACTUATOR_PORT = 8081
-_LOCAL_CLOUD_ACTUATOR_PORT = 19091
 # The edge has a one-slot queue in this scenario, so this rate reliably creates
 # pressure while the cloud's larger function budget absorbs the overflow.
 _OFFLOADABLE_RATE = "100"
@@ -50,16 +45,26 @@ _K6_DURATION = "60s"
 Role = Literal["stack", "cloud"]
 
 
-def _role_host(environment: EnvironmentConfig, role: Role, *, dry_run: bool) -> str:
+def _role_host(
+    environment: EnvironmentConfig,
+    role: Role,
+    *,
+    dry_run: bool,
+    repo_root: Path,
+) -> str:
     target = environment.target(role)
-    if environment.provider == "local":
-        return "127.0.0.1"
     if environment.provider == "multipass":
         return resolve_connection_host(
             VmRequest(lifecycle="multipass", name=target.name),
             MultipassClient(),
             dry_run=dry_run,
         )
+    if environment.provider == "azure":
+        request = vm_request_for_role(environment, role, loadtest=True)
+        if dry_run:
+            return f"<azure-ip:{request.name}>"
+        provider = cast(Any, provider_for(request, repo_root))
+        return cast(str, provider.connection_host(request))
     if target.host:
         return target.host
     raise ValueError(f"{environment.provider} {role} requires a host or explicit URLs")
@@ -130,12 +135,8 @@ class EvaluateOffloadConservation:
             encoding="utf-8",
         )
         if not report.passed:
-            raise RuntimeError(
-                "offload conservation check failed: " + "; ".join(report.failures)
-            )
+            raise RuntimeError("offload conservation check failed: " + "; ".join(report.failures))
         return {"passed": report.passed}
-
-
 
 
 def _offload_target(values: dict[str, str], target_url: str) -> dict[str, str]:
@@ -165,22 +166,17 @@ def _platform(
     role: Literal["stack", "cloud"],
     build: str,
     repo_root: Path,
-    backend: Literal["container", "k8s"],
     offload_target: str | None = None,
 ) -> PlatformRequest:
     request = PlatformRequest(
-        backend=backend,
+        backend="k8s",
         build=build,  # pyright: ignore[reportArgumentType]
         functions=functions,
         additional_modules=("offload", "sync-queue"),
         source_fingerprint=source_fingerprint(repo_root),
         execution_role=role,
         label=label,
-        build_control_plane=backend == "k8s",
-        push_function_images=backend == "container",
     )
-    if backend == "container":
-        return request
     values = control_plane_helm_values(
         namespace=request.namespace,
         control_plane_image=request.control_plane_image_reference(),
@@ -188,6 +184,13 @@ def _platform(
         metrics_profile="advanced",
         sync_queue_max_depth=1 if offload_target is not None else None,
     )
+    if role == "cloud":
+        enabled_key = next(
+            key
+            for key, value in values.items()
+            if key.endswith(".name") and value == "SYNC_QUEUE_ENABLED"
+        )
+        values[enabled_key.removesuffix(".name") + ".value"] = "false"
     if offload_target is not None:
         values = _offload_target(values, offload_target)
     helm_args: tuple[str, ...] = helm_set_args(values)
@@ -215,9 +218,16 @@ def build_offload_loadtest_plan(
     if config.workflow != "offload-loadtest":
         raise ValueError("offload load-test plan requires an offload-loadtest scenario")
     if len(config.functions) != 2:
+        raise ValueError("offload-loadtest requires exactly two functions: [offloadable, control]")
+    roles = set(environment.roles)
+    if environment.provider == "local" or roles != {"stack", "cloud"}:
         raise ValueError(
-            "offload-loadtest requires exactly two functions: [offloadable, control]"
+            "offload-loadtest requires exactly stack and cloud on two virtual machines"
         )
+    stack = environment.roles["stack"]
+    cloud = environment.roles["cloud"]
+    if (stack.name or stack.host) == (cloud.name or cloud.host):
+        raise ValueError("stack and cloud must be different virtual machines")
     offloadable_key, control_key = config.functions
     root = repo_root or Path.cwd()
     # timeout_ms is also the offload gateway's remote-call budget (edge gives up
@@ -225,9 +235,7 @@ def build_offload_loadtest_plan(
     # to a function pod that may still be warming up under real load.
     offloadable = replace(
         sonata_function(
-            resolve_function(
-                config, offloadable_key, source_root=repo_root, tool_root=tool_root
-            )
+            resolve_function(config, offloadable_key, source_root=repo_root, tool_root=tool_root)
         ),
         concurrency=2,
         queue_size=8,
@@ -244,12 +252,14 @@ def build_offload_loadtest_plan(
         offload={"enabled": False},
     )
 
-    edge_host = _role_host(environment, "stack", dry_run=dry_run)
-    cloud_host = _role_host(environment, "cloud", dry_run=dry_run)
-    local = environment.provider == "local"
-    edge_url = f"http://{edge_host}:{_LOCAL_EDGE_CONTROL_PLANE_PORT if local else _CONTROL_PLANE_PORT}"  # NOSONAR (S5332): local control-plane endpoint
-    cloud_url = f"http://{cloud_host}:{_LOCAL_CLOUD_CONTROL_PLANE_PORT if local else _CONTROL_PLANE_PORT}"  # NOSONAR (S5332): local control-plane endpoint
-    backend: Literal["container", "k8s"] = "container" if local else "k8s"
+    edge_host = _role_host(environment, "stack", dry_run=dry_run, repo_root=root)
+    cloud_host = _role_host(environment, "cloud", dry_run=dry_run, repo_root=root)
+    edge_url = (
+        f"http://{edge_host}:{_CONTROL_PLANE_PORT}"  # NOSONAR (S5332): VM control-plane endpoint
+    )
+    cloud_url = (
+        f"http://{cloud_host}:{_CONTROL_PLANE_PORT}"  # NOSONAR (S5332): VM control-plane endpoint
+    )
 
     request = OffloadLoadtestRequest(
         # The cloud absorbs whatever the edge sheds, so it must not reproduce the
@@ -261,7 +271,6 @@ def build_offload_loadtest_plan(
             role="cloud",
             build=config.build,
             repo_root=root,
-            backend=backend,
         ),
         edge=_platform(
             (offloadable, control),
@@ -269,38 +278,14 @@ def build_offload_loadtest_plan(
             role="stack",
             build=config.build,
             repo_root=root,
-            backend=backend,
-            offload_target=None if local else cloud_url,
+            offload_target=cloud_url,
         ),
     )
 
-    requires = ()
-    if local:
-        registry = docker_registry_resource(executor=RoleBoundCommandTaskExecutor(bindings), role="host")
-        compose = docker_compose_resource(
-            DockerComposeProject(
-                name="nanofaas-offload-loadtest",
-                file=Path("deploy/compose/offload-loadtest.yaml"),
-                ready_url="http://127.0.0.1:8081/actuator/health/readiness",
-            ),
-            executor=RoleBoundCommandTaskExecutor(bindings),
-            cwd=root,
-            requires=(registry,),
-        )
-        requires = (registry, compose)
-
-    dedicated_loadgen = "loadgen" in environment.roles
-    k6_role: Literal["stack", "loadgen"] = "loadgen" if dedicated_loadgen else "stack"
-    remote = dedicated_loadgen and environment.provider != "local"
-    if remote:
-        role_target = environment.target("loadgen")
-        home = role_target.remote_home
-        script_path = Path(home) / "nanolab-assets/k6/offload-mixed.js"
-        summary_path = Path(home) / "nanofaas-loadtest/k6-summary.json"
-    else:
-        product_root = tool_root or discover_tool_root()
-        script_path = product_root / "assets/k6/offload-mixed.js"
-        summary_path = run_dir / "k6-summary.json"
+    k6_role: Literal["stack"] = "stack"
+    home = environment.target("stack").remote_home
+    script_path = Path(home) / "nanolab-assets/k6/offload-mixed.js"
+    summary_path = Path(home) / "nanofaas-loadtest/k6-summary.json"
 
     executor = RoleBoundCommandTaskExecutor(bindings)
     steps: list[Any] = [
@@ -342,22 +327,20 @@ def build_offload_loadtest_plan(
         ),
     ]
 
-    local_summary_path = summary_path
-    if remote:
-        if fetcher is None:
-            raise ValueError("fetcher is required to retrieve remote k6 results")
-        steps.append(
-            FetchResultsTask(
-                fetch=FetchVmResults(
-                    task_id="",
-                    title="Fetch k6 results",
-                    fetcher=fetcher,
-                    remote_source=str(summary_path),
-                    local_dest=run_dir,
-                )
+    if fetcher is None:
+        raise ValueError("fetcher is required to retrieve remote k6 results")
+    steps.append(
+        FetchResultsTask(
+            fetch=FetchVmResults(
+                task_id="",
+                title="Fetch k6 results",
+                fetcher=fetcher,
+                remote_source=str(summary_path),
+                local_dest=run_dir,
             )
         )
-        local_summary_path = run_dir / summary_path.name
+    )
+    local_summary_path = run_dir / summary_path.name
 
     steps.append(
         EvaluateConservationTask(
@@ -365,8 +348,8 @@ def build_offload_loadtest_plan(
                 task_id="",
                 title="Evaluate offload conservation",
                 k6_summary_path=local_summary_path,
-                edge_metrics_url=f"http://{edge_host}:{_LOCAL_EDGE_ACTUATOR_PORT if local else _ACTUATOR_PORT}/actuator/prometheus",  # NOSONAR (S5332): local actuator endpoint
-                cloud_metrics_url=f"http://{cloud_host}:{_LOCAL_CLOUD_ACTUATOR_PORT if local else _ACTUATOR_PORT}/actuator/prometheus",  # NOSONAR (S5332): local actuator endpoint
+                edge_metrics_url=f"http://{edge_host}:{_ACTUATOR_PORT}/actuator/prometheus",  # NOSONAR (S5332): VM actuator endpoint
+                cloud_metrics_url=f"http://{cloud_host}:{_ACTUATOR_PORT}/actuator/prometheus",  # NOSONAR (S5332): VM actuator endpoint
                 offloadable=offloadable.name,
                 control=control.name,
                 output_path=run_dir / "offload-report.json",
@@ -379,7 +362,4 @@ def build_offload_loadtest_plan(
         bindings,
         cwd=root,
         load=Steps(title="Run the offload load test", steps=tuple(steps)),
-        requires=requires,
-        cloud_local_endpoint=cloud_url,
-        edge_local_endpoint=edge_url,
     )

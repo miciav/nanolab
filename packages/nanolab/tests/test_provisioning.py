@@ -178,7 +178,6 @@ def test_offload_loadtest_syncs_repository_to_cloud(tmp_path: Path) -> None:
                 "roles": {
                     "stack": {"name": "stack"},
                     "cloud": {"name": "cloud"},
-                    "loadgen": {"name": "loadgen"},
                 },
             }
         ),
@@ -191,6 +190,11 @@ def test_offload_loadtest_syncs_repository_to_cloud(tmp_path: Path) -> None:
         command[0] == "rsync" and "cloud.internal:/home/ubuntu/nanofaas/" in command[-1]
         for command in _commands(orchestrator)
     )
+    assert [value for kind, value in orchestrator.events if kind == "ensure"] == [
+        ("multipass", "stack"),
+        ("multipass", "cloud"),
+    ]
+    assert "install-k6.yml" in _playbooks(orchestrator)
 
 
 def test_arm_builder_role_is_ensured_torn_down_and_base_provisioned(tmp_path: Path) -> None:
@@ -222,9 +226,7 @@ def test_arm_builder_role_is_ensured_torn_down_and_base_provisioned(tmp_path: Pa
     arm_playbooks = [
         Path(command[-1]).name
         for kind, command in orchestrator.events
-        if kind == "command"
-        and command[0] == "ansible-playbook"
-        and "arm" in " ".join(command)
+        if kind == "command" and command[0] == "ansible-playbook" and "arm" in " ".join(command)
     ]
     assert "provision-base.yml" in arm_playbooks
     assert "provision-k3s.yml" not in arm_playbooks
@@ -254,16 +256,12 @@ def test_post_ensure_verifier_runs_before_each_vm_bootstrap(tmp_path: Path) -> N
         pass
 
     stack_ensure = orchestrator.events.index(("ensure", ("multipass", "stack")))
-    stack_verify = orchestrator.events.index(
-        ("verify", ("stack", "multipass", "stack"))
-    )
+    stack_verify = orchestrator.events.index(("verify", ("stack", "multipass", "stack")))
     first_command = next(
         index for index, event in enumerate(orchestrator.events) if event[0] == "command"
     )
     loadgen_ensure = orchestrator.events.index(("ensure", ("multipass", "loadgen")))
-    loadgen_verify = orchestrator.events.index(
-        ("verify", ("loadgen", "multipass", "loadgen"))
-    )
+    loadgen_verify = orchestrator.events.index(("verify", ("loadgen", "multipass", "loadgen")))
     assert stack_ensure < loadgen_ensure < stack_verify < loadgen_verify < first_command
 
 
@@ -411,6 +409,42 @@ def test_azure_provisioning_restricts_nodeports_to_the_operator(tmp_path: Path) 
 
     assert orchestrator.restrictions == [
         ("nanofaas-azure", (30080, 30081, 30090), ("203.0.113.42/32",))
+    ]
+
+
+def test_azure_offload_restricts_both_control_planes_to_operator_and_edge(
+    tmp_path: Path,
+) -> None:
+    class AzureOrchestrator(RecordingOrchestrator):
+        def connection_host(self, request):
+            return "198.51.100.10" if request.name == "edge" else "198.51.100.20"
+
+    orchestrator = AzureOrchestrator()
+
+    with provision_environment(
+        ScenarioConfig(workflow="offload-loadtest", functions=["word-stats-java"]),
+        EnvironmentConfig.model_validate(
+            {
+                "provider": "azure",
+                "roles": {
+                    "stack": {"name": "edge"},
+                    "cloud": {"name": "cloud"},
+                },
+                "azure": {
+                    "resource_group": "rg",
+                    "location": "westeurope",
+                    "operator_source_cidr": "203.0.113.42/32",
+                },
+            }
+        ),
+        repo_root=tmp_path,
+        orchestrator_factory=lambda _: orchestrator,
+    ):
+        pass
+
+    assert orchestrator.restrictions == [
+        ("edge", (30080, 30081, 30090), ("198.51.100.10/32", "203.0.113.42/32")),
+        ("cloud", (30080, 30081, 30090), ("198.51.100.10/32", "203.0.113.42/32")),
     ]
 
 

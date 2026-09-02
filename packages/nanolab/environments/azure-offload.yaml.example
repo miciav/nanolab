@@ -1,0 +1,17 @@
+provider: azure
+roles:
+  stack:
+    name: nanofaas-edge
+    disk: 30G
+    user: azureuser
+  cloud:
+    name: nanofaas-cloud
+    disk: 30G
+    user: azureuser
+azure:
+  resource_group: your-resource-group
+  location: westeurope
+  vm_size: Standard_D4s_v5
+  image_urn: Canonical:ubuntu-24_04-lts:server:24.04.202607140
+  operator_source_cidr: auto
+  ssh_key_path: /home/you/.ssh/id_ed25519.pub
