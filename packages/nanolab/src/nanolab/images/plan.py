@@ -18,7 +18,7 @@ DEFAULT_ARCHITECTURES: tuple[ImageArchitecture, ...] = ("amd64", "arm64")
 DEFAULT_REGISTRY = f"{LOCAL_REGISTRY}/nanofaas"
 
 NATIVE_JAVA_DOCKERFILE = Path("deploy/native-java/Dockerfile")
-JVM_RELEASE_PROFILE = VARIANTS_BY_KEY["jvm-c2"]
+JVM_RELEASE_PROFILE = VARIANTS_BY_KEY["jvm-g1-c2"]
 NATIVE_RELEASE_PROFILE = VARIANTS_BY_KEY["native-o3-g1"]
 
 

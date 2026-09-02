@@ -192,7 +192,7 @@ def test_spring_jvm_cells_require_boot_jar_before_bake() -> None:
             ":control-plane:bootJar",
             "-PcontrolPlaneModules=all",
             "-PnanofaasBuildType=jvm",
-            "-PnanofaasBuildVariant=jvm-c2",
+            "-PnanofaasBuildVariant=jvm-g1-c2",
             "-PnanofaasBuildOptimization=c2",
         ),
         "java-warm-echo": ("./gradlew", ":services:java:warm-echo:bootJar"),
@@ -295,12 +295,12 @@ def test_function_images_do_not_receive_control_plane_build_metadata() -> None:
             assert "-Pnanofaas" not in cell.build_args["GRADLE_ARGS"]
 
 
-def test_java_release_cells_use_jvm_c2_and_native_o3_g1_profiles() -> None:
+def test_java_release_cells_use_jvm_g1_c2_and_native_o3_g1_profiles() -> None:
     plan = _plan(architectures=("amd64",))
 
     for cell in plan.cells:
         if cell.flavor == "jvm":
-            assert cell.build_args == {"JVM_TUNING": "-XX:+UseSerialGC"}
+            assert cell.build_args == {"JVM_TUNING": "-XX:+UseG1GC"}
         elif cell.flavor == "native" and cell.target.native_build is not None:
             assert "-PnativeOptimization=3" in cell.build_args["GRADLE_ARGS"]
             assert "-PnativeGc=G1" in cell.build_args["GRADLE_ARGS"]
@@ -338,5 +338,5 @@ def test_jvm_and_default_cells_keep_their_own_dockerfile_and_context() -> None:
         assert cell.dockerfile == cell.target.dockerfile
         assert cell.context == cell.target.context
         assert cell.build_args == (
-            {"JVM_TUNING": "-XX:+UseSerialGC"} if cell.flavor == "jvm" else {}
+            {"JVM_TUNING": "-XX:+UseG1GC"} if cell.flavor == "jvm" else {}
         )
