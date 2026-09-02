@@ -47,7 +47,7 @@ runs:
         #     update came back HTTP 400.
         # Tests read the version and the matrix from this checkout rather than
         # assuming them, so moving the pin needs no test edits.
-        ref: 4730063710e39a4c507f26b5e3c26df7e22bbdd0
+        ref: 89811f7e2534080e318b06088ff0a2d600dcb753
         path: .nanofaas-source
         token: ${{ inputs.nanofaas-token }}
 

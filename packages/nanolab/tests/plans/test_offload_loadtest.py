@@ -15,6 +15,7 @@ from nanolab.plans.offload_loadtest import (
 )
 from sonata_tasks.execution.bindings import RoleBindings
 from sonata_tasks.platform import PlatformFunction, PlatformRequest
+from sonata_tasks.registry import docker_registry_resource
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 NANOFAAS_ROOT = Path(os.environ["NANOFAAS_ROOT"]).resolve()
@@ -69,6 +70,7 @@ def test_platform_returns_helm_arguments_in_the_platform_request() -> None:
         role="stack",
         build="docker",
         repo_root=NANOFAAS_ROOT,
+        backend="k8s",
         offload_target="http://cloud:8080",
     )
     assert isinstance(request, PlatformRequest)
@@ -84,6 +86,11 @@ def _no_real_network(monkeypatch: pytest.MonkeyPatch) -> None:
     waits out two connection timeouts — the file took two minutes."""
     monkeypatch.setattr(
         offload_loadtest_plan, "_fetch_text", lambda _url, **_kwargs: ""
+    )
+    monkeypatch.setattr(
+        offload_loadtest_plan,
+        "docker_registry_resource",
+        lambda **kwargs: docker_registry_resource(**kwargs, ready=lambda: True),
     )
 
 
@@ -136,10 +143,11 @@ def test_rejects_wrong_function_count() -> None:
 def test_deployment_then_registration_then_k6_then_evaluation_ordering(tmp_path: Path) -> None:
     workflow = build_offload_loadtest_plan(
         SCENARIO,
-        _local_environment(),
+        _external_environment(),
         _bindings(RecordingExecutor()),
         run_dir=tmp_path,
         repo_root=NANOFAAS_ROOT,
+        fetcher=_UnusedFetcher(),
     )
 
     ids = [task.task_id for task in workflow.compile().tasks]
@@ -172,6 +180,34 @@ def test_local_provider_runs_k6_on_stack_without_fetch(tmp_path: Path) -> None:
 
     assert preflight.execution_role == "stack"
     assert str(tool_root / "assets/k6/offload-mixed.js") in k6
+
+
+def test_local_provider_uses_one_compose_platform_with_distinct_endpoints(tmp_path: Path) -> None:
+    executor = RecordingExecutor()
+    workflow = build_offload_loadtest_plan(
+        SCENARIO,
+        _local_environment(),
+        _bindings(executor),
+        run_dir=tmp_path,
+        repo_root=NANOFAAS_ROOT,
+    )
+
+    ids = [task.task_id for task in workflow.compile().tasks]
+    commands = _run(workflow, executor)
+    command_lines = [" ".join(command.argv) for command in commands]
+
+    assert any(task.endswith("acquire-local-registry") for task in ids)
+    assert any("acquire-docker-compose-project-nanofaas-offload-loadtest" in task for task in ids)
+    assert not any("kubectl" in task or "helm" in task for task in ids)
+    assert any("http://127.0.0.1:8080" in command for command in command_lines)
+    assert any("http://127.0.0.1:19090" in command for command in command_lines)
+    assert [task.split(".", 1)[1] for task in ids[-5:]] == [
+        "release-json-transform-java-on-the-edge",
+        "release-word-stats-java-on-the-edge",
+        "release-word-stats-java-on-the-cloud",
+        "release-docker-compose-project-nanofaas-offload-loadtest",
+        "release-local-registry",
+    ]
 
 
 def test_dedicated_loadgen_runs_k6_on_loadgen_and_fetches_results(tmp_path: Path) -> None:
@@ -309,9 +345,9 @@ def test_cleanup_covers_both_control_planes(tmp_path: Path) -> None:
     assert [task.split(".", 1)[1] for task in ids[-5:]] == [
         "release-json-transform-java-on-the-edge",
         "release-word-stats-java-on-the-edge",
-        "release-helm-release-nanofaas-on-the-edge",
         "release-word-stats-java-on-the-cloud",
-        "release-helm-release-nanofaas-on-the-cloud",
+        "release-docker-compose-project-nanofaas-offload-loadtest",
+        "release-local-registry",
     ]
 
 

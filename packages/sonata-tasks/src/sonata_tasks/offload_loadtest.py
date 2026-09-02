@@ -81,6 +81,8 @@ def build_offload_loadtest_workflow(
     workflow_id: str = "offload-loadtest",
     cwd: Path | None = None,
     requires: tuple[Resource[Any], ...] = (),
+    cloud_local_endpoint: str = "http://127.0.0.1:18080",
+    edge_local_endpoint: str = "http://127.0.0.1:18080",
 ) -> Workflow:
     """Two platforms, functions registered across them, then load over the hop.
 
@@ -96,10 +98,12 @@ def build_offload_loadtest_workflow(
     executor = RoleBoundCommandTaskExecutor(bindings)
     workflow = Workflow(workflow_id=workflow_id)
     cloud = add_platform(
-        workflow, request.cloud, executor=executor, cwd=cwd, requires=requires
+        workflow, request.cloud, executor=executor, cwd=cwd, requires=requires,
+        local_endpoint=cloud_local_endpoint,
     )
     edge = add_platform(
-        workflow, request.edge, executor=executor, cwd=cwd, requires=requires
+        workflow, request.edge, executor=executor, cwd=cwd, requires=requires,
+        local_endpoint=edge_local_endpoint,
     )
     workflow.add(
         load,

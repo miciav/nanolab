@@ -9,6 +9,7 @@ import urllib.request
 from multipass import MultipassClient
 from sonata_engine import Steps, Workflow
 from sonata_tasks.command import CommandTask
+from sonata_tasks.compose import DockerComposeProject, docker_compose_resource
 from sonata_tasks.deployment import CONTROL_PLANE_NODE_PORT
 from sonata_tasks.loadtest import FetchResultsTask, RunK6Task
 from sonata_tasks.offload_loadtest import (
@@ -17,6 +18,7 @@ from sonata_tasks.offload_loadtest import (
     build_offload_loadtest_workflow,
 )
 from sonata_tasks.platform import PlatformFunction, PlatformRequest
+from sonata_tasks.registry import docker_registry_resource
 from sonata_tasks.components.helm import control_plane_helm_values, helm_set_args
 from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
 from sonata_tasks.k6 import K6Task
@@ -35,6 +37,10 @@ from nanolab.plans.functions import resolve_function, sonata_function
 
 _ACTUATOR_PORT = 30081
 _CONTROL_PLANE_PORT = CONTROL_PLANE_NODE_PORT
+_LOCAL_EDGE_CONTROL_PLANE_PORT = 8080
+_LOCAL_CLOUD_CONTROL_PLANE_PORT = 19090
+_LOCAL_EDGE_ACTUATOR_PORT = 8081
+_LOCAL_CLOUD_ACTUATOR_PORT = 19091
 # The edge has a one-slot queue in this scenario, so this rate reliably creates
 # pressure while the cloud's larger function budget absorbs the overflow.
 _OFFLOADABLE_RATE = "100"
@@ -159,17 +165,22 @@ def _platform(
     role: Literal["stack", "cloud"],
     build: str,
     repo_root: Path,
+    backend: Literal["container", "k8s"],
     offload_target: str | None = None,
 ) -> PlatformRequest:
     request = PlatformRequest(
-        backend="k8s",
+        backend=backend,
         build=build,  # pyright: ignore[reportArgumentType]
         functions=functions,
         additional_modules=("offload", "sync-queue"),
         source_fingerprint=source_fingerprint(repo_root),
         execution_role=role,
         label=label,
+        build_control_plane=backend == "k8s",
+        push_function_images=backend == "container",
     )
+    if backend == "container":
+        return request
     values = control_plane_helm_values(
         namespace=request.namespace,
         control_plane_image=request.control_plane_image_reference(),
@@ -235,8 +246,10 @@ def build_offload_loadtest_plan(
 
     edge_host = _role_host(environment, "stack", dry_run=dry_run)
     cloud_host = _role_host(environment, "cloud", dry_run=dry_run)
-    edge_url = f"http://{edge_host}:{_CONTROL_PLANE_PORT}"  # NOSONAR (S5332): local control-plane endpoint
-    cloud_url = f"http://{cloud_host}:{_CONTROL_PLANE_PORT}"  # NOSONAR (S5332): local control-plane endpoint
+    local = environment.provider == "local"
+    edge_url = f"http://{edge_host}:{_LOCAL_EDGE_CONTROL_PLANE_PORT if local else _CONTROL_PLANE_PORT}"  # NOSONAR (S5332): local control-plane endpoint
+    cloud_url = f"http://{cloud_host}:{_LOCAL_CLOUD_CONTROL_PLANE_PORT if local else _CONTROL_PLANE_PORT}"  # NOSONAR (S5332): local control-plane endpoint
+    backend: Literal["container", "k8s"] = "container" if local else "k8s"
 
     request = OffloadLoadtestRequest(
         # The cloud absorbs whatever the edge sheds, so it must not reproduce the
@@ -248,6 +261,7 @@ def build_offload_loadtest_plan(
             role="cloud",
             build=config.build,
             repo_root=root,
+            backend=backend,
         ),
         edge=_platform(
             (offloadable, control),
@@ -255,9 +269,25 @@ def build_offload_loadtest_plan(
             role="stack",
             build=config.build,
             repo_root=root,
-            offload_target=cloud_url,
+            backend=backend,
+            offload_target=None if local else cloud_url,
         ),
     )
+
+    requires = ()
+    if local:
+        registry = docker_registry_resource(executor=RoleBoundCommandTaskExecutor(bindings), role="host")
+        compose = docker_compose_resource(
+            DockerComposeProject(
+                name="nanofaas-offload-loadtest",
+                file=Path("deploy/compose/offload-loadtest.yaml"),
+                ready_url="http://127.0.0.1:8081/actuator/health/readiness",
+            ),
+            executor=RoleBoundCommandTaskExecutor(bindings),
+            cwd=root,
+            requires=(registry,),
+        )
+        requires = (registry, compose)
 
     dedicated_loadgen = "loadgen" in environment.roles
     k6_role: Literal["stack", "loadgen"] = "loadgen" if dedicated_loadgen else "stack"
@@ -335,8 +365,8 @@ def build_offload_loadtest_plan(
                 task_id="",
                 title="Evaluate offload conservation",
                 k6_summary_path=local_summary_path,
-                edge_metrics_url=f"http://{edge_host}:{_ACTUATOR_PORT}/actuator/prometheus",  # NOSONAR (S5332): local actuator endpoint
-                cloud_metrics_url=f"http://{cloud_host}:{_ACTUATOR_PORT}/actuator/prometheus",  # NOSONAR (S5332): local actuator endpoint
+                edge_metrics_url=f"http://{edge_host}:{_LOCAL_EDGE_ACTUATOR_PORT if local else _ACTUATOR_PORT}/actuator/prometheus",  # NOSONAR (S5332): local actuator endpoint
+                cloud_metrics_url=f"http://{cloud_host}:{_LOCAL_CLOUD_ACTUATOR_PORT if local else _ACTUATOR_PORT}/actuator/prometheus",  # NOSONAR (S5332): local actuator endpoint
                 offloadable=offloadable.name,
                 control=control.name,
                 output_path=run_dir / "offload-report.json",
@@ -349,4 +379,7 @@ def build_offload_loadtest_plan(
         bindings,
         cwd=root,
         load=Steps(title="Run the offload load test", steps=tuple(steps)),
+        requires=requires,
+        cloud_local_endpoint=cloud_url,
+        edge_local_endpoint=edge_url,
     )
