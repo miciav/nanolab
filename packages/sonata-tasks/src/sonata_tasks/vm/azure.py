@@ -31,10 +31,11 @@ class AzureVmProvider:
         self.repo_root = Path(repo_root)
 
     def _client(self, request: VmRequest) -> AzureClient:
+        private_key = self.ssh_private_key_path(request)
         return AzureClient(
             resource_group=request.azure_resource_group,
             location=request.azure_location,
-            ssh_key_path=request.azure_ssh_key_path,
+            ssh_key_path=str(private_key) if private_key is not None else None,
             ssh_username=request.user,
         )
 

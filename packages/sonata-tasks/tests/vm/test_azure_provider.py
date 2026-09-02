@@ -115,6 +115,21 @@ def test_ssh_private_key_path_strips_pub_suffix(mock_client_cls, tmp_path) -> No
 
 
 @patch("sonata_tasks.vm.azure.AzureClient")
+def test_client_uses_private_key_for_ssh(mock_client_cls, tmp_path) -> None:
+    provider = _make_provider()
+    req = _make_request(azure_ssh_key_path=str(tmp_path / "id_ed25519.pub"))
+
+    provider._client(req)
+
+    mock_client_cls.assert_called_once_with(
+        resource_group="rg-test",
+        location="eastus",
+        ssh_key_path=str(tmp_path / "id_ed25519"),
+        ssh_username="ubuntu",
+    )
+
+
+@patch("sonata_tasks.vm.azure.AzureClient")
 def test_connection_host(mock_client_cls) -> None:
     client_mock, vm_mock = _make_azure_client_mock()
     mock_client_cls.return_value = client_mock
