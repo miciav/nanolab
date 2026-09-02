@@ -22,7 +22,7 @@ def _image_parts(image: str) -> tuple[str, str]:
     return repository, tag
 
 
-def control_plane_helm_values(
+def control_plane_helm_values(  # NOSONAR (S3776): Helm's flat key map needs explicit conditional values
     *,
     namespace: str,
     control_plane_image: str,

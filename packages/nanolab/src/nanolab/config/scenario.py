@@ -155,7 +155,7 @@ class ScenarioConfig(BaseModel):
     release: ReleaseConfig | None = None
 
     @model_validator(mode="after")
-    def validate_workflow(self) -> "ScenarioConfig":
+    def validate_workflow(self) -> "ScenarioConfig":  # NOSONAR (S3776): declarative validation rules
         if self.workflow in ("validate", "cli") and self.backend is None:
             raise ValueError(f"backend is required for {self.workflow} workflow")
         if self.workflow == "offload" and self.backend is not None:

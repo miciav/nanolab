@@ -1,3 +1,4 @@
+import math
 from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path, PurePosixPath
@@ -677,7 +678,7 @@ def k6_environment(
         # than a property of how hard the generator was told to push.
         env["K6_PEAK_VUS"] = str(burst_peak_vus(config))
         env.pop("K6_MAX_P95_MS", None)
-    if config.load_scale != 1.0:
+    if not math.isclose(config.load_scale, 1.0):
         # One knob for the whole shape: scaling the stages individually is how a
         # profile stops being the same profile.
         # Only the scale. The VU pool is sized by the script, which is where the
@@ -757,7 +758,7 @@ def _build_run_k6(
     )
 
 
-def _default_stages(config: ScenarioConfig) -> tuple[tuple[str, int], ...]:
+def _default_stages(config: ScenarioConfig) -> tuple[tuple[str, int], ...]:  # NOSONAR (S8495): stage count depends on the selected profile
     if is_co_tenancy(config):
         # None: the phases live in the script, and a --stage flag would override
         # the scenarios that stagger them.
@@ -865,8 +866,8 @@ def _build_concurrency_watchers(
     )
 
 
-def _build_steps_after(
-    *,
+def _build_steps_after(  # NOSONAR (S107): all values describe one post-run task graph
+    *,  # NOSONAR (S107): all values describe one post-run task graph
     remote: bool,
     executor: RoleBoundCommandTaskExecutor,
     summary_path: Path,

@@ -631,9 +631,11 @@ def hpa_queries(function_name: str) -> Queries:
 # where exceptions belong: declared, with its reason.
 #
 # Keyed by query name, valued by why that name may legitimately answer nothing.
+_SUBSTRATE_G1_NO_GC_MXBEAN = "SubstrateVM under G1 registers no GarbageCollectorMXBean"
+
 _MAY_BE_ABSENT: Mapping[str, str] = {
-    "jvm_gc_collection_count": "SubstrateVM under G1 registers no GarbageCollectorMXBean",
-    "jvm_gc_collection_time": "SubstrateVM under G1 registers no GarbageCollectorMXBean",
+    "jvm_gc_collection_count": _SUBSTRATE_G1_NO_GC_MXBEAN,
+    "jvm_gc_collection_time": _SUBSTRATE_G1_NO_GC_MXBEAN,
     # Same VM, same reason, and they were left out of this list by oversight: a
     # split of counters that do not exist cannot exist either. Declaring the
     # aggregates absent-able while requiring the per-generation split made the
@@ -643,10 +645,10 @@ _MAY_BE_ABSENT: Mapping[str, str] = {
     # Silence here is no longer ambiguous the way it was in August: whether a
     # build can see its own collector at all is now answered by
     # gc_metrics_source_mxbean, and native G1 publishes its pauses through JFR.
-    "jvm_gc_young_count": "SubstrateVM under G1 registers no GarbageCollectorMXBean",
-    "jvm_gc_young_time": "SubstrateVM under G1 registers no GarbageCollectorMXBean",
-    "jvm_gc_full_count": "SubstrateVM under G1 registers no GarbageCollectorMXBean",
-    "jvm_gc_full_time": "SubstrateVM under G1 registers no GarbageCollectorMXBean",
+    "jvm_gc_young_count": _SUBSTRATE_G1_NO_GC_MXBEAN,
+    "jvm_gc_young_time": _SUBSTRATE_G1_NO_GC_MXBEAN,
+    "jvm_gc_full_count": _SUBSTRATE_G1_NO_GC_MXBEAN,
+    "jvm_gc_full_time": _SUBSTRATE_G1_NO_GC_MXBEAN,
     "jvm_gc_pause_count": "Micrometer's notification binder does not exist on a native image",
     "jvm_gc_pause_sum": "Micrometer's notification binder does not exist on a native image",
     "jvm_gc_time_fraction": "polled binder, absent when the collector publishes no MXBean",

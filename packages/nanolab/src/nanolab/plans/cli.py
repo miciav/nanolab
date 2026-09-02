@@ -341,7 +341,7 @@ def _build_k8s_plan(
     )
 
 
-def build_cli_plan(
+def build_cli_plan(  # NOSONAR (S3776): selects one complete deployment graph
     config: ScenarioConfig,
     bindings: RoleBindings,
     *,

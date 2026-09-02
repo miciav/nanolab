@@ -182,7 +182,7 @@ def _async_checks(
     return tuple(checks)
 
 
-def build_validate_plan(
+def build_validate_plan(  # NOSONAR (S3776): backend-specific resource graph is intentionally co-located
     config: ScenarioConfig,
     bindings: RoleBindings,
     *,

@@ -109,7 +109,7 @@ def _inspection_task(
     )
 
 
-def build_validate_workflow(
+def build_validate_workflow(  # NOSONAR (S3776): workflow assembly mirrors the execution graph
     # ValidateWorkflowRequest, not PlatformRequest: this reads queue_probe,
     # extended_k8s_checks and queue_burst_script, none of which exist on the
     # base. Every caller already passes the subclass — the wider annotation only

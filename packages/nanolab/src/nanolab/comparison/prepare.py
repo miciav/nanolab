@@ -118,7 +118,7 @@ def pinned_function_images(functions: Sequence[Any]) -> dict[str, str]:
 CONTROL_PLANE_NODE_PORT = 30080
 
 
-def leftover_cleanup_operations(
+def leftover_cleanup_operations(  # NOSONAR (S8495): one operation is emitted per supplied function
     function_names: Sequence[str],
     *,
     node_port: int = CONTROL_PLANE_NODE_PORT,

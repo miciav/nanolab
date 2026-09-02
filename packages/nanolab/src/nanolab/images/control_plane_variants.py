@@ -150,7 +150,7 @@ def resolve_variants(keys: tuple[str, ...]) -> tuple[ControlPlaneVariant, ...]:
     return tuple(VARIANTS_BY_KEY[key] for key in keys)
 
 
-def build_operations(
+def build_operations(  # NOSONAR (S8495): optional Docker arguments deliberately vary in tuple length
     variant: ControlPlaneVariant,
     *,
     registry: str,

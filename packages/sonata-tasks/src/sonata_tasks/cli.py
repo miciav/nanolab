@@ -89,7 +89,7 @@ def _cli_argv(request: CliWorkflowRequest, *arguments: str) -> tuple[str, ...]:
     return (request.binary, "--endpoint", request.endpoint, *arguments)
 
 
-def _manifest(request: CliWorkflowRequest, function: CliFunction) -> FunctionManifest:
+def _manifest(function: CliFunction) -> FunctionManifest:
     return FunctionManifest(
         name=function.name, image=function.image, resources=function.resources
     )
@@ -111,7 +111,7 @@ def _function_resource(
     register, readiness — belongs to `function_resource`, which every other
     workflow reuses with its own register and delete commands.
     """
-    manifest = _manifest(request, function)
+    manifest = _manifest(function)
     prefix = _cli_argv(request)
     apply_task = CliFunctionApplyTask(
         manifest, cli_argv=prefix, executor=executor, role=request.cli_role, cwd=cwd
@@ -141,7 +141,7 @@ def _function_resource(
     )
 
 
-def build_cli_workflow(
+def build_cli_workflow(  # NOSONAR (S3776): workflow assembly mirrors resource lifecycle
     request: CliWorkflowRequest,
     bindings: RoleBindings,
     *,
@@ -301,7 +301,7 @@ def build_cli_workflow(
         # Last of the three: replacing re-registers the function from its manifest,
         # which discards the patch and the replica count the two steps above set.
         for task in function_replace_tasks(
-            _manifest(request, function),
+            _manifest(function),
             cli_argv=prefix,
             executor=executor,
             role=role,

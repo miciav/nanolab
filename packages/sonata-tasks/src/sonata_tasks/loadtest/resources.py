@@ -100,7 +100,7 @@ class DockerEngineProbe:
     def _client(self) -> httpx.Client:
         return httpx.Client(
             transport=httpx.HTTPTransport(uds=self.socket_path),
-            base_url="http://docker",
+            base_url="http://docker",  # NOSONAR (S5332): Unix-domain socket, no network transport
             timeout=self.timeout_seconds,
         )
 

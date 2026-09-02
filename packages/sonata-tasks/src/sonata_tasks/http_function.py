@@ -426,7 +426,7 @@ class HttpExecutionSuccessTask(Task[None]):
         self._expected_status_code = expected_status_code
         self._cwd = cwd
 
-    def run(self, inputs: TaskInputs) -> TaskOutcome[None]:
+    def run(self, inputs: TaskInputs) -> TaskOutcome[None]:  # NOSONAR (S3776): polling state machine reports precise failures
         execution_id = inputs.upstream()
         if not isinstance(execution_id, str) or not execution_id:
             raise RuntimeError(f"{self.title}: expected an execution id from enqueue")

@@ -16,6 +16,7 @@ because a matrix that lost one run to a flaky VM is still worth reading.
 from __future__ import annotations
 
 import json
+import math
 import statistics
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -128,7 +129,7 @@ def _spread(values: list[float]) -> tuple[float, float]:
 
 
 def _fmt(mean: float, half_range: float, digits: int = 1) -> str:
-    if mean != mean:  # NaN
+    if math.isnan(mean):
         return "—"
     return f"{mean:.{digits}f} ± {half_range:.{digits}f}"
 
