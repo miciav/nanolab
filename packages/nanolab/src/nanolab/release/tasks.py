@@ -18,6 +18,7 @@ from sonata_tasks.tasks.models import CommandTaskSpec
 
 from nanolab.release.evidence import is_sha256_digest, receipt_artifacts
 from nanolab.release.model import ArtifactEvidence, ReleaseIdentity, digest_path
+from nanolab.release.remote_retry import retry_on_connection_death
 
 
 PhaseWork = Callable[[TaskInputs], Iterable[Evidence]]
@@ -299,31 +300,55 @@ def run_image_steps(
     user's machine instead of here.
     """
     run_steps(steps, inputs)
-    evidence: list[Evidence] = []
-    for image in images:
-        if architecture is not None:
-            _require_architecture(executor, image, architecture)
-        argv = (
-            (
-                "skopeo",
-                "inspect",
-                "--tls-verify=false",
-                "--format={{.Digest}}",
-                f"docker://{image}",
-            )
-            if registry
-            else ("docker", "image", "inspect", "--format={{.Id}}", image)
+    if not images:
+        return ()
+
+    argv = (
+        (
+            "sh",
+            "-c",
+            "for image do skopeo inspect --tls-verify=false "
+            "--format='{{.Digest}}' \"docker://$image\" || exit; done",
+            "verify-images",
+            *images,
         )
-        result = executor.run(
+        if registry
+        else (
+            "docker",
+            "image",
+            "inspect",
+            "--format={{.Architecture}}|{{.Id}}" if architecture else "--format={{.Id}}",
+            *images,
+        )
+    )
+    result = retry_on_connection_death(
+        lambda: executor.run(
             CommandTaskSpec(
                 task_id="",
-                summary=f"Verify {image}",
+                summary="Verify image matrix",
                 argv=argv,
                 role="stack",
             )
-        )
-        digest = result.stdout.strip() if isinstance(result.stdout, str) else None
-        if result.status != "passed" or not is_sha256_digest(digest):
+        ),
+        describe="image matrix verification",
+    )
+    lines = result.stdout.splitlines() if isinstance(result.stdout, str) else []
+    if result.status != "passed" or len(lines) != len(images):
+        raise RuntimeError("invalid image digest output for image matrix")
+
+    evidence: list[Evidence] = []
+    for image, line in zip(images, lines, strict=True):
+        if architecture is not None:
+            actual, separator, digest = line.partition("|")
+            if not separator or actual != architecture:
+                raise RuntimeError(
+                    f"image architecture mismatch for {image}: "
+                    f"expected {architecture}, got {actual or 'empty'}"
+                )
+        else:
+            digest = line
+        digest = digest.strip()
+        if not is_sha256_digest(digest):
             raise RuntimeError(f"invalid image digest for {image}")
         evidence.append(
             Evidence(
@@ -333,24 +358,6 @@ def run_image_steps(
             )
         )
     return tuple(evidence)
-
-
-def _require_architecture(
-    executor: CommandTaskExecutor, image: str, expected: str
-) -> None:
-    result = executor.run(
-        CommandTaskSpec(
-            task_id="",
-            summary=f"Verify {image} architecture",
-            argv=("docker", "image", "inspect", "--format={{.Architecture}}", image),
-            role="stack",
-        )
-    )
-    actual = result.stdout.strip() if isinstance(result.stdout, str) else ""
-    if result.status != "passed" or actual != expected:
-        raise RuntimeError(
-            f"image architecture mismatch for {image}: expected {expected}, got {actual or 'empty'}"
-        )
 
 
 def run_steps(steps: Task[Any], inputs: TaskInputs) -> None:

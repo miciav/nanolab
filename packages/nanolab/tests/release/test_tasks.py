@@ -736,7 +736,9 @@ def test_image_steps_capture_every_current_registry_digest() -> None:
 
         def run(self, task, *, dry_run=False):
             self.commands.append(task.argv)
-            return TaskResult(task_id="", status="passed", return_code=0, stdout=digest)
+            return TaskResult(
+                task_id="", status="passed", return_code=0, stdout=f"{digest}\n{digest}"
+            )
 
     executor = Executor()
     evidence = run_image_steps(
@@ -751,7 +753,9 @@ def test_image_steps_capture_every_current_registry_digest() -> None:
         "docker://image-a:v1",
         "docker://image-b:v1",
     }
-    assert all(command[0] == "skopeo" for command in executor.commands)
+    assert len(executor.commands) == 1
+    assert executor.commands[0][:2] == ("sh", "-c")
+    assert executor.commands[0][-2:] == ("image-a:v1", "image-b:v1")
 
 
 @pytest.mark.parametrize(
@@ -808,10 +812,16 @@ def test_run_source_steps_records_the_tested_source_tree(tmp_path: Path) -> None
 
 
 def test_run_image_steps_rejects_a_foreign_architecture() -> None:
+    digest = "sha256:" + "a" * 64
     executor = _ScriptedExecutor(
         {
-            ("docker", "image", "inspect", "--format={{.Architecture}}", "img:v1"): "arm64",
-            ("docker", "image", "inspect", "--format={{.Id}}", "img:v1"): "sha256:" + "a" * 64,
+            (
+                "docker",
+                "image",
+                "inspect",
+                "--format={{.Architecture}}|{{.Id}}",
+                "img:v1",
+            ): f"arm64|{digest}",
         }
     )
 
@@ -830,8 +840,14 @@ def test_run_image_steps_accepts_the_expected_architecture() -> None:
     digest = "sha256:" + "b" * 64
     executor = _ScriptedExecutor(
         {
-            ("docker", "image", "inspect", "--format={{.Architecture}}", "img:v1"): "amd64",
-            ("docker", "image", "inspect", "--format={{.Id}}", "img:v1"): digest,
+            (
+                "docker",
+                "image",
+                "inspect",
+                "--format={{.Architecture}}|{{.Id}}",
+                "img-a:v1",
+                "img-b:v1",
+            ): f"amd64|{digest}\namd64|{digest}",
         }
     )
 
@@ -839,9 +855,40 @@ def test_run_image_steps_accepts_the_expected_architecture() -> None:
         _NoopSteps(),
         TaskInputs.empty(),
         executor,
-        ("img:v1",),
+        ("img-a:v1", "img-b:v1"),
         registry=False,
         architecture="amd64",
     )
 
+    assert [item.digest for item in evidence] == [digest, digest]
+
+
+def test_run_image_steps_retries_the_read_only_matrix_inspection(monkeypatch) -> None:
+    digest = "sha256:" + "c" * 64
+
+    def immediate_retry(operation, *, describe):
+        assert describe == "image matrix verification"
+        with pytest.raises(ConnectionError):
+            operation()
+        return operation()
+
+    monkeypatch.setattr(release_tasks, "retry_on_connection_death", immediate_retry)
+
+    class Executor:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def run(self, task, *, dry_run=False):
+            del task, dry_run
+            self.calls += 1
+            if self.calls == 1:
+                raise ConnectionError("reset")
+            return TaskResult(task_id="", status="passed", return_code=0, stdout=digest)
+
+    executor = Executor()
+    evidence = run_image_steps(
+        _NoopSteps(), TaskInputs.empty(), executor, ("img:v1",), registry=False
+    )
+
+    assert executor.calls == 2
     assert [item.digest for item in evidence] == [digest]
