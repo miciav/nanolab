@@ -70,3 +70,35 @@ Fast-forward `/home/michele/Documenti/nanolab` on `michele@149.132.179.35`, pres
 **Step 3: Verify synchronization**
 
 Confirm local `main`, `origin/main`, and remote `HEAD` resolve to the same commit.
+
+### Task 4: Reuse the Azure SSH transport across workflow commands
+
+The first implementation removed the post-build inspection burst, but a resumed release proved that the registry push composite contains another per-image command burst. Batching every present and future composite would duplicate a network constraint throughout release code, so the durable boundary is the Azure transport.
+
+**Files:**
+- Modify in `azure-vm-sdk`: `src/azure_vm/vm.py`
+- Test in `azure-vm-sdk`: `tests/unit/test_vm.py`
+- Modify: `packages/sonata-tasks/src/sonata_tasks/vm/azure.py`
+- Test: `packages/sonata-tasks/tests/vm/test_azure_provider.py`
+- Modify: `packages/sonata-tasks/pyproject.toml`
+- Modify: `uv.lock`
+
+**Step 1: Specify SDK connection reuse**
+
+Add a failing SDK test that executes two commands through one `AzureVM` and requires one connected `SSHClient`. Add a failing reconnection test for an inactive cached transport.
+
+**Step 2: Implement the SDK lifecycle**
+
+Cache one authenticated active client per `AzureVM`, close and replace an inactive client, invalidate it on transport errors, and expose `close()` for deterministic lifecycle cleanup.
+
+**Step 3: Specify provider VM reuse**
+
+Add a failing provider test that executes two commands for the same request and requires a single `AzureClient.get_vm()` result to serve both.
+
+**Step 4: Implement provider ownership and update the pin**
+
+Cache `AzureVM` handles by immutable connection identity inside `AzureVmProvider`; use the handle for command execution and upload, and close it before teardown. Pin NanoLab to the published SDK commit and refresh `uv.lock`.
+
+**Step 5: Verify and publish both repositories**
+
+Run the complete unit, lint, and type-check suites in each repository; commit and push the SDK first, then NanoLab. Fast-forward both remote checkouts and confirm the release journal and retained VM remain available.

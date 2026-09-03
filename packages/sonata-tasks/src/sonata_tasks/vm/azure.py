@@ -8,7 +8,7 @@ import re
 import subprocess
 from typing import Any
 
-from azure_vm import AzureClient
+from azure_vm import AzureClient, AzureVM
 from azure_vm.exceptions import VmNotFoundError
 from shellcraft.backend import ShellExecutionResult
 
@@ -29,6 +29,7 @@ class AzureVmProvider:
 
     def __init__(self, repo_root: Path) -> None:
         self.repo_root = Path(repo_root)
+        self._vms: dict[tuple[str, str | None, str | None, str, str | None], AzureVM] = {}
 
     def _client(self, request: VmRequest) -> AzureClient:
         private_key = self.ssh_private_key_path(request)
@@ -41,6 +42,24 @@ class AzureVmProvider:
 
     def _vm_name(self, request: VmRequest) -> str:
         return request.name or "nanofaas-azure"
+
+    def _vm_key(
+        self, request: VmRequest
+    ) -> tuple[str, str | None, str | None, str, str | None]:
+        key = self.ssh_private_key_path(request)
+        return (
+            self._vm_name(request),
+            request.azure_resource_group,
+            request.azure_location,
+            request.user,
+            str(key) if key is not None else None,
+        )
+
+    def _vm(self, request: VmRequest) -> AzureVM:
+        key = self._vm_key(request)
+        if key not in self._vms:
+            self._vms[key] = self._client(request).get_vm(self._vm_name(request))
+        return self._vms[key]
 
     def _ssh_key(self, request: VmRequest) -> Path | None:
         if request.azure_ssh_key_path:
@@ -64,13 +83,14 @@ class AzureVmProvider:
         return f"{self.remote_home(request)}/nanofaas"
 
     def connection_host(self, request: VmRequest) -> str:
-        vm = self._client(request).get_vm(self._vm_name(request))
-        return vm.wait_for_ip()
+        return self._vm(request).wait_for_ip()
 
     def teardown(self, request: VmRequest) -> ShellExecutionResult:
         name = self._vm_name(request)
         try:
-            self._client(request).get_vm(name).delete()
+            vm = self._vms.pop(self._vm_key(request), None) or self._client(request).get_vm(name)
+            vm.close()
+            vm.delete()
         except VmNotFoundError:
             # `get_vm` raises this from the LOCAL ~/.azure-vm-sdk/<name> workspace,
             # never from Azure. The SDK can only destroy what it recorded, so a
@@ -133,10 +153,12 @@ class AzureVmProvider:
         # interrupted teardown -- therefore reports RUNNING forever and
         # ensure_running returns without touching Azure. Ask Azure, which is the
         # authority, and force a converging apply when the workspace is lying.
-        if self._exists_in_azure(request):
+        vm = (
             client.ensure_running(name, **parameters)
-        else:
-            client.launch(name, **parameters)
+            if self._exists_in_azure(request)
+            else client.launch(name, **parameters)
+        )
+        self._vms[self._vm_key(request)] = vm
         return _ok(["azure", "ensure_running", name])
 
     def release_vm_facts(self, request: VmRequest) -> AzureVmFacts:
@@ -259,7 +281,7 @@ class AzureVmProvider:
         dry_run: bool = False,
     ) -> ShellExecutionResult:
         del dry_run
-        vm = self._client(request).get_vm(self._vm_name(request))
+        vm = self._vm(request)
         # The Azure client's `cwd` is the directory on the VM, same meaning.
         result = vm.exec_structured(list(argv), env=env, cwd=remote_dir)
         return ShellExecutionResult(
@@ -276,7 +298,7 @@ class AzureVmProvider:
         source: Path,
         destination: str,
     ) -> ShellExecutionResult:
-        vm = self._client(request).get_vm(self._vm_name(request))
+        vm = self._vm(request)
         vm.transfer(str(source), destination)
         return _ok(["scp", str(source), destination])
 
@@ -287,7 +309,7 @@ class AzureVmProvider:
         source: str,
         destination: Path,
     ) -> ShellExecutionResult:
-        ip = self._client(request).get_vm(self._vm_name(request)).wait_for_ip()
+        ip = self._vm(request).wait_for_ip()
         key = self.ssh_private_key_path(request)
         cmd: list[str] = ["scp"]
         if key:

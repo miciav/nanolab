@@ -147,6 +147,7 @@ def test_teardown_success(mock_client_cls, _gone) -> None:
     provider = _make_provider()
     req = _make_request()
     result = provider.teardown(req)
+    vm_mock.close.assert_called_once_with()
     vm_mock.delete.assert_called_once()
     assert result.return_code == 0
 
@@ -318,6 +319,21 @@ def test_exec_argv(mock_client_cls) -> None:
     result = provider.exec_argv(req, ["echo", "hello"])
     assert result.return_code == 0
     assert result.stdout == "output"
+
+
+@patch("sonata_tasks.vm.azure.AzureClient")
+def test_exec_argv_reuses_the_vm_handle(mock_client_cls) -> None:
+    client_mock, vm_mock = _make_azure_client_mock()
+    exec_result = MagicMock(returncode=0, stdout="", stderr="")
+    vm_mock.exec_structured.return_value = exec_result
+    mock_client_cls.return_value = client_mock
+    provider = _make_provider()
+    req = _make_request()
+
+    provider.exec_argv(req, ["true"])
+    provider.exec_argv(req, ["true"])
+
+    client_mock.get_vm.assert_called_once_with("test-vm")
 
 
 @patch("sonata_tasks.vm.azure.AzureClient")

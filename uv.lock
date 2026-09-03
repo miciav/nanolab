@@ -52,7 +52,7 @@ wheels = [
 [[package]]
 name = "azure-vm-sdk"
 version = "0.1.0"
-source = { git = "https://github.com/miciav/azure-vm-sdk.git?rev=cb159a5#cb159a504b02f879310c0e87f3cf430646c890d6" }
+source = { git = "https://github.com/miciav/azure-vm-sdk.git?rev=1aa6726#1aa6726e2f13b12e4714c5fc3235c1e011d1e35c" }
 dependencies = [
     { name = "paramiko" },
     { name = "pyyaml" },
@@ -1280,7 +1280,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "azure-vm-sdk", git = "https://github.com/miciav/azure-vm-sdk.git?rev=cb159a5" },
+    { name = "azure-vm-sdk", git = "https://github.com/miciav/azure-vm-sdk.git?rev=1aa6726" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "multipass-sdk", git = "https://github.com/miciav/multipass-sdk.git?rev=402c406" },
     { name = "pandas", specifier = ">=2.2" },
