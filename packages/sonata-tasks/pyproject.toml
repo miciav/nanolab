@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "nanoFaaS workflow tasks built on the Sonata engine."
 requires-python = ">=3.12"
 dependencies = [
-    "azure-vm-sdk @ git+https://github.com/miciav/azure-vm-sdk.git@1aa6726",
+    "azure-vm-sdk @ git+https://github.com/miciav/azure-vm-sdk.git@eb8a542",
     "httpx>=0.27",
     "multipass-sdk @ git+https://github.com/miciav/multipass-sdk.git@402c406",
     # The experiment report. Plotly is written into the page inline rather than
