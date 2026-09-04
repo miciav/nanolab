@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from pathlib import Path
 import shlex
 import threading
 import time
@@ -10,7 +9,6 @@ from typing import Protocol
 from urllib.parse import quote
 
 import httpx
-from sonata_tasks.loadtest.ports import RemoteFileFetcher
 from sonata_tasks.tasks.executors import VmCommandRunner
 
 
@@ -426,17 +424,3 @@ class VerifyAutoscalingReplicas:
             ),
         )
 
-
-@dataclass
-class FetchAutoscalingSummary:
-    """Copies the autoscaling k6 summary from the VM into the local run dir."""
-
-    task_id: str
-    title: str
-    fetcher: RemoteFileFetcher
-    remote_path: str
-    local_path: Path
-
-    def run(self) -> None:
-        self.local_path.parent.mkdir(parents=True, exist_ok=True)
-        self.fetcher.fetch_from(self.remote_path, self.local_path)

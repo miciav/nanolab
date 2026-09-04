@@ -373,31 +373,6 @@ def test_scale_up_failure_message_includes_watcher_probe_errors(monkeypatch) -> 
     assert summary.verdict_error is not None
     assert "Scale-up not observed" in summary.verdict_error
     assert "Unable to connect" in summary.verdict_error
-
-
-def test_fetch_autoscaling_summary_creates_parent_and_fetches(tmp_path) -> None:
-    from sonata_tasks.loadtest.autoscaling import FetchAutoscalingSummary
-
-    fetched: list[tuple[str, object]] = []
-
-    class _Fetcher:
-        def fetch_from(self, remote, local):
-            fetched.append((remote, local))
-
-    local = tmp_path / "metrics" / "autoscaling-k6-summary.json"
-    FetchAutoscalingSummary(
-        task_id="autoscaling.fetch_summary",
-        title="Fetch autoscaling k6 summary",
-        fetcher=_Fetcher(),
-        remote_path="/home/ubuntu/two-vm-loadtest/results/autoscaling-k6-summary.json",
-        local_path=local,
-    ).run()
-
-    assert local.parent.is_dir()
-    assert fetched == [("/home/ubuntu/two-vm-loadtest/results/autoscaling-k6-summary.json", local)]
-
-
-
 def test_watcher_keeps_the_whole_trajectory_not_just_its_peak() -> None:
     """The peak is derivable from the series; the series is not derivable from the peak."""
     import time as _time

@@ -378,8 +378,10 @@ class SideCommandTask(Task[LoadtestOutcome]):
 class FetchResultsTask(Task[LoadtestOutcome]):
     """Bring a remote loadgen's summary back to the run directory."""
 
-    def __init__(self, *, fetch: FetchVmResults, title: str = "Fetch k6 results") -> None:
-        self.title = title
+    def __init__(self, *, fetch: FetchVmResults) -> None:
+        # The fetch already carries the title the compiler slugifies; a second one
+        # here could only disagree with it.
+        self.title = fetch.title
         self._fetch = fetch
 
     @override
