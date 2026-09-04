@@ -392,3 +392,42 @@ def test_jvm_metrics_requirement_follows_the_collector_the_release_builds() -> N
 
     assert NATIVE_RELEASE_PROFILE.build_env.get("NATIVE_GC") == "G1"
     assert release_benchmark._HEAP_METRICS_AVAILABLE is False
+
+
+def test_the_release_collects_container_metrics_for_its_memory_reading(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The heap gauge its G1 build cannot publish left the release with no memory
+    reading at all. cAdvisor is the replacement, and it takes both halves: the
+    chart scrape has to be on, and the snapshot only records queries it is given."""
+    plan = _plan(tmp_path, monkeypatch)
+    receipt = _registry_receipt(plan)
+    calls: list[dict[str, Any]] = []
+
+    class Workflow:
+        def __init__(self, run_dir: Path):
+            self.run_dir = run_dir
+
+        def run(self) -> None:
+            self.run_dir.mkdir(parents=True, exist_ok=True)
+            self.run_dir.joinpath("summary.json").write_text(
+                json.dumps(_summary(100)), encoding="utf-8"
+            )
+
+    def builder(*_args, **kwargs):
+        calls.append(kwargs)
+        return Workflow(kwargs["run_dir"])
+
+    release_benchmark.run_sonata_benchmark(
+        plan,
+        1,
+        builder,
+        object(),
+        None,
+        ReleaseEndpoints("http://stack:30080", "http://stack:30090"),
+        receipt,
+    )
+
+    assert calls[0]["container_metrics"] is True
+    asked = {query.name for query in calls[0]["extra_prometheus_queries"]}
+    assert "container_memory_bytes@control-plane" in asked

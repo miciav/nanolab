@@ -15,6 +15,7 @@ from sonata_engine import Evidence
 
 from nanolab.functions.catalog import resolve_function_definition
 from nanolab.images.plan import NATIVE_RELEASE_PROFILE
+from nanolab.metrics.catalogue import container_queries
 from nanolab.release.evidence import receipt_artifacts as _receipt_artifacts
 from nanolab.release.metrics import (
     aggregate_runs,
@@ -186,6 +187,11 @@ def run_sonata_benchmark(
             for function in plan.scenario.functions
         },
         heap_metrics_required=_HEAP_METRICS_AVAILABLE,
+        # cAdvisor, through the kubelet the chart already scrapes, is the one
+        # memory reading every build produces on the same terms - and the resident
+        # set, not the heap, is what decides whether a build fits on a node.
+        container_metrics=True,
+        extra_prometheus_queries=container_queries(plan.scenario.functions),
     )
     workflow.run()  # type: ignore[attr-defined]
     if not summary.is_file():

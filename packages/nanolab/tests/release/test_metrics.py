@@ -82,6 +82,70 @@ def test_aggregate_runs_uses_per_metric_median() -> None:
     }
 
 
+def _summary_without_heap_pools(value: float) -> dict[str, object]:
+    """What the snapshot writes for a series that returned nothing: a point count
+    and no statistics. It is what a G1 control plane produces for the heap."""
+    summary = cast(dict[str, Any], _summary(value))
+    summary["prometheus"]["jvm_heap_used_bytes"] = {"points": 0}
+    return summary
+
+
+def test_a_build_with_no_heap_pools_reports_every_other_metric() -> None:
+    """v0.20.0 ran three clean benchmarks and then failed the aggregate with "max
+    must be a finite nonnegative number": its G1 control plane publishes no heap
+    series, so there was no peak to read. The absence is a reading, not a zero -
+    a zero would record a control plane that used no memory at all."""
+    aggregate = aggregate_runs(
+        PROFILE,
+        (
+            _summary_without_heap_pools(30),
+            _summary_without_heap_pools(10),
+            _summary_without_heap_pools(20),
+        ),
+    )
+
+    assert "controlPlaneHeapPeakBytes" not in aggregate.metrics
+    assert aggregate.metrics["controlPlaneCpuPeak"] == 0.2
+    assert aggregate.metrics["throughputRps"] == 20.0
+    assert aggregate.run_count == 3
+
+
+def test_the_container_working_set_is_recorded_for_builds_with_no_heap_gauge() -> None:
+    """cAdvisor prices every build on the same terms, so a G1 release still
+    records what the control plane cost - and the resident set, not the heap, is
+    what decides whether a build fits on a node."""
+    summaries = []
+    for value in (30, 10, 20):
+        summary = _summary_without_heap_pools(value)
+        summary["prometheus"]["container_memory_bytes@control-plane"] = {
+            "points": 40,
+            "max": value * 1_000_000,
+        }
+        summaries.append(summary)
+
+    aggregate = aggregate_runs(PROFILE, tuple(summaries))
+
+    assert "controlPlaneHeapPeakBytes" not in aggregate.metrics
+    assert aggregate.metrics["controlPlaneMemoryPeakBytes"] == 20_000_000
+
+
+def test_a_heap_series_that_has_points_is_still_held_to_the_strict_rules() -> None:
+    """Only an empty series is excused. One that reported points and then carries
+    no usable maximum is the broken evidence it looks like."""
+    summary = cast(dict[str, Any], _summary(20))
+    summary["prometheus"]["jvm_heap_used_bytes"] = {"points": 12}
+
+    with pytest.raises(ValueError, match="finite nonnegative"):
+        aggregate_runs(PROFILE, (summary,))
+
+
+def test_runs_that_disagree_on_their_metrics_are_not_quietly_averaged() -> None:
+    """Same build and same profile: one run publishing a heap peak and another not
+    is an anomaly to stop on, and it used to surface as a bare KeyError."""
+    with pytest.raises(ValueError, match="different metrics"):
+        aggregate_runs(PROFILE, (_summary(20), _summary_without_heap_pools(20)))
+
+
 @pytest.mark.parametrize("invalid", (float("nan"), float("inf"), float("-inf"), -1.0))
 def test_aggregate_runs_rejects_invalid_source_numbers(invalid: float) -> None:
     summary = cast(dict[str, Any], _summary(20))

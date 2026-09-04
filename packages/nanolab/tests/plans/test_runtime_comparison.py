@@ -135,7 +135,7 @@ def test_container_cost_is_queried_for_the_control_plane_and_every_function() ->
     The default query list asks the control plane's actuator for
     `jvm_heap_used_bytes`, which three of the four builds do not publish.
     """
-    names = [q.name for q in container_queries(_config())]
+    names = [q.name for q in container_queries(_config().functions)]
 
     assert "container_memory_bytes@control-plane" in names
     assert "container_memory_bytes@word-stats-java" in names
@@ -154,7 +154,7 @@ def test_container_cost_is_queried_for_the_control_plane_and_every_function() ->
 
 def test_cpu_is_a_rate_not_a_counter() -> None:
     """A counter only rises, so charting it says nothing about when the work happened."""
-    cpu = next(q for q in container_queries(_config()) if q.name == "container_cpu_cores@control-plane")
+    cpu = next(q for q in container_queries(_config().functions) if q.name == "container_cpu_cores@control-plane")
 
     assert cpu.expr.startswith("rate(container_cpu_usage_seconds_total")
     assert "[30s]" in cpu.expr
@@ -163,7 +163,7 @@ def test_cpu_is_a_rate_not_a_counter() -> None:
 def test_functions_are_separated_by_pod_prefix() -> None:
     """Every function container is named `function`; only the pod tells them apart."""
     java = next(
-        q for q in container_queries(_config()) if q.name == "container_memory_bytes@word-stats-java"
+        q for q in container_queries(_config().functions) if q.name == "container_memory_bytes@word-stats-java"
     )
 
     assert 'container="function"' in java.expr
@@ -256,7 +256,7 @@ def test_the_comparison_does_not_require_the_heap_gauge() -> None:
 
 def test_the_container_memory_series_is_the_guard_instead() -> None:
     """cAdvisor reports it for every build alike, so its absence means a broken scrape."""
-    required = [q.name for q in container_queries(_config()) if q.required]
+    required = [q.name for q in container_queries(_config().functions) if q.required]
 
     assert required == ["container_memory_bytes@control-plane"]
 

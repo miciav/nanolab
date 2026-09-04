@@ -50,6 +50,14 @@ def aggregate_runs(
         raise ValueError("at least one benchmark summary is required")
     per_run = tuple(_extract_metrics(summary) for summary in summaries)
     names = per_run[0]
+    for index, run in enumerate(per_run[1:], start=2):
+        if run.keys() != names.keys():
+            # Same build, same profile: a metric present in one run and missing in
+            # another is an anomaly worth stopping for, not a median to take.
+            missing = sorted(set(names) ^ set(run))
+            raise ValueError(
+                f"benchmark {index} carries different metrics than benchmark 1: {', '.join(missing)}"
+            )
     return PerformanceAggregate(
         profile=profile,
         run_count=len(per_run),
@@ -189,11 +197,26 @@ def _extract_metrics(summary: Mapping[str, Any]) -> dict[str, float]:
         "queueWaitSeconds": queue_sum / queue_count if queue_count else 0.0,
         "coldStarts": _prometheus_value(prometheus, "function_cold_start_total", "delta"),
         "controlPlaneCpuPeak": _prometheus_value(prometheus, "process_cpu_usage", "max"),
-        "controlPlaneHeapPeakBytes": _prometheus_value(
-            prometheus, "jvm_heap_used_bytes", "max"
-        ),
         "peakReplicas": _number(autoscaling, "max_replicas_observed"),
     }
+    # A release builds the control plane with G1 on Oracle GraalVM, where
+    # SubstrateVM registers no heap MemoryPoolMXBean: the snapshot records the
+    # series with no points and there is no peak to carry. Recorded when the build
+    # does keep heap pools, omitted when it does not - rather than invented as a
+    # zero, which would read as a control plane that used no memory at all.
+    heap_peak = _optional_prometheus_value(prometheus, "jvm_heap_used_bytes", "max")
+    if heap_peak is not None:
+        metrics["controlPlaneHeapPeakBytes"] = heap_peak
+    # What the heap gauge was standing in for, priced the same way on every build:
+    # the container's working set, which on a JVM also holds class metadata, JIT
+    # code and thread stacks. Optional only so summaries taken before the release
+    # collected it stay readable - the catalogue marks the series required, so a
+    # broken cAdvisor scrape fails the run long before it reaches this line.
+    memory_peak = _optional_prometheus_value(
+        prometheus, "container_memory_bytes@control-plane", "max"
+    )
+    if memory_peak is not None:
+        metrics["controlPlaneMemoryPeakBytes"] = memory_peak
     _validate_metrics(metrics, "summary")
     return metrics
 
@@ -211,6 +234,27 @@ def _k6_value(k6: Mapping[str, Any], metric: str, *names: str) -> float:
 
 def _prometheus_value(prometheus: Mapping[str, Any], metric: str, name: str) -> float:
     return _number(_mapping(prometheus, metric), name)
+
+
+def _optional_prometheus_value(
+    prometheus: Mapping[str, Any], metric: str, name: str
+) -> float | None:
+    """The same reading, for a series the catalogue allows to be absent.
+
+    An empty series is the snapshot's own statement that the build publishes
+    nothing here, so there is no number rather than a bad one. A series the
+    summary never carried at all reads the same way, which is what keeps records
+    taken before a query existed readable. A series that has points is still held
+    to the strict rules.
+    """
+    entry = prometheus.get(metric)
+    if entry is None:
+        return None
+    if not isinstance(entry, Mapping):
+        raise ValueError(f"{metric} must be a mapping")
+    if entry.get("points") == 0:
+        return None
+    return _number(entry, name)
 
 
 def _mapping(parent: Mapping[str, Any], name: str) -> Mapping[str, Any]:

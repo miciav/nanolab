@@ -33,6 +33,7 @@ from sonata_tasks.loadtest.ports import PrometheusClient, RemoteFileFetcher
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.images.control_plane_variants import resolve_variants
+from nanolab.metrics.catalogue import container_queries
 from nanolab.plans.functions import resolve_function
 from nanolab.plans.loadtest import build_loadtest_plan
 
@@ -93,88 +94,6 @@ def comparison_k6_environment(config: ScenarioConfig) -> Mapping[str, str]:
     if config.idem_share is not None:
         environment["K6_IDEM_SHARE"] = str(config.idem_share)
     return environment
-
-
-def container_queries(config: ScenarioConfig) -> tuple[PrometheusQuery, ...]:
-    """What each container cost, from cAdvisor, for every pod in the run.
-
-    Enabling the scrape in the chart is not enough — the snapshot only records
-    the queries it is given, and the default list asks the control plane's own
-    actuator for `jvm_heap_used_bytes`. That metric does not exist on three of
-    the four builds being compared, and a heap gauge would be the wrong answer
-    anyway: what decides whether a build fits on a node is its resident set,
-    which on a JVM also holds class metadata, JIT-compiled code and thread
-    stacks. Measured here, a JVM control plane reporting a small heap held
-    1002 MiB.
-
-    CPU as a rate over 30s, not a counter: the counter only ever rises, so a
-    chart of it says nothing about when the work happened.
-    """
-    namespace = json.dumps(DEFAULT_NAMESPACE)
-    queries = [
-        PrometheusQuery(
-            "container_memory_bytes@control-plane",
-            f'container_memory_working_set_bytes{{namespace={namespace},container="control-plane"}}',
-            # Required: this is the one memory reading every build produces, so
-            # its absence means the cAdvisor scrape is broken rather than that a
-            # build is quiet — which is exactly what the JVM gauges could not
-            # distinguish.
-            True,
-        ),
-        PrometheusQuery(
-            "container_cpu_cores@control-plane",
-            f'rate(container_cpu_usage_seconds_total{{namespace={namespace},container="control-plane"}}[30s])',
-        ),
-        # Whether the CPU limit was the thing being measured. Usage alone cannot
-        # say: a process pinned at its quota and a process with work to spare
-        # both report a number below the limit, and only the throttled share
-        # tells them apart. Reading a comparison without it, a whole run can be
-        # attributed to the build when the answer was the chart's one core.
-        # The same reading without the sum. A snapshot entry holds one series, and
-        # `_merge_samples` adds every label dimension at each timestamp - so during
-        # the rollout each cell begins with, the terminating pod and the starting
-        # one are added together and the result exceeds the limit: 1.44 cores
-        # under a one-core cap, 3.088 under a two-core one. The mean is barely
-        # touched; the peak is nonsense. Kept beside the original rather than
-        # replacing it, so the series already archived stay comparable.
-        PrometheusQuery(
-            "container_cpu_cores_max@control-plane",
-            f'max(rate(container_cpu_usage_seconds_total{{namespace={namespace},container="control-plane"}}[30s]))',
-        ),
-        # Cores used says how much CPU the process got; these say how much it was
-        # denied. Without them a process pinned at its cgroup quota is
-        # indistinguishable from one that simply had little to do - and that
-        # reading cost ten runs of dispatch-path instrumentation.
-        PrometheusQuery(
-            "container_cpu_throttled_periods@control-plane",
-            f'container_cpu_cfs_throttled_periods_total{{namespace={namespace},container="control-plane"}}',
-        ),
-        PrometheusQuery(
-            "container_cpu_periods@control-plane",
-            f'container_cpu_cfs_periods_total{{namespace={namespace},container="control-plane"}}',
-        ),
-        PrometheusQuery(
-            "container_cpu_throttled_seconds@control-plane",
-            f'container_cpu_cfs_throttled_seconds_total{{namespace={namespace},container="control-plane"}}',
-        ),
-    ]
-    for name in config.functions:
-        # Function containers are all named `function` by the deployment builder,
-        # so the pod prefix is what separates one function from another.
-        selector = f'namespace={namespace},container="function",pod=~"fn-{name}-.*"'
-        queries.extend(
-            (
-                PrometheusQuery(
-                    f"container_memory_bytes@{name}",
-                    f"container_memory_working_set_bytes{{{selector}}}",
-                ),
-                PrometheusQuery(
-                    f"container_cpu_cores@{name}",
-                    f"rate(container_cpu_usage_seconds_total{{{selector}}}[30s])",
-                ),
-            )
-        )
-    return tuple(queries)
 
 
 def _variant_image(config: ScenarioConfig) -> str | None:
@@ -269,7 +188,7 @@ def build_runtime_comparison_plan(
         # a natively compiled control plane publishes no JVM memory gauges, so
         # cAdvisor is the one source that prices every build on the same terms.
         container_metrics=True,
-        extra_prometheus_queries=container_queries(config),
+        extra_prometheus_queries=container_queries(config.functions),
         observed_modules=COMPARISON_MODULES,
         # No reaching back before the load started: every cell redeploys the
         # control plane, so anything before k6 belongs to the build the previous
