@@ -78,6 +78,7 @@ def _default_prometheus_queries(
     modules: tuple[str, ...] = (),
     hpa: bool = False,
     heap_metrics_required: bool = True,
+    container_functions: tuple[str, ...] | None = None,
 ) -> tuple[PrometheusQuery, ...]:
     """What this run can meaningfully be asked, given the modules it loaded.
 
@@ -93,6 +94,7 @@ def _default_prometheus_queries(
         neighbour=neighbour,
         hpa=hpa,
         heap_metrics_required=heap_metrics_required,
+        container_functions=container_functions,
     )
 
 
@@ -890,7 +892,10 @@ def _build_steps_after(  # NOSONAR (S107): all values describe one post-run task
     target: Any,
     replica_floor: int,
     prometheus_client: PrometheusClient,
-    extra_prometheus_queries: tuple[PrometheusQuery, ...] = (),
+    # The functions to price from cAdvisor, empty when the scrape is off. Not a
+    # free-form query list: one that bypassed the catalogue could not be promoted
+    # to required, and would read an empty series as zero.
+    container_functions: tuple[str, ...] | None = None,
     # Which modules the control plane under test was built with. The snapshot
     # asks each of them for what only it can answer, so this is not decoration:
     # without it a run with sync-queue records zero rejections while the platform
@@ -986,8 +991,8 @@ def _build_steps_after(  # NOSONAR (S107): all values describe one post-run task
                             modules=observed_modules,
                             hpa=hpa_metrics,
                             heap_metrics_required=heap_metrics_required,
+                            container_functions=container_functions,
                         )
-                        + extra_prometheus_queries
                     ),
                     window=window,
                     output_dir=run_dir,
@@ -1248,8 +1253,10 @@ def build_loadtest_plan(
     prebuilt_function_images: Mapping[str, str] | None = None,
     script_name: str | None = None,
     k6_env_overrides: Mapping[str, str] | None = None,
+    # Turns on the chart's cAdvisor scrape AND asks for what it publishes. The
+    # two were separate, and a caller that enabled one without the other got a
+    # scrape nobody read, or nothing at all.
     container_metrics: bool = False,
-    extra_prometheus_queries: tuple[PrometheusQuery, ...] = (),
     observed_modules: tuple[str, ...] = (),
     snapshot_lead_seconds: float | None = None,
     heap_metrics_required: bool = True,
@@ -1389,7 +1396,7 @@ def build_loadtest_plan(
         # sull'unica funzione osservata.
         neighbour=neighbour_name(config) if len(config.functions) >= 2 else None,
         concurrency_report=_build_concurrency_report(config, run_dir),
-        extra_prometheus_queries=extra_prometheus_queries,
+        container_functions=tuple(config.functions) if container_metrics else None,
         observed_modules=observed_modules or additional_modules,
         hpa_metrics=hpa,
         snapshot_lead_seconds=snapshot_lead_seconds,

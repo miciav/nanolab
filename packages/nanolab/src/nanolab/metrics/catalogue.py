@@ -680,6 +680,13 @@ _MAY_BE_ABSENT: Mapping[str, str] = {
     # not on this list and is required everywhere: every build measured publishes
     # it, so its absence only ever means the actuator scrape is broken.
     "jvm_heap_used_bytes": "governed per run by heap_metrics_required",
+    # The CFS accounting a cgroup keeps only when it has a quota to enforce. A run
+    # that sets no CPU limit produces none of it, and that is a fact about the run
+    # rather than a broken scrape - unlike the container memory series beside
+    # them, which cAdvisor reports for every container alike.
+    "container_cpu_throttled_periods@control-plane": "no CPU limit, so the cgroup enforces no quota",
+    "container_cpu_periods@control-plane": "no CPU limit, so the cgroup enforces no quota",
+    "container_cpu_throttled_seconds@control-plane": "no CPU limit, so the cgroup enforces no quota",
 }
 
 
@@ -705,6 +712,7 @@ def queries_for(
     neighbour: str | None = None,
     hpa: bool = False,
     heap_metrics_required: bool = True,
+    container_functions: Iterable[str] | None = None,
 ) -> Queries:
     """Everything this run can meaningfully be asked, and nothing it cannot.
 
@@ -725,6 +733,12 @@ def queries_for(
         queries.extend(hpa_queries(function_name))
     if neighbour is not None:
         queries.extend(neighbour_queries(neighbour, modules=selected))
+    # Composed here rather than appended by the caller: a query added after this
+    # function returns never meets _require_everything_that_can_answer, so it can
+    # read an empty series as a quiet zero - the one failure this module exists to
+    # prevent.
+    if container_functions is not None:
+        queries.extend(container_queries(container_functions))
     return _require_everything_that_can_answer(tuple(queries))
 
 

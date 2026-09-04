@@ -329,3 +329,40 @@ def test_a_build_that_keeps_heap_pools_is_held_to_them() -> None:
 
     assert _required(queries, "process_cpu_usage") is True
     assert _required(queries, "jvm_heap_used_bytes") is True
+
+
+def _by_name(queries) -> dict[str, bool]:
+    return {query.name: query.required for query in queries}
+
+
+def test_container_queries_are_promoted_like_everything_else_in_the_catalogue() -> None:
+    """They used to arrive as extra_prometheus_queries, appended after
+    queries_for had already run its promotion - so an empty series read as a
+    quiet zero, which is the failure this catalogue was written to stop."""
+    required = _by_name(
+        queries_for("word-stats-java", modules=(), container_functions=("word-stats-java",))
+    )
+
+    assert required["container_memory_bytes@control-plane"] is True
+    assert required["container_cpu_cores@control-plane"] is True
+    assert required["container_cpu_cores_max@control-plane"] is True
+    assert required["container_memory_bytes@word-stats-java"] is True
+    assert required["container_cpu_cores@word-stats-java"] is True
+
+
+def test_the_cfs_counters_stay_optional_because_a_run_may_set_no_cpu_limit() -> None:
+    """Promotion without this would fail every run that caps nothing: the cgroup
+    keeps no quota accounting, so the series never exists."""
+    required = _by_name(
+        queries_for("word-stats-java", modules=(), container_functions=("word-stats-java",))
+    )
+
+    assert required["container_cpu_throttled_periods@control-plane"] is False
+    assert required["container_cpu_periods@control-plane"] is False
+    assert required["container_cpu_throttled_seconds@control-plane"] is False
+
+
+def test_a_run_without_container_metrics_asks_for_none_of_them() -> None:
+    asked = _by_name(queries_for("word-stats-java", modules=()))
+
+    assert not [name for name in asked if name.startswith("container_")]

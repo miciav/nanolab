@@ -10,6 +10,7 @@ from sonata_tasks.platform import PlatformFunction
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.plans import loadtest as loadtest_mod
 from nanolab.plans import runtime_comparison as comparison_mod
+from nanolab.metrics.catalogue import container_queries
 from nanolab.plans.loadtest import _resolve_functions
 from nanolab.plans.runtime_comparison import (
     NO_STAGES,
@@ -17,7 +18,6 @@ from nanolab.plans.runtime_comparison import (
     SCRIPT_NAME,
     script_for,
     _variant_image,
-    container_queries,
     build_runtime_comparison_plan,
     comparison_k6_environment,
     is_runtime_comparison,

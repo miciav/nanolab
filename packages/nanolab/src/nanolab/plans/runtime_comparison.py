@@ -33,7 +33,6 @@ from sonata_tasks.loadtest.ports import PrometheusClient, RemoteFileFetcher
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.images.control_plane_variants import resolve_variants
-from nanolab.metrics.catalogue import container_queries
 from nanolab.plans.functions import resolve_function
 from nanolab.plans.loadtest import build_loadtest_plan
 
@@ -188,7 +187,6 @@ def build_runtime_comparison_plan(
         # a natively compiled control plane publishes no JVM memory gauges, so
         # cAdvisor is the one source that prices every build on the same terms.
         container_metrics=True,
-        extra_prometheus_queries=container_queries(config.functions),
         observed_modules=COMPARISON_MODULES,
         # No reaching back before the load started: every cell redeploys the
         # control plane, so anything before k6 belongs to the build the previous

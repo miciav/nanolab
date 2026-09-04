@@ -428,6 +428,7 @@ def test_the_release_collects_container_metrics_for_its_memory_reading(
         receipt,
     )
 
+    # One flag now, not two: the plan turns the scrape on and asks the catalogue
+    # for what it publishes. What those queries are, and which of them a run has
+    # to answer, is settled in test_catalogue_coverage.
     assert calls[0]["container_metrics"] is True
-    asked = {query.name for query in calls[0]["extra_prometheus_queries"]}
-    assert "container_memory_bytes@control-plane" in asked
