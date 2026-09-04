@@ -120,3 +120,28 @@ def test_jvm_c1_only_variants_report_c1_optimization() -> None:
 def test_native_variants_pass_the_variant_key_through_the_environment() -> None:
     ops = build_operations(_variant("native-o3-g1"), registry=REGISTRY, modules=MODULES)
     assert ops[0].env["NANOFAAS_BUILD_VARIANT"] == "native-o3-g1"
+
+
+def test_loop_count_variants_set_the_event_loop_system_property() -> None:
+    """A build-arg without ioWorkerCount would produce the default-loop-count
+    image under a loop-count-variant tag - the whole point of the cell lost
+    silently."""
+    for key in ("jvm-loop1", "jvm-c2-loop1"):
+        ops = build_operations(_variant(key), registry=REGISTRY, modules=MODULES)
+        build = next(op for op in ops if op.operation_id.endswith(".image"))
+        tuning_args = [arg for arg in build.argv if arg.startswith("JVM_TUNING=")]
+        assert tuning_args, f"{key} did not pass JVM_TUNING to the image build"
+        assert "-Dreactor.netty.ioWorkerCount=1" in tuning_args[0]
+
+
+def test_loop_count_variants_pair_with_their_baseline_jit_setting() -> None:
+    """jvm-loop1 isolates the loop-count axis by holding jvm's C1/serial
+    setting fixed; jvm-c2-loop1 does the same against jvm-c2's C2/serial. Get
+    either backwards and the 2x2 in Esperimento B compares the wrong cells."""
+    loop1 = build_operations(_variant("jvm-loop1"), registry=REGISTRY, modules=MODULES)
+    c2_loop1 = build_operations(_variant("jvm-c2-loop1"), registry=REGISTRY, modules=MODULES)
+    loop1_boot_jar = next(op for op in loop1 if op.operation_id.endswith(".boot_jar"))
+    c2_loop1_boot_jar = next(op for op in c2_loop1 if op.operation_id.endswith(".boot_jar"))
+
+    assert "-PnanofaasBuildOptimization=c1" in loop1_boot_jar.argv
+    assert "-PnanofaasBuildOptimization=c2" in c2_loop1_boot_jar.argv

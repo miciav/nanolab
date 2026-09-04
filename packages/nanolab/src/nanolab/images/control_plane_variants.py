@@ -101,6 +101,33 @@ VARIANTS: tuple[ControlPlaneVariant, ...] = (
         ),
         build_env=_env(JVM_TUNING="-XX:+UseG1GC"),
     ),
+    # Event-loop count on a second axis, at the collector/JIT settings a single
+    # CPU wants. reactor-netty's default is max(availableProcessors, 4) - four
+    # loops sharing a one-core quota, each getting a wedge of CPU time too thin
+    # to avoid CFS throttling. -Dreactor.netty.ioWorkerCount is a plain system
+    # property, so it rides in JVM_TUNING exactly like the GC/tiering flags -
+    # nothing about the build mechanism changes, only which flags it carries.
+    # Pairs with jvm and jvm-c2 respectively: same collector and tiering, one
+    # event loop instead of four.
+    ControlPlaneVariant(
+        key="jvm-loop1",
+        label="JVM (serial GC, C1 only, 1 event loop)",
+        rationale=(
+            "jvm with the event-loop floor removed: isolates whether a single "
+            "loop avoids the CFS throttling four loops hit on a one-core quota."
+        ),
+        build_env=_env(JVM_TUNING="-XX:+UseSerialGC -XX:TieredStopAtLevel=1 -Dreactor.netty.ioWorkerCount=1"),
+    ),
+    ControlPlaneVariant(
+        key="jvm-c2-loop1",
+        label="JVM (serial GC, full tiering, 1 event loop)",
+        rationale=(
+            "jvm-c2 with the event-loop floor removed: the JIT-and-loop-count "
+            "2x2 cell that decides both axes together, since both attack the "
+            "same one-core CPU starvation and comparisons must stay inside one run."
+        ),
+        build_env=_env(JVM_TUNING="-XX:+UseSerialGC -Dreactor.netty.ioWorkerCount=1"),
+    ),
     ControlPlaneVariant(
         key="native-os",
         label="Native, -Os, serial GC",
