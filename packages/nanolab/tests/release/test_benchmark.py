@@ -345,3 +345,50 @@ def test_sonata_regression_gate_writes_failure_and_blocks_publication(
     assert json.loads(
         plan.run_dir.joinpath("regression-decision.json").read_text(encoding="utf-8")
     )["passed"] is False
+
+
+def test_release_does_not_require_jvm_heap_metrics_its_g1_build_cannot_publish(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """v0.20.0 ran the whole benchmark and then failed on the thresholds with
+    "jvm_heap_used_bytes returned no data". It was the truth: a release builds the
+    control plane with G1 on Oracle GraalVM, and SubstrateVM registers no heap
+    MemoryPoolMXBean under G1, so the series does not exist."""
+    plan = _plan(tmp_path, monkeypatch)
+    receipt = _registry_receipt(plan)
+    calls: list[dict[str, Any]] = []
+
+    class Workflow:
+        def __init__(self, run_dir: Path):
+            self.run_dir = run_dir
+
+        def run(self) -> None:
+            self.run_dir.mkdir(parents=True, exist_ok=True)
+            self.run_dir.joinpath("summary.json").write_text(
+                json.dumps(_summary(100)), encoding="utf-8"
+            )
+
+    def builder(*_args, **kwargs):
+        calls.append(kwargs)
+        return Workflow(kwargs["run_dir"])
+
+    release_benchmark.run_sonata_benchmark(
+        plan,
+        1,
+        builder,
+        object(),
+        None,
+        ReleaseEndpoints("http://stack:30080", "http://stack:30090"),
+        receipt,
+    )
+
+    assert calls[0]["heap_metrics_required"] is False
+
+
+def test_jvm_metrics_requirement_follows_the_collector_the_release_builds() -> None:
+    """Derived, not hardcoded: a release that leaves G1 has to start requiring the
+    metric again without anyone remembering this file."""
+    from nanolab.images.plan import NATIVE_RELEASE_PROFILE
+
+    assert NATIVE_RELEASE_PROFILE.build_env.get("NATIVE_GC") == "G1"
+    assert release_benchmark._HEAP_METRICS_AVAILABLE is False

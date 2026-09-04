@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 from sonata_engine import Evidence
 
 from nanolab.functions.catalog import resolve_function_definition
+from nanolab.images.plan import NATIVE_RELEASE_PROFILE
 from nanolab.release.evidence import receipt_artifacts as _receipt_artifacts
 from nanolab.release.metrics import (
     aggregate_runs,
@@ -128,6 +129,16 @@ def _file_evidence(artifact: ArtifactEvidence) -> Evidence:
     return Evidence("file-digest", artifact.reference, artifact.digest)
 
 
+# A release always builds the control plane with NATIVE_RELEASE_PROFILE, and that
+# profile is G1 on Oracle GraalVM. SubstrateVM registers no heap MemoryPoolMXBean
+# under G1, so Micrometer publishes jvm_memory_used_bytes for nonheap pools only
+# and `jvm_memory_used_bytes{area="heap"}` has no series at all - the absence
+# runtime_queries() documents, and the reason it takes this flag. Derived rather
+# than hardcoded so a release that returns to the serial collector starts
+# requiring the metric again on its own.
+_HEAP_METRICS_AVAILABLE = NATIVE_RELEASE_PROFILE.build_env.get("NATIVE_GC") != "G1"
+
+
 def run_sonata_benchmark(
     plan: ReleasePlanLike,
     index: int,
@@ -174,6 +185,7 @@ def run_sonata_benchmark(
             )
             for function in plan.scenario.functions
         },
+        heap_metrics_required=_HEAP_METRICS_AVAILABLE,
     )
     workflow.run()  # type: ignore[attr-defined]
     if not summary.is_file():

@@ -77,7 +77,7 @@ def _default_prometheus_queries(
     *,
     modules: tuple[str, ...] = (),
     hpa: bool = False,
-    jvm_metrics_required: bool = True,
+    heap_metrics_required: bool = True,
 ) -> tuple[PrometheusQuery, ...]:
     """What this run can meaningfully be asked, given the modules it loaded.
 
@@ -92,7 +92,7 @@ def _default_prometheus_queries(
         modules=modules,
         neighbour=neighbour,
         hpa=hpa,
-        jvm_metrics_required=jvm_metrics_required,
+        heap_metrics_required=heap_metrics_required,
     )
 
 
@@ -898,7 +898,7 @@ def _build_steps_after(  # NOSONAR (S107): all values describe one post-run task
     observed_modules: tuple[str, ...] = (),
     hpa_metrics: bool = False,
     snapshot_lead_seconds: float | None = None,
-    jvm_metrics_required: bool = True,
+    heap_metrics_required: bool = True,
     neighbour: str | None = None,
     concurrency_report: WriteConcurrencyReport | None = None,
 ) -> list[Task[Any]]:
@@ -985,7 +985,7 @@ def _build_steps_after(  # NOSONAR (S107): all values describe one post-run task
                             neighbour,
                             modules=observed_modules,
                             hpa=hpa_metrics,
-                            jvm_metrics_required=jvm_metrics_required,
+                            heap_metrics_required=heap_metrics_required,
                         )
                         + extra_prometheus_queries
                     ),
@@ -1252,7 +1252,7 @@ def build_loadtest_plan(
     extra_prometheus_queries: tuple[PrometheusQuery, ...] = (),
     observed_modules: tuple[str, ...] = (),
     snapshot_lead_seconds: float | None = None,
-    jvm_metrics_required: bool = True,
+    heap_metrics_required: bool = True,
     function_concurrency: int | None = None,
     function_queue_size: int | None = None,
 ) -> Workflow:
@@ -1393,7 +1393,7 @@ def build_loadtest_plan(
         observed_modules=observed_modules or additional_modules,
         hpa_metrics=hpa,
         snapshot_lead_seconds=snapshot_lead_seconds,
-        jvm_metrics_required=jvm_metrics_required,
+        heap_metrics_required=heap_metrics_required,
     )
     prepare_argv = _prepare_run_directory_argv(summary_path, remote_run_dir)
     preflight = _build_preflight(

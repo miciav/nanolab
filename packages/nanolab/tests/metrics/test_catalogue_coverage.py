@@ -306,3 +306,26 @@ def test_queries_use_the_name_prometheus_serves_not_the_one_the_code_registers()
         "these queries use the registered name where Prometheus serves a "
         f"suffixed one: {sorted(wrong)}"
     )
+
+
+def _required(queries, name: str) -> bool:
+    query = next(query for query in queries if query.name == name)
+    return query.required
+
+
+def test_a_run_without_heap_pools_still_has_to_answer_for_its_cpu() -> None:
+    """The two used to share one flag, so a release that could not publish heap
+    pools also stopped requiring process_cpu_usage - and a broken actuator scrape
+    would have read as a normal G1 run. Measured on the v0.20.0 release: the G1
+    native control plane publishes process_cpu_usage and no heap series."""
+    queries = queries_for("word-stats-java", modules=(), heap_metrics_required=False)
+
+    assert _required(queries, "process_cpu_usage") is True
+    assert _required(queries, "jvm_heap_used_bytes") is False
+
+
+def test_a_build_that_keeps_heap_pools_is_held_to_them() -> None:
+    queries = queries_for("word-stats-java", modules=(), heap_metrics_required=True)
+
+    assert _required(queries, "process_cpu_usage") is True
+    assert _required(queries, "jvm_heap_used_bytes") is True

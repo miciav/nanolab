@@ -164,28 +164,34 @@ def core_queries(function_name: str) -> Queries:
     )
 
 
-def runtime_queries(_function_name: str, *, required: bool = True) -> Queries:
+def runtime_queries(_function_name: str, *, heap_required: bool = True) -> Queries:
     """The process itself, published by Spring rather than by nanoFaaS.
 
-    `required` is a property of the run, not of the metric. On a single-build run
-    the absence of these means the actuator scrape is broken and the run should
-    say so. On a comparison it means nothing of the sort: measured here, the JVM
-    and both serial-collector native builds publish `jvm_memory_used_bytes`, and
-    the G1 build publishes none of it — SubstrateVM registers no MXBeans at all
-    under G1, so there is no MemoryMXBean for Micrometer to read.
+    `heap_required` is a property of the run, not of the metric: measured here,
+    the JVM and both serial-collector native builds publish
+    `jvm_memory_used_bytes` for heap pools, and the G1 build publishes none of it
+    — SubstrateVM registers no heap MemoryPoolMXBean under G1, so the series does
+    not exist. An earlier version of this docstring named that trap and left the
+    flag on anyway. The matrix then failed on its first G1 cell with "required
+    query 'jvm_heap_used_bytes' returned no data", which was the truth and not a
+    fault.
 
-    An earlier version of this docstring named that trap and left the flag on
-    anyway. The matrix then failed on its first G1 cell with "required query
-    'jvm_heap_used_bytes' returned no data", which was the truth and not a fault.
+    One flag used to govern `process_cpu_usage` too, on the belief that G1
+    registers no MXBeans at all. It is not so: the v0.20.0 release, whose control
+    plane is the G1 native build, published process_cpu_usage throughout while
+    only the heap series was missing — nanoFaaS registers ProcessorMetrics for
+    native images on purpose. Accepting its absence bought nothing and cost the
+    one reading that distinguishes a broken actuator scrape from a collector that
+    keeps no pools, so it stays required on every run.
     """
     return (
         PrometheusQuery(
-            "process_cpu_usage", f"process_cpu_usage{CONTROL_PLANE_SELECTOR}", required
+            "process_cpu_usage", f"process_cpu_usage{CONTROL_PLANE_SELECTOR}", True
         ),
         PrometheusQuery(
             "jvm_heap_used_bytes",
             'jvm_memory_used_bytes{app="nanofaas-control-plane",area="heap"}',
-            required,
+            heap_required,
         ),
         # Collection, published by a polling binder because a native image emits
         # no GC notifications and, under G1, registers no GarbageCollectorMXBean
@@ -667,11 +673,12 @@ _MAY_BE_ABSENT: Mapping[str, str] = {
     "gc_metrics_source_mxbean": "absent IS the reading: the build has no usable collector MXBean",
     "jfr_vm_operation_count": "the JFR stream is opened only where the MXBeans cannot answer",
     "jfr_gc_operation_time": "no JFR stream, or SubstrateVM names its GC operation otherwise",
-    # process_cpu_usage and jvm_heap_used_bytes are governed by the run instead,
-    # through runtime_queries(required=...): on a single-build run their absence
-    # means the actuator scrape is broken, on a build comparison it means G1.
-    "process_cpu_usage": "governed per run by jvm_metrics_required",
-    "jvm_heap_used_bytes": "governed per run by jvm_metrics_required",
+    # jvm_heap_used_bytes is governed by the run instead, through
+    # runtime_queries(heap_required=...): absent means the build's collector keeps
+    # no heap pools, which is what G1 does under SubstrateVM. process_cpu_usage is
+    # not on this list and is required everywhere: every build measured publishes
+    # it, so its absence only ever means the actuator scrape is broken.
+    "jvm_heap_used_bytes": "governed per run by heap_metrics_required",
 }
 
 
@@ -696,7 +703,7 @@ def queries_for(
     modules: Iterable[str],
     neighbour: str | None = None,
     hpa: bool = False,
-    jvm_metrics_required: bool = True,
+    heap_metrics_required: bool = True,
 ) -> Queries:
     """Everything this run can meaningfully be asked, and nothing it cannot.
 
@@ -707,7 +714,7 @@ def queries_for(
     """
     selected = tuple(modules)
     queries = list(core_queries(function_name)) + list(
-        runtime_queries(function_name, required=jvm_metrics_required)
+        runtime_queries(function_name, heap_required=heap_metrics_required)
     )
     for module in selected:
         builder = MODULE_QUERIES.get(module)
