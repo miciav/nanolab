@@ -11,6 +11,9 @@ from sonata_tasks.loadtest.models import TimeWindow
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 
+CONTROL_PLANE_LOG = "InternalScaler starting with poll interval 5000ms\n"
+
+
 @dataclass
 class RecordingExecutor:
     seen: list[CommandTaskSpec] = field(default_factory=list)
@@ -19,7 +22,10 @@ class RecordingExecutor:
         self.seen.append(task)
         # The platform half resolves the control plane's address before anything
         # can register against it.
-        stdout = "10.43.0.7" if "get service control-plane" in " ".join(task.argv) else ""
+        argv = " ".join(task.argv)
+        stdout = "10.43.0.7" if "get service control-plane" in argv else ""
+        if "logs deploy/nanofaas-control-plane" in argv:
+            stdout = CONTROL_PLANE_LOG
         return TaskResult(
             task_id=task.task_id, status="passed", return_code=0, stdout=stdout
         )
@@ -336,12 +342,16 @@ def test_explicit_remote_run_directory_is_cleaned_before_k6(tmp_path: Path) -> N
     assert cleanup < k6
     assert str(remote_run_dir) in commands[cleanup]
     assert str(remote_run_dir / "k6-summary.json") in commands[k6]
-    # The control-plane log comes back too: it is the only place four different
-    # reasons for an autoscaler that never ran are distinguishable.
-    assert fetcher.fetched == [
-        (str(remote_run_dir / "k6-summary.json"), tmp_path),
-        (str(remote_run_dir / "control-plane.log"), tmp_path),
-    ]
+    # Only k6's summary is fetched. The control-plane log used to be scp'd as
+    # well, from the loadgen, while kubectl had written it on the stack VM under
+    # a path only the loadgen has - so it was never there to fetch.
+    assert fetcher.fetched == [(str(remote_run_dir / "k6-summary.json"), tmp_path)]
+
+    # It is the only place four different reasons for an autoscaler that never ran
+    # are distinguishable, so it still has to arrive - captured, not transferred.
+    logs = next(command for command in commands if "logs deploy/nanofaas-control-plane" in command)
+    assert ">" not in logs, "a redirect writes the log on whichever host kubectl ran on"
+    assert (tmp_path / "control-plane.log").read_text() == CONTROL_PLANE_LOG
 
 
 @pytest.mark.parametrize(

@@ -1,6 +1,7 @@
 import math
 from collections.abc import Mapping
 from dataclasses import replace
+from functools import partial
 from pathlib import Path, PurePosixPath
 from typing import Any, cast
 
@@ -56,7 +57,7 @@ from sonata_tasks.loadtest.tasks import (
     WriteK6Report,
     WriteLoadtestSummary,
 )
-from sonata_tasks.tasks.models import CommandTaskSpec
+from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.cli.vm_provider import vm_request_for_role
@@ -93,6 +94,13 @@ def _default_prometheus_queries(
         hpa=hpa,
         jvm_metrics_required=jvm_metrics_required,
     )
+
+
+
+def _write_control_plane_log(destination: Path, result: TaskResult) -> None:
+    """Keep the log the run was collected for, next to the rest of the evidence."""
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    _ = destination.write_text(result.stdout)
 
 
 class _RoleRunner:
@@ -941,7 +949,11 @@ def _build_steps_after(  # NOSONAR (S107): all values describe one post-run task
         # an exception swallowed per tick - are indistinguishable in metrics and
         # one line apart in this log. The VM is destroyed at teardown, so it has
         # to be taken here or not at all.
-        log_path = summary_path.parent / "control-plane.log"
+        # kubectl runs on the stack VM, but summary_path lives under the loadgen's
+        # home: writing the log remotely put it on a host the fetch never looks at,
+        # under a directory only the loadgen has. Capturing stdout keeps the whole
+        # thing on one hop, with no remote file to lose.
+        log_path = run_dir / "control-plane.log"
         after.append(
             SideCommandTask(
                 title="Collect the control-plane log",
@@ -951,24 +963,13 @@ def _build_steps_after(  # NOSONAR (S107): all values describe one post-run task
                         "bash",
                         "-lc",
                         f"sudo kubectl -n {request.namespace} logs "
-                        f"deploy/nanofaas-control-plane --tail=-1 > {log_path} 2>&1 || true",
+                        "deploy/nanofaas-control-plane --tail=-1",
                     ),
                     executor=executor,
                     role="stack",
                     remote_dir=_REMOTE_DIR,
+                    verify=partial(_write_control_plane_log, log_path),
                 ),
-            )
-        )
-        after.append(
-            FetchResultsTask(
-                fetch=FetchVmResults(
-                    task_id="",
-                    title="Fetch the control-plane log",
-                    fetcher=cast(RemoteFileFetcher, fetcher),
-                    remote_source=str(log_path),
-                    local_dest=run_dir,
-                ),
-                title="Fetch the control-plane log",
             )
         )
     after.extend(
