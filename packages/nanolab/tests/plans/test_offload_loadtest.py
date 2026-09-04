@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import json
 import os
 from pathlib import Path
@@ -359,3 +359,47 @@ def test_scenario_file_parses_with_two_ordered_functions() -> None:
     assert config.workflow == "offload-loadtest"
     assert config.backend == "k8s"
     assert config.functions == ["word-stats-java", "json-transform-java"]
+
+
+class _MkdirFetcher:
+    """Satisfies the fetch so the steps after it actually run."""
+
+    def fetch_from(self, remote: str, local: Path) -> None:
+        del remote
+        Path(local).mkdir(parents=True, exist_ok=True)
+
+
+def test_each_cluster_answers_for_itself_in_its_own_control_plane_log(tmp_path: Path) -> None:
+    """One log would answer for whichever side happened to be asked, and the
+    failures worth this run are the ones where edge and cloud disagree.
+
+    Taken before the evaluation on purpose: a run that fails its conservation
+    check is exactly the run whose logs are wanted, and this workflow does fail
+    it here - the k6 summary never exists under a recording executor."""
+
+    class _PerRoleExecutor(RecordingExecutor):
+        def run(self, task: CommandTaskSpec, *, dry_run: bool = False) -> TaskResult:
+            result = super().run(task, dry_run=dry_run)
+            if "logs deploy/nanofaas-control-plane" in " ".join(task.argv):
+                return replace(result, stdout=f"log from {task.role}")
+            return result
+
+    executor = _PerRoleExecutor()
+    workflow = build_offload_loadtest_plan(
+        SCENARIO,
+        _external_environment(),
+        _bindings(executor),
+        run_dir=tmp_path,
+        repo_root=NANOFAAS_ROOT,
+        fetcher=_MkdirFetcher(),
+    )
+
+    collected = [
+        task
+        for task in _run(workflow, executor)
+        if "logs deploy/nanofaas-control-plane" in " ".join(task.argv)
+    ]
+
+    assert [task.role for task in collected] == ["stack", "cloud"]
+    assert (tmp_path / "control-plane-edge.log").read_text() == "log from stack"
+    assert (tmp_path / "control-plane-cloud.log").read_text() == "log from cloud"

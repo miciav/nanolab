@@ -11,7 +11,7 @@ from sonata_engine import Steps, Workflow
 from sonata_tasks.command import CommandTask
 from sonata_tasks.compose import DockerComposeProject, docker_compose_resource
 from sonata_tasks.deployment import CONTROL_PLANE_NODE_PORT
-from sonata_tasks.loadtest import FetchResultsTask, RunK6Task
+from sonata_tasks.loadtest import FetchResultsTask, RunK6Task, SideCommandTask
 from sonata_tasks.offload_loadtest import (
     EvaluateConservationTask,
     OffloadLoadtestRequest,
@@ -26,6 +26,7 @@ from sonata_tasks.loadtest.models import K6Config
 from sonata_tasks.loadtest.offload_conservation import evaluate_conservation
 from sonata_tasks.loadtest.ports import RemoteFileFetcher
 from sonata_tasks.loadtest.tasks import FetchVmResults
+from nanolab.plans.diagnostics import collect_control_plane_log
 from sonata_tasks.vm.models import VmRequest
 from sonata_tasks.vm.multipass import resolve_connection_host
 
@@ -358,6 +359,27 @@ def build_offload_loadtest_plan(
             )
         )
         local_summary_path = run_dir / summary_path.name
+
+    if not local:
+        # Two clusters, so two logs: one file would answer for whichever side
+        # happened to be asked, and the interesting failures here are precisely
+        # the ones where the edge and the cloud disagree.
+        for label, platform, role in (
+            ("edge", request.edge, "stack"),
+            ("cloud", request.cloud, "cloud"),
+        ):
+            steps.append(
+                SideCommandTask(
+                    title=f"Collect the {label} control-plane log",
+                    command=collect_control_plane_log(
+                        executor=executor,
+                        role=role,
+                        namespace=platform.namespace,
+                        destination=run_dir / f"control-plane-{label}.log",
+                        title=f"Collect the {label} control-plane log",
+                    ),
+                )
+            )
 
     steps.append(
         EvaluateConservationTask(

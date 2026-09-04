@@ -1,7 +1,6 @@
 import math
 from collections.abc import Mapping
 from dataclasses import replace
-from functools import partial
 from pathlib import Path, PurePosixPath
 from typing import Any, cast
 
@@ -57,13 +56,14 @@ from sonata_tasks.loadtest.tasks import (
     WriteK6Report,
     WriteLoadtestSummary,
 )
-from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
+from sonata_tasks.tasks.models import CommandTaskSpec
 
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.cli.vm_provider import vm_request_for_role
 from nanolab.metrics.catalogue import queries_for
 from nanolab.config.scenario import CONTROL_PLANE_RESOURCES, ScenarioConfig
 from nanolab.plans.functions import resolve_function, sonata_function
+from nanolab.plans.diagnostics import collect_control_plane_log
 from nanolab.workspace.paths import discover_tool_root
 from nanolab.workspace.provenance import source_fingerprint
 
@@ -96,13 +96,6 @@ def _default_prometheus_queries(
         heap_metrics_required=heap_metrics_required,
         container_functions=container_functions,
     )
-
-
-
-def _write_control_plane_log(destination: Path, result: TaskResult) -> None:
-    """Keep the log the run was collected for, next to the rest of the evidence."""
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    _ = destination.write_text(result.stdout)
 
 
 class _RoleRunner:
@@ -949,31 +942,15 @@ def _build_steps_after(  # NOSONAR (S107): all values describe one post-run task
             )
         )
     if remote:
-        # Four different reasons why the internal scaler never evaluates a
-        # function - module absent, no deployment coordinator, no managed target,
-        # an exception swallowed per tick - are indistinguishable in metrics and
-        # one line apart in this log. The VM is destroyed at teardown, so it has
-        # to be taken here or not at all.
-        # kubectl runs on the stack VM, but summary_path lives under the loadgen's
-        # home: writing the log remotely put it on a host the fetch never looks at,
-        # under a directory only the loadgen has. Capturing stdout keeps the whole
-        # thing on one hop, with no remote file to lose.
-        log_path = run_dir / "control-plane.log"
         after.append(
             SideCommandTask(
                 title="Collect the control-plane log",
-                command=CommandTask(
-                    title="Collect the control-plane log",
-                    argv=(
-                        "bash",
-                        "-lc",
-                        f"sudo kubectl -n {request.namespace} logs "
-                        "deploy/nanofaas-control-plane --tail=-1",
-                    ),
+                command=collect_control_plane_log(
                     executor=executor,
                     role="stack",
+                    namespace=request.namespace,
+                    destination=run_dir / "control-plane.log",
                     remote_dir=_REMOTE_DIR,
-                    verify=partial(_write_control_plane_log, log_path),
                 ),
             )
         )
