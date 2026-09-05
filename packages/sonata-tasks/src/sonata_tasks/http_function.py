@@ -11,7 +11,7 @@ from typing import cast
 from sonata_engine import Resource, Task, TaskInputs, TaskOutcome
 from sonata_tasks.execution.bindings import CommandTaskExecutor
 from sonata_tasks.execution.roles import ExecutionRole
-from sonata_tasks.tasks.models import TaskResult
+from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 from sonata_tasks.command import Argv, CommandTask
 from sonata_tasks.invocation import verify_invocation
@@ -106,8 +106,39 @@ def _verify_registration_endpoint(
         )
 
 
+def _registration_matches_manifest(manifest: FunctionManifest, response: object) -> bool:
+    """Whether an existing registration is the same function this call would create.
+
+    Only the fields the manifest itself controls: enough to tell "this is the
+    function we were about to register, already there" from "something else is
+    using this name," without demanding the deployment-derived fields
+    (`deploymentBackend`, `endpointUrl`) that `_verify_registration_response`
+    checks on a fresh registration - those can legitimately differ after a
+    reconcile.
+    """
+    if not isinstance(response, dict):
+        return False
+    return (
+        response.get("name") == manifest.name
+        and response.get("image") == manifest.image
+        and response.get("requestedExecutionMode") == manifest.execution_mode
+    )
+
+
 class HttpFunctionRegisterTask(CommandTask):
-    """POST a function manifest to the control plane."""
+    """POST a function manifest to the control plane.
+
+    A 409 is not automatically a failure: the control plane restores its
+    persisted catalog on every restart, reconciling each managed function
+    against its real backend before serving traffic again
+    (`FunctionCatalogRestorer`). A workflow that registers, runs a load test,
+    and releases has no way to know the control plane restarted in between -
+    only that the function it is about to register already exists. If a GET
+    shows that existing registration is this same function (same name, image,
+    execution mode), the 409 means the earlier registration already succeeded
+    durably and survived the restart; that is success, not conflict. A 409 for
+    a genuinely different function under this name still fails, same as before.
+    """
 
     def __init__(
         self,
@@ -127,6 +158,8 @@ class HttpFunctionRegisterTask(CommandTask):
                 manifest, result.stdout, expected_backend, expected_endpoint_prefix
             )
 
+        self._manifest = manifest
+        self._endpoint = endpoint
         super().__init__(
             title=f"Register {manifest.name}",
             argv=_argv(
@@ -161,8 +194,41 @@ class HttpFunctionRegisterTask(CommandTask):
             executor=executor,
             role=role,
             cwd=cwd,
+            expected_exit_codes=frozenset({0, 22}),
             verify=verify if expected_backend is not None or expected_endpoint_prefix is not None else None,
         )
+
+    def run(self, inputs: TaskInputs) -> TaskOutcome[TaskResult]:
+        result = self.executor.run(self._spec(inputs))
+        if result.return_code == 0:
+            if self.verify is not None:
+                self.verify(result)
+            return TaskOutcome(value=result)
+        if result.return_code == 22:
+            base = inputs.resource(self._endpoint) if not isinstance(self._endpoint, str) else self._endpoint
+            existing = self.executor.run(
+                CommandTaskSpec(
+                    task_id="",
+                    summary=f"Check existing registration for {self._manifest.name}",
+                    argv=("curl", "-fsS", f"{base}/v1/functions/{self._manifest.name}"),
+                    role=self.role,
+                    env=self.env,
+                    cwd=self.cwd,
+                    remote_dir=self.remote_dir,
+                    expected_exit_codes=frozenset({0}),
+                    timeout_seconds=self.timeout_seconds,
+                )
+            )
+            if existing.status == "passed":
+                try:
+                    response = json.loads(existing.stdout)
+                except json.JSONDecodeError:
+                    response = None
+                if _registration_matches_manifest(self._manifest, response):
+                    return TaskOutcome(value=result)
+        detail = "\n".join(part for part in (result.stderr.strip(), result.stdout.strip()) if part)
+        detail = detail or "no output"
+        raise RuntimeError(f"{self.title} failed (exit {result.return_code}): {detail}")
 
 
 class HttpFunctionDeleteTask(CommandTask):

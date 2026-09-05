@@ -460,3 +460,83 @@ def test_http_register_retries_a_refused_connection() -> None:
     assert "--retry-connrefused" in argv, (
         "a retry budget that skips refused connections does not survive a rollout"
     )
+
+
+@dataclass
+class ConflictThenExecutor(RecordingExecutor):
+    """First call fails as curl's "HTTP error" (22); every call after that
+    succeeds with the given body — the shape of register-then-GET-to-check."""
+
+    follow_up_stdout: str = ""
+
+    def run(self, task: CommandTaskSpec, *, dry_run: bool = False) -> TaskResult:
+        self.seen.append(task)
+        if len(self.seen) == 1:
+            return TaskResult(task_id="", status="failed", return_code=22)
+        return TaskResult(task_id="", status="passed", return_code=0, stdout=self.follow_up_stdout)
+
+
+def test_http_register_tolerates_a_409_for_the_same_function_already_restored() -> None:
+    """The control plane reconciles its persisted catalog on every restart
+    (FunctionCatalogRestorer) before serving traffic again, so a function that
+    survived a mid-workflow restart is still legitimately registered. A
+    workflow re-registering it after such a restart should see success, not
+    the conflict a stale assumption of a clean registry would produce."""
+    executor = ConflictThenExecutor(
+        follow_up_stdout=json.dumps(
+            {
+                "name": "word-stats",
+                "image": "reg/word-stats:e2e",
+                "requestedExecutionMode": "DEPLOYMENT",
+            }
+        )
+    )
+
+    _ = HttpFunctionRegisterTask(
+        MANIFEST, endpoint="http://cp:8080", executor=executor, role="host"
+    ).run(TaskInputs.empty())
+
+    assert len(executor.seen) == 2
+    assert executor.seen[1].argv[-1] == "http://cp:8080/v1/functions/word-stats"
+
+
+def test_http_register_still_fails_a_409_for_a_conflicting_function() -> None:
+    """A 409 on a name that already holds a *different* function (a different
+    image, say) is a real conflict, not a restart artifact - it must still
+    fail."""
+    executor = ConflictThenExecutor(
+        follow_up_stdout=json.dumps(
+            {
+                "name": "word-stats",
+                "image": "reg/some-other-image:latest",
+                "requestedExecutionMode": "DEPLOYMENT",
+            }
+        )
+    )
+
+    task = HttpFunctionRegisterTask(
+        MANIFEST, endpoint="http://cp:8080", executor=executor, role="host"
+    )
+
+    with pytest.raises(RuntimeError, match="Register word-stats failed"):
+        _ = task.run(TaskInputs.empty())
+
+
+def test_http_register_fails_when_the_existing_function_check_itself_fails() -> None:
+    """If the function is genuinely gone (the GET also errors), the original
+    register failure is what should surface - not a second, more confusing one
+    about the GET."""
+
+    @dataclass
+    class AlwaysConflictExecutor(RecordingExecutor):
+        def run(self, task: CommandTaskSpec, *, dry_run: bool = False) -> TaskResult:
+            self.seen.append(task)
+            return TaskResult(task_id="", status="failed", return_code=22, stderr="boom")
+
+    executor = AlwaysConflictExecutor()
+    task = HttpFunctionRegisterTask(
+        MANIFEST, endpoint="http://cp:8080", executor=executor, role="host"
+    )
+
+    with pytest.raises(RuntimeError, match="Register word-stats failed \\(exit 22\\): boom"):
+        _ = task.run(TaskInputs.empty())
