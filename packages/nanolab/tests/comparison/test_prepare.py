@@ -162,6 +162,9 @@ class _RecordingExecutor:
     def __init__(self) -> None:
         self.seen: list[tuple[str, ...]] = []
 
+    def binding_key(self, role: str) -> str:
+        return f"test-recording:{role}"
+
     def run(self, spec, dry_run: bool = False):  # noqa: ANN001 - structural stand-in
         from sonata_tasks.tasks.models import TaskResult
 
@@ -226,7 +229,7 @@ def test_prepare_tasks_run_inside_the_checkout() -> None:
     )
 
     for compiled in workflow.compile().tasks:
-        assert getattr(compiled.task, "remote_dir", None) == "/home/azureuser/nanofaas"
+        assert compiled.task.options.remote_dir == "/home/azureuser/nanofaas"
 
 
 def test_a_cell_is_retried_once_and_not_more() -> None:

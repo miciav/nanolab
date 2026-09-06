@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sonata_tasks.vm.models import VmRequest
+from nanolab.tasks.vm.models import VmRequest
 
 import os
 from pathlib import Path

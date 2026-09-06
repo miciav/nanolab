@@ -11,9 +11,9 @@ from typing import Any, cast
 from urllib.parse import urlsplit
 
 from multipass import MultipassClient
-from sonata_tasks.deployment import CONTROL_PLANE_NODE_PORT, PROMETHEUS_NODE_PORT
+from nanolab.tasks.deployment import CONTROL_PLANE_NODE_PORT, PROMETHEUS_NODE_PORT
 from sonata_tasks.execution.bindings import RoleBindings
-from sonata_tasks.provisioning.providers import provider_for
+from nanolab.tasks.provisioning.providers import provider_for
 from sonata_tasks.tasks.executors import (
     HostCommandRunner,
     HostCommandTaskExecutor,
@@ -21,11 +21,11 @@ from sonata_tasks.tasks.executors import (
     VmCommandTaskExecutor,
 )
 from sonata_tasks.shell import ShellBackend, SubprocessShell
-from sonata_tasks.vm.models import VmRequest, vm_remote_home
+from nanolab.tasks.vm.models import VmRequest, vm_remote_home
 from sonata_tasks.vm.multipass import resolve_connection_host
-from sonata_tasks.vm.orchestrator import VmOrchestrator
-from sonata_tasks.vm.ports import VmCommandProvider
-from sonata_tasks.vm.runners import VmFileFetcher
+from nanolab.tasks.vm.orchestrator import VmOrchestrator
+from nanolab.tasks.vm.ports import VmCommandProvider
+from nanolab.tasks.vm.runners import VmFileFetcher
 
 from nanolab.cli.vm_provider import vm_request_for_role
 from nanolab.config.environment import EnvironmentConfig, RoleTarget
@@ -423,7 +423,11 @@ def _provider_bindings(
                     if environment.provider == "multipass"
                     else vm_remote_home(request)
                 ),
-            )
+            ),
+            target_key=(
+                f"{environment.provider}:{role}:{request.name or request.host}:"
+                f"{request.user}"
+            ),
         )
         return executor, request
 
@@ -435,10 +439,11 @@ def _provider_bindings(
     arm_builder_result = make("arm-builder") if "arm-builder" in environment.roles else None
     arm_builder = arm_builder_result[0] if arm_builder_result else None
     fetch_request = loadgen_result[1] if loadgen_result else stack_request
-    return (
-        RoleBindings(host=host, stack=stack, loadgen=loadgen, cloud=cloud, arm_builder=arm_builder),
-        fetch_request,
-    )
+    executors = {"host": host, "stack": stack}
+    executors.update({name: executor for name, executor in {
+        "loadgen": loadgen, "cloud": cloud, "arm-builder": arm_builder,
+    }.items() if executor is not None})
+    return RoleBindings(executors), fetch_request
 
 
 def _ssh_bindings(
@@ -454,7 +459,9 @@ def _ssh_bindings(
             else None
         )
         executor = VmCommandTaskExecutor(
-            _RemoteRunner(command_runner, target, environment.provider, default_env)
+            _RemoteRunner(command_runner, target, environment.provider, default_env),
+            target_key=(f"{environment.provider}:{role}:{target.host}:"
+                        f"{target.user}:{target.remote_home}"),
         )
         return executor
 
@@ -463,10 +470,11 @@ def _ssh_bindings(
     cloud = remote("cloud") if "cloud" in environment.roles else None
     arm_builder = remote("arm-builder") if "arm-builder" in environment.roles else None
     fetch_target = environment.target("loadgen" if loadgen is not None else "stack")
-    return (
-        RoleBindings(host=host, stack=stack, loadgen=loadgen, cloud=cloud, arm_builder=arm_builder),
-        fetch_target,
-    )
+    executors = {"host": host, "stack": stack}
+    executors.update({name: executor for name, executor in {
+        "loadgen": loadgen, "cloud": cloud, "arm-builder": arm_builder,
+    }.items() if executor is not None})
+    return RoleBindings(executors), fetch_target
 
 
 def build_role_bindings(
@@ -479,7 +487,9 @@ def build_role_bindings(
     command_runner = runner or SubprocessShell()
     host = HostCommandTaskExecutor(command_runner)
     if environment.provider == "local":
-        return RoleBindings(host=host, stack=host, loadgen=host, cloud=host, arm_builder=host), None
+        return RoleBindings({role: host for role in (
+            "host", "stack", "loadgen", "cloud", "arm-builder"
+        )}), None
 
     if environment.provider in {"multipass", "azure", "proxmox"}:
         provider = _provider_for_stack(environment, vm_provider, command_runner, repo_root)

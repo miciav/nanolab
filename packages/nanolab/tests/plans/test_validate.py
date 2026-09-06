@@ -59,6 +59,9 @@ class RecordingExecutor:
 
     seen: list[CommandTaskSpec] = field(default_factory=list)
 
+    def binding_key(self, role: str) -> str:
+        return f"test-recording:{role}"
+
     def run(self, task: CommandTaskSpec, *, dry_run: bool = False) -> TaskResult:
         self.seen.append(task)
         rendered = " ".join(task.argv)
@@ -97,7 +100,7 @@ def _plan(backend: str, **config: object) -> Workflow:
                 **config,
             }
         ),
-        RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor()),
+        RoleBindings({'host': RecordingExecutor(), 'stack': RecordingExecutor()}),
     )
 
 
@@ -117,7 +120,7 @@ def test_validate_plan_dispatches_k8s_tasks_to_stack_binding() -> None:
     stack = RecordingExecutor()
     plan = build_validate_plan(
         ScenarioConfig(workflow="validate", backend="k8s", functions=["word-stats-java"]),
-        RoleBindings(host=host, stack=stack),
+        RoleBindings({'host': host, 'stack': stack}),
     )
 
     # The workflow itself validates deploy, invoke and resource propagation.
@@ -135,7 +138,7 @@ def test_kubernetes_validation_runs_the_queue_burst_with_k6() -> None:
     stack = RecordingExecutor()
     plan = build_validate_plan(
         ScenarioConfig(workflow="validate", backend="k8s", functions=["word-stats-java"]),
-        RoleBindings(host=RecordingExecutor(), stack=stack),
+        RoleBindings({'host': RecordingExecutor(), 'stack': stack}),
     )
 
     plan.run()
@@ -150,7 +153,7 @@ def test_validate_plan_keeps_container_validation_local() -> None:
     stack = RecordingExecutor()
     build_validate_plan(
         ScenarioConfig(workflow="validate", backend="container", functions=["word-stats-java"]),
-        RoleBindings(host=host, stack=stack),
+        RoleBindings({'host': host, 'stack': stack}),
     )
 
     assert stack.seen == []
@@ -183,7 +186,7 @@ def test_handler_envelope_validation_adds_contract_tasks_for_each_selected_funct
                 "handler_envelope": True,
             }
         ),
-        RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor()),
+        RoleBindings({'host': RecordingExecutor(), 'stack': RecordingExecutor()}),
     )
 
     titles = [task.task.title for task in plan.compile().tasks]
@@ -208,7 +211,7 @@ def test_handler_envelope_validation_requires_every_contract_function() -> None:
                     "handler_envelope": True,
                 }
             ),
-            RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor()),
+            RoleBindings({'host': RecordingExecutor(), 'stack': RecordingExecutor()}),
         )
 
 
@@ -218,7 +221,7 @@ def test_handler_envelope_container_scenario_runs_every_deterministic_function()
     )
     plan = build_validate_plan(
         config,
-        RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor()),
+        RoleBindings({'host': RecordingExecutor(), 'stack': RecordingExecutor()}),
     )
 
     assert config.backend == "container"
@@ -264,7 +267,7 @@ def test_handler_envelope_contracts_send_real_header_and_binary_sentinels() -> N
         }
     )
     plan = build_validate_plan(
-        config, RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor())
+        config, RoleBindings({'host': RecordingExecutor(), 'stack': RecordingExecutor()})
     )
 
     probe = _argv(plan, "Verify handler-envelope HTTP envelope")
@@ -308,7 +311,7 @@ def test_plain_and_header_probe_contracts_reject_unexpected_api_markers(
         }
     )
     plan = build_validate_plan(
-        config, RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor())
+        config, RoleBindings({'host': RecordingExecutor(), 'stack': RecordingExecutor()})
     )
     tasks = {task.task.title: task.task for task in plan.compile().tasks}
     responses = {
@@ -384,7 +387,7 @@ def test_container_validation_owns_an_isolated_compose_project(
             backend="container",
             functions=["word-stats-java"],
         ),
-        RoleBindings(host=host, stack=RecordingExecutor()),
+        RoleBindings({'host': host, 'stack': RecordingExecutor()}),
     )
 
     plan.run()
@@ -430,14 +433,14 @@ def test_async_load_enables_async_modules_on_the_compose_control_plane(
                 "async_load": True,
             }
         ),
-        RoleBindings(host=host, stack=RecordingExecutor()),
+        RoleBindings({'host': host, 'stack': RecordingExecutor()}),
         repo_root=checkout,
     )
 
     plan.run()
 
     compose = next(spec for spec in host.seen if spec.argv[:2] == ("docker", "compose"))
-    assert compose.env["NANOFAAS_CONTROL_PLANE_MODULES"] == "container-deployment-provider,async-queue"
+    assert compose.options.env["NANOFAAS_CONTROL_PLANE_MODULES"] == "container-deployment-provider,async-queue"
 
 
 def test_async_load_builds_an_async_check_for_every_payload_file(
@@ -473,7 +476,7 @@ def test_async_load_builds_an_async_check_for_every_payload_file(
                 "async_load": True,
             }
         ),
-        RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor()),
+        RoleBindings({'host': RecordingExecutor(), 'stack': RecordingExecutor()}),
         repo_root=checkout,
     )
 
@@ -546,7 +549,7 @@ def test_validate_plan_reads_payload_from_the_nanolab_package(
             backend="container",
             functions=["word-stats-java"],
         ),
-        RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor()),
+        RoleBindings({'host': RecordingExecutor(), 'stack': RecordingExecutor()}),
         repo_root=nanofaas_root,
         tool_root=tool_root,
     )
@@ -577,7 +580,7 @@ def test_validate_plan_resolves_function_manifest_from_its_repo_root(
     config = ScenarioConfig(workflow="validate", backend="container", functions=["word-stats-java"])
     plan = build_validate_plan(
         config,
-        RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor()),
+        RoleBindings({'host': RecordingExecutor(), 'stack': RecordingExecutor()}),
         repo_root=checkout_a,
     )
     manifest = sonata_function(
@@ -595,7 +598,7 @@ def test_a_kubernetes_run_installs_the_chart_and_registers_against_the_resolved_
     stack = RecordingExecutor()
     plan = build_validate_plan(
         ScenarioConfig(workflow="validate", backend="k8s", functions=["word-stats-java"]),
-        RoleBindings(host=RecordingExecutor(), stack=stack),
+        RoleBindings({'host': RecordingExecutor(), 'stack': stack}),
     )
 
     plan.run()

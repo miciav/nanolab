@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, cast
 
-from sonata_tasks.components.bootstrap import (
+from nanolab.tasks.components.bootstrap import (
     plan_assets_sync_to_vm,
     plan_k3s_configure_registry,
     plan_k3s_install,
@@ -17,16 +17,16 @@ from sonata_tasks.components.bootstrap import (
     plan_vm_provision_base,
     retarget_bootstrap_operation,
 )
-from sonata_tasks.components.context import ScenarioExecutionContext
-from sonata_tasks.components.operations import RemoteCommandOperation, ScenarioOperation
-from sonata_tasks.provisioning import (
+from nanolab.tasks.components.context import ScenarioExecutionContext
+from nanolab.tasks.components.operations import RemoteCommandOperation, ScenarioOperation
+from nanolab.tasks.provisioning import (
     ProvisionedRole,
     provision_roles,
     remote_operations,
     scenario_context,
 )
 from sonata_tasks.vm.azure import AzureVmProvider
-from sonata_tasks.vm.models import VmRequest
+from nanolab.tasks.vm.models import VmRequest
 from sonata_tasks.vm.proxmox import ProxmoxVmProvider
 
 from nanolab.cli.vm_provider import provider_for_environment, vm_request_for_role

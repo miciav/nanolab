@@ -5,9 +5,9 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from sonata_tasks.deployment import CONTROL_PLANE_NODE_PORT, PROMETHEUS_NODE_PORT
-from sonata_tasks.provisioning.providers import command_provider_for
-from sonata_tasks.vm.models import VmRequest
+from nanolab.tasks.deployment import CONTROL_PLANE_NODE_PORT, PROMETHEUS_NODE_PORT
+from nanolab.tasks.provisioning.providers import command_provider_for
+from nanolab.tasks.vm.models import VmRequest
 
 from nanolab.config.environment import EnvironmentConfig, ExecutionRole
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from sonata_tasks.execution.models import CommandOptions
+
 from dataclasses import dataclass, replace
 import json
 from pathlib import Path
@@ -9,25 +11,26 @@ import urllib.request
 from multipass import MultipassClient
 from sonata_engine import Steps, Workflow
 from sonata_tasks.command import CommandTask
-from sonata_tasks.compose import DockerComposeProject, docker_compose_resource
-from sonata_tasks.deployment import CONTROL_PLANE_NODE_PORT
-from sonata_tasks.loadtest import FetchResultsTask, RunK6Task, SideCommandTask
-from sonata_tasks.offload_loadtest import (
+from nanolab.tasks.compose import DockerComposeProject, docker_compose_resource
+from nanolab.tasks.deployment import CONTROL_PLANE_NODE_PORT
+from nanolab.tasks.deployment import REGISTRY_CONTAINER_NAME
+from nanolab.tasks.loadtest import FetchResultsTask, RunK6Task, SideCommandTask
+from nanolab.tasks.offload_loadtest import (
     EvaluateConservationTask,
     OffloadLoadtestRequest,
     build_offload_loadtest_workflow,
 )
-from sonata_tasks.platform import PlatformFunction, PlatformRequest
+from nanolab.tasks.platform import PlatformFunction, PlatformRequest
 from sonata_tasks.registry import docker_registry_resource
-from sonata_tasks.components.helm import control_plane_helm_values, helm_set_args
+from nanolab.tasks.components.helm import control_plane_helm_values, helm_set_args
 from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
-from sonata_tasks.k6 import K6Task
-from sonata_tasks.loadtest.models import K6Config
-from sonata_tasks.loadtest.offload_conservation import evaluate_conservation
-from sonata_tasks.loadtest.ports import RemoteFileFetcher
-from sonata_tasks.loadtest.tasks import FetchVmResults
+from nanolab.tasks.k6 import K6Task
+from nanolab.tasks.loadtest.models import K6Config
+from nanolab.tasks.loadtest.offload_conservation import evaluate_conservation
+from nanolab.tasks.loadtest.ports import RemoteFileFetcher
+from nanolab.tasks.loadtest.tasks import FetchVmResults
 from nanolab.plans.diagnostics import collect_control_plane_log
-from sonata_tasks.vm.models import VmRequest
+from nanolab.tasks.vm.models import VmRequest
 from sonata_tasks.vm.multipass import resolve_connection_host
 
 from nanolab.config.environment import EnvironmentConfig
@@ -277,7 +280,7 @@ def build_offload_loadtest_plan(
 
     requires = ()
     if local:
-        registry = docker_registry_resource(executor=RoleBoundCommandTaskExecutor(bindings), role="host")
+        registry = docker_registry_resource(executor=RoleBoundCommandTaskExecutor(bindings), role="host", container=REGISTRY_CONTAINER_NAME)
         compose = docker_compose_resource(
             DockerComposeProject(
                 name="nanofaas-offload-loadtest",
@@ -310,14 +313,14 @@ def build_offload_loadtest_plan(
             argv=("k6", "version"),
             executor=executor,
             role=k6_role,
-            cwd=root,
+            options=CommandOptions(cwd=root),
         ),
         CommandTask(
             title="Prepare the run directory",
             argv=("mkdir", "-p", str(summary_path.parent)),
             executor=executor,
             role=k6_role,
-            cwd=root,
+            options=CommandOptions(cwd=root),
         ),
         RunK6Task(
             run_k6=K6Task(

@@ -6,15 +6,16 @@ from pathlib import Path
 from typing import Any
 
 from sonata_engine import Resource, Workflow
-from sonata_tasks.offload import (
+from nanolab.tasks.offload import (
     OffloadFunction,
     OffloadWorkflowRequest,
     build_offload_workflow,
 )
 from sonata_tasks.process import managed_process_resource
-from sonata_tasks.deployment import (
+from nanolab.tasks.deployment import (
     LOCAL_CONTROL_PLANE_API_PORT,
     LOCAL_CONTROL_PLANE_MANAGEMENT_PORT,
+    REGISTRY_CONTAINER_NAME,
 )
 from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
 from sonata_tasks.registry import docker_registry_resource
@@ -126,7 +127,7 @@ def build_offload_plan(
         edge_management=EDGE_MANAGEMENT,
     )
     registry = docker_registry_resource(
-        executor=RoleBoundCommandTaskExecutor(bindings), role="host"
+        executor=RoleBoundCommandTaskExecutor(bindings), role="host", container=REGISTRY_CONTAINER_NAME
     )
     return build_offload_workflow(
         request,

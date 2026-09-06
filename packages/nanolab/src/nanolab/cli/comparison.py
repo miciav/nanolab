@@ -21,9 +21,9 @@ from pathlib import Path
 
 import typer
 
-from sonata_tasks.components.bootstrap import remote_project_dir
-from sonata_tasks.deployment import LOCAL_REGISTRY
-from sonata_tasks.loadtest.comparison_report import WriteComparisonReport
+from nanolab.tasks.components.bootstrap import remote_project_dir
+from nanolab.tasks.deployment import LOCAL_REGISTRY
+from nanolab.tasks.loadtest.comparison_report import WriteComparisonReport
 from sonata_tasks.execution.bindings import RoleBoundCommandTaskExecutor
 
 from sonata_engine.workflow.context import bind_workflow_sink

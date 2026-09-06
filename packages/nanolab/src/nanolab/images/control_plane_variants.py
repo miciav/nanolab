@@ -20,7 +20,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 
-from sonata_tasks.components.operations import RemoteCommandOperation
+from nanolab.tasks.components.operations import RemoteCommandOperation
 
 
 @dataclass(frozen=True, slots=True)

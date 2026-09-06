@@ -1,0 +1,1571 @@
+{
+  "schema_version": 1,
+  "baseline": "d9c0783002c0067c557cbbe9f21dd58556f937b7",
+  "scope": "All tracked-source-like files currently under packages/sonata-tasks/src/sonata_tasks; no tests or generated caches",
+  "entries": [
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/__init__.py",
+      "sha256": "24dd1cc921952b9ee82fadad995af5502c37e48772f4ccd44331cfac768ce588",
+      "action": "split",
+      "destinations": [
+        {
+          "repo": "sonata",
+          "path": "packages/sonata-tasks/src/sonata_tasks/__init__.py",
+          "scope": "core exports only"
+        },
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/__init__.py",
+          "scope": "domain exports in nanolab.tasks.__init__"
+        }
+      ],
+      "top_level_symbols": []
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/archive.py",
+      "sha256": "9e04151d5b7c8ebe0181dcd8185cab03fa2509b6966992788a025b7febd12cb7",
+      "action": "sonata",
+      "destinations": [
+        {
+          "repo": "sonata",
+          "path": "packages/sonata-tasks/src/sonata_tasks/archive.py"
+        }
+      ],
+      "top_level_symbols": [
+        "_exec",
+        "_transfer_archive",
+        "_verify_remote_archive",
+        "_extract_remote_archive",
+        "source_archive_resource"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/buildx.py",
+      "sha256": "7d1e4d9ccac613825d8f254fd4aa6bbf6208a4e005958d8477ebaaea193b1b7c",
+      "action": "sonata",
+      "destinations": [
+        {
+          "repo": "sonata",
+          "path": "packages/sonata-tasks/src/sonata_tasks/buildx.py"
+        }
+      ],
+      "top_level_symbols": [
+        "_buildx_builder_run",
+        "_buildx_builder_create_argv",
+        "_buildx_builder_bootstrap",
+        "_buildx_builder_acquire",
+        "_buildx_builder_release",
+        "buildx_builder_resource"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/cli.py",
+      "sha256": "72f4e88119f8ac99e5ae06fb60a424d7ab701f9c78478a9586ce4ec960347e8b",
+      "action": "nanolab",
+      "destinations": [
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/cli.py"
+        }
+      ],
+      "top_level_symbols": [
+        "CliFunction",
+        "CliWorkflowRequest",
+        "_cli_argv",
+        "_manifest",
+        "_function_resource",
+        "build_cli_workflow"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/cli_function.py",
+      "sha256": "2c440d6279daa4225c60acad2e07645b2eac8b2263d29fc77d3d059db959f9fa",
+      "action": "nanolab",
+      "destinations": [
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/cli_function.py"
+        }
+      ],
+      "top_level_symbols": [
+        "_script_with_file",
+        "_apply_script",
+        "_json_stdout",
+        "_expect",
+        "CliFunctionApplyTask",
+        "CliFunctionDeleteTask",
+        "CliFunctionInvokeTask",
+        "control_plane_contract_tasks",
+        "function_update_task",
+        "function_replicas_tasks",
+        "function_replace_tasks",
+        "runtime_config_tasks"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/command.py",
+      "sha256": "d542bf58d7e9c4aa331fd502840921fa2bf5f64f9ca003df600bfed86e6b9050",
+      "action": "sonata",
+      "destinations": [
+        {
+          "repo": "sonata",
+          "path": "packages/sonata-tasks/src/sonata_tasks/core/command.py"
+        }
+      ],
+      "top_level_symbols": [
+        "CommandTask"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/compensation.py",
+      "sha256": "db1debbef73732089f7013c8814f425e31b229a4cb459a79b14c6aaa9e175bef",
+      "action": "sonata",
+      "destinations": [
+        {
+          "repo": "sonata",
+          "path": "packages/sonata-tasks/src/sonata_tasks/compensation.py"
+        }
+      ],
+      "top_level_symbols": [
+        "best_effort",
+        "compensated_resource"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/components/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "action": "nanolab",
+      "destinations": [
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/components/__init__.py"
+        }
+      ],
+      "top_level_symbols": []
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/components/bootstrap.py",
+      "sha256": "1273cef3d63553ef64a9087729c25d739861d988863261d9d0e6d4a0584af39f",
+      "action": "nanolab",
+      "destinations": [
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/components/bootstrap.py"
+        }
+      ],
+      "top_level_symbols": [
+        "_remote_home",
+        "remote_project_dir",
+        "remote_assets_dir",
+        "_kubeconfig_path",
+        "_inventory_target",
+        "_frozen_env",
+        "_ansible_operation",
+        "plan_vm_ensure_running",
+        "plan_vm_provision_base",
+        "_rsync_operation",
+        "plan_repo_sync_to_vm",
+        "plan_assets_sync_to_vm",
+        "_retarget_ansible_argv",
+        "retarget_bootstrap_operation",
+        "plan_registry_ensure_container",
+        "plan_k3s_install",
+        "plan_k3s_configure_registry",
+        "plan_loadtest_install_k6"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/components/context.py",
+      "sha256": "f16277065a0c7533dc621b57c025cd8d7e1ac5842dd0975eac6e8a968b68e554",
+      "action": "nanolab",
+      "destinations": [
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/components/context.py"
+        }
+      ],
+      "top_level_symbols": [
+        "ResolvedFunctionView",
+        "ResolvedScenarioView",
+        "ScenarioExecutionContext"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/components/helm.py",
+      "sha256": "670cd01c6fd2ce37010be46b3a08189e37c826987457c16a3667c0a8afc3dfc0",
+      "action": "nanolab",
+      "destinations": [
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/components/helm.py"
+        }
+      ],
+      "top_level_symbols": [
+        "_image_parts",
+        "control_plane_helm_values",
+        "_frozen_env",
+        "_effective_namespace",
+        "_kubeconfig_path",
+        "helm_set_args",
+        "plan_deploy_control_plane"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/components/images.py",
+      "sha256": "e1e8f629ffec7cc62384405fde08447acf22fe2207d22a2b8eadc036abfc7a5b",
+      "action": "nanolab",
+      "destinations": [
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/components/images.py"
+        }
+      ],
+      "top_level_symbols": [
+        "control_image",
+        "warm_echo_image",
+        "function_image_specs",
+        "_frozen_env",
+        "plan_build_core"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/components/operations.py",
+      "sha256": "60d797eb8acd371ee07732cd7103f6bdf0923ac7f7c644234483baf5df468cc3",
+      "action": "nanolab",
+      "destinations": [
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/components/operations.py"
+        }
+      ],
+      "top_level_symbols": [
+        "_empty_env",
+        "ScenarioOperation",
+        "RemoteCommandOperation"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/compose.py",
+      "sha256": "a91fa6175f0a66b565349d1ec53ac7f30f34537ee9b08ed8385ae883ed8c190f",
+      "action": "split",
+      "destinations": [
+        {
+          "repo": "sonata",
+          "path": "packages/sonata-tasks/src/sonata_tasks/compose.py",
+          "scope": "Generic tasks/resource without pre-deploy reset; volume/orphan removal explicit"
+        },
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/compose.py",
+          "scope": "isolated_compose_resource preserving clear/deploy/wait and teardown policy"
+        }
+      ],
+      "top_level_symbols": [
+        "DockerComposeProject",
+        "DeployDockerCompose",
+        "WaitForDockerCompose",
+        "DestroyDockerCompose",
+        "docker_compose_resource"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/cosign.py",
+      "sha256": "4ee9ac753bfa24895f763bb61b6edbaf1a9aed85568ec33022f812a30b35c0f5",
+      "action": "sonata",
+      "destinations": [
+        {
+          "repo": "sonata",
+          "path": "packages/sonata-tasks/src/sonata_tasks/cosign.py"
+        }
+      ],
+      "top_level_symbols": [
+        "CosignTask",
+        "_docker_run_args",
+        "_cosign_command"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/deployment.py",
+      "sha256": "8edf54a9d549e61dff6649b9643d2ea422c13576ee335cc89e57d11174be31b5",
+      "action": "nanolab",
+      "destinations": [
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/deployment.py"
+        }
+      ],
+      "top_level_symbols": []
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/docker.py",
+      "sha256": "ebd78b9c24ec0b293410ebc46295b2f32bcfc182433319be77c3de2a68501a0c",
+      "action": "sonata",
+      "destinations": [
+        {
+          "repo": "sonata",
+          "path": "packages/sonata-tasks/src/sonata_tasks/docker.py"
+        }
+      ],
+      "top_level_symbols": [
+        "DockerTask",
+        "DockerBuildTask",
+        "DockerPushTask",
+        "DockerInspectTask"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/execution/bindings.py",
+      "sha256": "c720046d7589b3fed0f1b323fcb852e0f13f512673da090d285d3efe04746966",
+      "action": "sonata",
+      "destinations": [
+        {
+          "repo": "sonata",
+          "path": "packages/sonata-tasks/src/sonata_tasks/execution/bindings.py"
+        }
+      ],
+      "top_level_symbols": [
+        "CommandTaskExecutor",
+        "RoleBindings",
+        "RoleBoundCommandTaskExecutor"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/execution/roles.py",
+      "sha256": "877aab8ccfe9124bfd1be9e5e9769a4f26175a39b092a1af68d53c06dde70ea9",
+      "action": "split",
+      "destinations": [
+        {
+          "repo": "sonata",
+          "path": "packages/sonata-tasks/src/sonata_tasks/execution/roles.py",
+          "scope": "ExecutionRole = str"
+        },
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/execution.py",
+          "scope": "NanolabRole Literal and client bindings"
+        }
+      ],
+      "top_level_symbols": []
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/function.py",
+      "sha256": "6ebd28b5537bdcce9c929a00e1c2c31f68dbfc7d59a5fce29ab36decc44f30c5",
+      "action": "nanolab",
+      "destinations": [
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/function.py"
+        }
+      ],
+      "top_level_symbols": [
+        "function_resource"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/gradle.py",
+      "sha256": "36aedbbe82c5802d6c1ad1def0ab11da82590290d39b19227514ad532e7936ee",
+      "action": "sonata",
+      "destinations": [
+        {
+          "repo": "sonata",
+          "path": "packages/sonata-tasks/src/sonata_tasks/gradle.py"
+        }
+      ],
+      "top_level_symbols": [
+        "GradleTask"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/helm.py",
+      "sha256": "044050017f4ba229e67023eb6043c48e31dc54400b35a9885b76b221a2283984",
+      "action": "sonata",
+      "destinations": [
+        {
+          "repo": "sonata",
+          "path": "packages/sonata-tasks/src/sonata_tasks/helm.py"
+        }
+      ],
+      "top_level_symbols": [
+        "HelmReleaseSpec",
+        "HelmInstallTask",
+        "HelmUninstallTask",
+        "helm_release_resource"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/http_function.py",
+      "sha256": "28837fa0af4d09bd66e14f432fafadbf5c00134eae7e192702594948c61c2a31",
+      "action": "split",
+      "destinations": [
+        {
+          "repo": "sonata",
+          "path": "packages/sonata-tasks/src/sonata_tasks/http.py",
+          "scope": "Endpoint, endpoint_argv, HttpStatusCheckTask with explicit headers"
+        },
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/http_function.py",
+          "scope": "All nanoFaaS HTTP operations and JSON policy wrapper"
+        }
+      ],
+      "top_level_symbols": [
+        "_argv",
+        "_command_result",
+        "_verify_registration_response",
+        "_verify_registration_endpoint",
+        "_registration_matches_manifest",
+        "HttpFunctionRegisterTask",
+        "HttpFunctionDeleteTask",
+        "HttpFunctionSetReplicasTask",
+        "HttpFunctionBackendTask",
+        "HttpFunctionReplicaStatusTask",
+        "HttpFunctionEnqueueTask",
+        "_UnsetType",
+        "HttpExecutionSuccessTask",
+        "_split_response",
+        "_split_final_response",
+        "HttpFunctionExpectation",
+        "_parse_contract_response",
+        "_header_matches",
+        "_headers_match",
+        "_verify_outer_headers",
+        "_verify_api_fields",
+        "_verify_api_envelope",
+        "_verify_decoded_output",
+        "HttpFunctionContractTask",
+        "HttpFunctionInvokeTask",
+        "HttpStatusCheckTask"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/imagetools.py",
+      "sha256": "4afeaa63913c67e9b067d2ee07db23fa8036460669270603036fdd4fbb47d0f0",
+      "action": "sonata",
+      "destinations": [
+        {
+          "repo": "sonata",
+          "path": "packages/sonata-tasks/src/sonata_tasks/imagetools.py"
+        }
+      ],
+      "top_level_symbols": [
+        "ImagetoolsCreateTask",
+        "ImagetoolsInspectTask"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/infra/ansible.py",
+      "sha256": "e0c52bf16fcc22c86801072cba522d550cf88fc3f14930b9598575c506a5023d",
+      "action": "split",
+      "destinations": [
+        {
+          "repo": "sonata",
+          "path": "packages/sonata-tasks/src/sonata_tasks/ansible.py",
+          "scope": "Pure build_ansible_argv and AnsiblePlaybookTask"
+        },
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/infra/ansible.py",
+          "scope": "Host resolution, provisioning methods and bundled playbook policy"
+        }
+      ],
+      "top_level_symbols": [
+        "HostResolver",
+        "bundled_ansible_root",
+        "AnsibleAdapter",
+        "RunPlaybook",
+        "install_k6_task"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/infra/ansible_assets/ansible.cfg",
+      "sha256": "b72f195d4b1a12b1b6418876e3bfc4f30b2984faa50bebf09d708c0dc7976cc6",
+      "action": "nanolab",
+      "destinations": [
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/infra/ansible_assets/ansible.cfg"
+        }
+      ],
+      "top_level_symbols": []
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/infra/ansible_assets/playbooks/configure-k3s-registry.yml",
+      "sha256": "cea54dc9f495f29e4eb8e323724a83b60d4cd13971ad6c98f2a68bc64fbaacd7",
+      "action": "nanolab",
+      "destinations": [
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/infra/ansible_assets/playbooks/configure-k3s-registry.yml"
+        }
+      ],
+      "top_level_symbols": []
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/infra/ansible_assets/playbooks/ensure-registry.yml",
+      "sha256": "f1a577653fa67a10682623b42d2f8dba0c5e8c1d22ea1b89fbe1a212d314863b",
+      "action": "nanolab",
+      "destinations": [
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/infra/ansible_assets/playbooks/ensure-registry.yml"
+        }
+      ],
+      "top_level_symbols": []
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/infra/ansible_assets/playbooks/install-k6.yml",
+      "sha256": "83b355a5a57d5b3b69c7bfb4346ad1e913c8d99584d873768c78e647b9b5bc76",
+      "action": "nanolab",
+      "destinations": [
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/infra/ansible_assets/playbooks/install-k6.yml"
+        }
+      ],
+      "top_level_symbols": []
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/infra/ansible_assets/playbooks/provision-base.yml",
+      "sha256": "8c9e3e5766b8ca6c409cda17de3b3503aadfb78a664bc248a19003a02f75f07d",
+      "action": "nanolab",
+      "destinations": [
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/infra/ansible_assets/playbooks/provision-base.yml"
+        }
+      ],
+      "top_level_symbols": []
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/infra/ansible_assets/playbooks/provision-k3s.yml",
+      "sha256": "ec8af66d0afadf8e92f29093a01afe03a48888382af124cc2402ffce49237c7e",
+      "action": "nanolab",
+      "destinations": [
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/infra/ansible_assets/playbooks/provision-k3s.yml"
+        }
+      ],
+      "top_level_symbols": []
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/infra/ansible_assets/playbooks/provision-release-builder.yml",
+      "sha256": "0d119ec190a593255c40f75e1cbc0d946e10737afb5a40ad6a5b61d825eff80a",
+      "action": "nanolab",
+      "destinations": [
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/infra/ansible_assets/playbooks/provision-release-builder.yml"
+        }
+      ],
+      "top_level_symbols": []
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/infra/ansible_assets/requirements.txt",
+      "sha256": "22bf5d5d62a6cac129304de051178a1c2184bb0a03d0adb67481f7463f10644a",
+      "action": "nanolab",
+      "destinations": [
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/infra/ansible_assets/requirements.txt"
+        }
+      ],
+      "top_level_symbols": []
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/invocation.py",
+      "sha256": "f0dae984f0c3855eaa36ba1fb85f036e90224740ed4d6ab206d4714d056e1f11",
+      "action": "nanolab",
+      "destinations": [
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/invocation.py"
+        }
+      ],
+      "top_level_symbols": [
+        "verify_invocation",
+        "_reason"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/k6.py",
+      "sha256": "87b0d2e6fa3ca08bc879dfd7527ec893add292425d2da6cfedf09ab3ca4e908f",
+      "action": "split",
+      "destinations": [
+        {
+          "repo": "sonata",
+          "path": "packages/sonata-tasks/src/sonata_tasks/k6.py",
+          "scope": "Generic k6_argv and K6Task; no NANOFAAS environment injection"
+        },
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/k6.py",
+          "scope": "Scenario adapter resolving target and injecting NANOFAAS_URL/PAYLOAD"
+        }
+      ],
+      "top_level_symbols": [
+        "k6_argv",
+        "K6Task"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/kubectl.py",
+      "sha256": "513a520f0d871f9584a33229fa36548342c01bc182835cb2dfc179b7ca7f1663",
+      "action": "split",
+      "destinations": [
+        {
+          "repo": "sonata",
+          "path": "packages/sonata-tasks/src/sonata_tasks/kubectl.py",
+          "scope": "KubectlTask, ClusterIpEndpointTask, k8s_deployment_readiness"
+        },
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/kubectl.py",
+          "scope": "k8s_function_resources_absent"
+        }
+      ],
+      "top_level_symbols": [
+        "KubectlTask",
+        "ClusterIpEndpointTask",
+        "k8s_deployment_readiness",
+        "k8s_function_resources_absent"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/loadtest/__init__.py",
+      "sha256": "a862e122f244693ca05e70b1fa64465e8c34116f44b822921934f2554c5af413",
+      "action": "nanolab",
+      "destinations": [
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/loadtest/__init__.py"
+        }
+      ],
+      "top_level_symbols": [
+        "LoadtestOutcome",
+        "load_outcome",
+        "RunK6Task",
+        "VerifyAutoscalingTask",
+        "VerifyConcurrencyTask",
+        "ReportCoTenancyTask",
+        "CapturePrometheusTask",
+        "WriteReportTask",
+        "WriteConcurrencyReportTask",
+        "WriteSummaryTask",
+        "EvaluateGateTask",
+        "SideCommandTask",
+        "FetchResultsTask",
+        "loadtest_composite",
+        "build_loadtest_workflow"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/loadtest/adapters.py",
+      "sha256": "fdf82a9a3db2a6584a83e531daecb5218c3424005574a8a29aa32f820498e15b",
+      "action": "split",
+      "destinations": [
+        {
+          "repo": "sonata",
+          "path": "packages/sonata-tasks/src/sonata_tasks/prometheus.py",
+          "scope": "Generic HttpPrometheusClient; generic models and return contract"
+        },
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/loadtest/adapters.py",
+          "scope": "Adapter preserving existing snapshot protocol and summed results"
+        }
+      ],
+      "top_level_symbols": [
+        "HttpPrometheusClient"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/loadtest/autoscaling.py",
+      "sha256": "689fbb2dab411ad7c73eeb4777b6d7d35c235785109862770834dc61bd7028d8",
+      "action": "nanolab",
+      "destinations": [
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/loadtest/autoscaling.py"
+        }
+      ],
+      "top_level_symbols": [
+        "Sampling",
+        "InitialReplicaCheck",
+        "AutoscalingResult",
+        "Watcher",
+        "ReplicaStatusProbe",
+        "ReplicaSample",
+        "releases_under_load",
+        "AutoscalingSummary",
+        "ReplicaProbe",
+        "HttpReplicaProbe",
+        "ReplicaWatcher",
+        "VerifyInitialAutoscalingReplicas",
+        "VerifyAutoscalingReplicas"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/loadtest/comparison_report.py",
+      "sha256": "0494e9602f4f1bac2d1dbf21645b15e5c0798d2c24bdcd1bcfbcceb5f512d112",
+      "action": "nanolab",
+      "destinations": [
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/loadtest/comparison_report.py"
+        }
+      ],
+      "top_level_symbols": [
+        "CellData",
+        "_k6_values",
+        "_series",
+        "read_cell",
+        "_spread",
+        "_fmt",
+        "aggregate_table",
+        "_verdict",
+        "_over_time",
+        "_spread_chart",
+        "_per_run_table",
+        "WriteComparisonReport"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/loadtest/concurrency.py",
+      "sha256": "3159c74f6f6789100898ce84830e6efda3305e3bb52fca758710438d3ed4715b",
+      "action": "nanolab",
+      "destinations": [
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/loadtest/concurrency.py"
+        }
+      ],
+      "top_level_symbols": [
+        "ConcurrencyReading",
+        "EffectiveConcurrencyReader",
+        "ConcurrencySample",
+        "ConcurrencyDip",
+        "governed_samples",
+        "find_dip",
+        "ConcurrencySummary",
+        "write_series",
+        "ConcurrencyResponse",
+        "measure_response",
+        "verify_observable",
+        "verify_concurrency_cycle",
+        "ScrapeConcurrencyProbe",
+        "ConcurrencyWatcherGroup",
+        "ConcurrencyWatcher"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/loadtest/models.py",
+      "sha256": "a552976d2f6a741783014bc7ce4e43338f438d554fc8add85798dda043dd3ed9",
+      "action": "split",
+      "destinations": [
+        {
+          "repo": "sonata",
+          "path": "packages/sonata-tasks/src/sonata_tasks/k6_models.py",
+          "scope": "K6Stage, K6RunResult; new generic K6Config without scenario fields"
+        },
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/loadtest/models.py",
+          "scope": "Scenario K6Config, TimeWindow, PrometheusQuery; imports shared K6Stage/K6RunResult"
+        }
+      ],
+      "top_level_symbols": [
+        "K6Stage",
+        "K6Config",
+        "K6RunResult",
+        "TimeWindow",
+        "PrometheusQuery"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/loadtest/offload_conservation.py",
+      "sha256": "745d5ba8d9ef389af6729590e72a0074b3b894ac0aa5d54667aa2329311a8b5b",
+      "action": "nanolab",
+      "destinations": [
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/loadtest/offload_conservation.py"
+        }
+      ],
+      "top_level_symbols": [
+        "ConservationReport",
+        "_k6_counter_value",
+        "_sum_metric",
+        "evaluate_conservation"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/loadtest/ports.py",
+      "sha256": "eaaa6c81cbc7c1c7c83e96b2b1467faae92a2d1d1eacb080e5d5f2af7be87de0",
+      "action": "nanolab",
+      "destinations": [
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/loadtest/ports.py"
+        }
+      ],
+      "top_level_symbols": [
+        "RemoteFileFetcher",
+        "PrometheusClient"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/loadtest/prometheus.py",
+      "sha256": "4474621e6769cad94c7679872be1b9d0080254c23a0d7fd2cf9b6ce8d0b0d07d",
+      "action": "split",
+      "destinations": [
+        {
+          "repo": "sonata",
+          "path": "packages/sonata-tasks/src/sonata_tasks/prometheus.py",
+          "scope": "HTTP query mechanism preserving separate labelled series; explicit retry policy"
+        },
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/loadtest/prometheus.py",
+          "scope": "Compatibility query functions, sum_series_by_timestamp and nanolab retry defaults"
+        }
+      ],
+      "top_level_symbols": [
+        "_prometheus_api_get",
+        "query_prometheus_server_time",
+        "_coerce_sample",
+        "_merge_samples",
+        "query_prometheus_range_series"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/loadtest/report.py",
+      "sha256": "fa5ed65143df48fd5f1701ef709ac6d12351ee285a10c2dca14501769e867098",
+      "action": "nanolab",
+      "destinations": [
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/loadtest/report.py"
+        }
+      ],
+      "top_level_symbols": [
+        "ReportPhase",
+        "counter_delta",
+        "_scalar",
+        "_series_frame",
+        "_phase_of",
+        "_shade_phases",
+        "_layout",
+        "_limit_and_queue",
+        "_wait_against_service",
+        "_throughput_and_rejections",
+        "_depth_distribution",
+        "_resource_frame",
+        "_footprint",
+        "_footprint_table",
+        "_phase_table",
+        "_k6_table",
+        "_tail_table",
+        "_counter_table",
+        "_table_html",
+        "_cards",
+        "WriteConcurrencyReport"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/loadtest/resources.py",
+      "sha256": "9c4af28c61c136cde4f3cc80a44616f946bf6db617941fefd6cc76553b97adae",
+      "action": "nanolab",
+      "destinations": [
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/loadtest/resources.py"
+        }
+      ],
+      "top_level_symbols": [
+        "ResourceSample",
+        "working_set_bytes",
+        "cpu_percent",
+        "DockerEngineProbe",
+        "ResourceWatcher",
+        "ResourceWatcherGroup"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/loadtest/tasks.py",
+      "sha256": "c25b3e411255ea22d0a97d609ae60d005e924dcb099d615755434493e059b689",
+      "action": "nanolab",
+      "destinations": [
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/loadtest/tasks.py"
+        }
+      ],
+      "top_level_symbols": [
+        "FetchVmResults",
+        "_unreachable_hint",
+        "CapturePrometheusSnapshot",
+        "_render_k6_html",
+        "WriteK6Report",
+        "_point_stats",
+        "WriteLoadtestSummary"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/loadtest/two_vm.py",
+      "sha256": "daa1c0012d702d5ba949ae572d532434183266af34fd5c95f4e403e4c020a764",
+      "action": "nanolab",
+      "destinations": [
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/loadtest/two_vm.py"
+        }
+      ],
+      "top_level_symbols": []
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/manifest.py",
+      "sha256": "a8b76dd71b33954d6878a465281c7f8a62dafd5e60cee4e2446b295544ce5b1a",
+      "action": "nanolab",
+      "destinations": [
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/manifest.py"
+        }
+      ],
+      "top_level_symbols": [
+        "FunctionManifest"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/metrics.py",
+      "sha256": "c600658deee9deea0d2f1fc419357e3c3f96bc4a8e1aadbc65f6cd7ec0d1d108",
+      "action": "split",
+      "destinations": [
+        {
+          "repo": "sonata",
+          "path": "packages/sonata-tasks/src/sonata_tasks/metrics.py",
+          "scope": "Metric parsing and checks on complete unmodified endpoints"
+        },
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/metrics.py",
+          "scope": "Actuator endpoint resolver and client wrappers"
+        }
+      ],
+      "top_level_symbols": [
+        "metric_sum",
+        "_resolve_prometheus_url",
+        "_require_metric_sum",
+        "_check_minimums",
+        "PrometheusScrapeCheckTask",
+        "PrometheusMinimumCheckTask"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/offload.py",
+      "sha256": "c6d6914970584b67f7592aca194e035f86e98f74ca7326182570066c55be5862",
+      "action": "nanolab",
+      "destinations": [
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/offload.py"
+        }
+      ],
+      "top_level_symbols": [
+        "OffloadFunction",
+        "OffloadWorkflowRequest",
+        "_side",
+        "_no_local_fallback",
+        "build_offload_workflow"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/offload_loadtest.py",
+      "sha256": "0eea2ffe0e3bff0007036f7eb2d2ad422bffdc121b83e8b787eb9e2a1c673479",
+      "action": "nanolab",
+      "destinations": [
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/offload_loadtest.py"
+        }
+      ],
+      "top_level_symbols": [
+        "ConservationEvaluator",
+        "EvaluateConservationTask",
+        "OffloadLoadtestRequest",
+        "build_offload_loadtest_workflow"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/platform.py",
+      "sha256": "02b356557a6229e009f120213b8c2dd845fe4549e842921154b9bc24e0d36ecf",
+      "action": "nanolab",
+      "destinations": [
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/platform.py"
+        }
+      ],
+      "top_level_symbols": [
+        "PlatformFunction",
+        "PlatformRequest",
+        "_control_plane_build",
+        "_helm_release_with_endpoint",
+        "Platform",
+        "_check_kubectl",
+        "_add_function_build",
+        "_add_build_tasks",
+        "_resolve_platform_endpoint",
+        "_function_resource",
+        "add_platform"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/process.py",
+      "sha256": "4ae7ab7432291b71bcebc6caaf71eebc8235d9f43a55f6cca206907b9ed50a4d",
+      "action": "sonata",
+      "destinations": [
+        {
+          "repo": "sonata",
+          "path": "packages/sonata-tasks/src/sonata_tasks/process.py"
+        }
+      ],
+      "top_level_symbols": [
+        "ManagedProcess",
+        "managed_process_resource",
+        "managed_process_resource",
+        "_wait_until_ready",
+        "managed_process_resource"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/provisioning/__init__.py",
+      "sha256": "28a58e0525105e686fe9d85f66912babccea8bec29aea6ce0b84050a148da31b",
+      "action": "nanolab",
+      "destinations": [
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/provisioning/__init__.py"
+        }
+      ],
+      "top_level_symbols": []
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/provisioning/bootstrap.py",
+      "sha256": "33b209a3c6130bfb5b4ec742fd1f6d09ff6d9c5cc8018c64c64ea3abe6b41b20",
+      "action": "nanolab",
+      "destinations": [
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/provisioning/bootstrap.py"
+        }
+      ],
+      "top_level_symbols": [
+        "scenario_context",
+        "OperationTask",
+        "operation_task",
+        "run_bootstrap_operations",
+        "remote_operations",
+        "retarget_cloud_operations"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/provisioning/environment.py",
+      "sha256": "e00af34a46483ffa05f6ea0cc17ee893fe5383f702fedae8c2c0fbf57da428c1",
+      "action": "nanolab",
+      "destinations": [
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/provisioning/environment.py"
+        }
+      ],
+      "top_level_symbols": [
+        "ProvisionedRole",
+        "_ensure_vm",
+        "_destroy_task",
+        "_run_cleanup_tasks",
+        "_raise_if_failed",
+        "provision_roles"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/provisioning/providers.py",
+      "sha256": "17f4f4a1abc499cd5304c272a145d58c46f7faeb1210859e6e1fdb0563696935",
+      "action": "nanolab",
+      "destinations": [
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/provisioning/providers.py"
+        }
+      ],
+      "top_level_symbols": [
+        "provider_for",
+        "command_provider_for"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/provisioning/resources.py",
+      "sha256": "a845f17222b71afcf87b370dd7c50c3dc785a5a8d9f9fc6051b7a769aab3a8cd",
+      "action": "nanolab",
+      "destinations": [
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/provisioning/resources.py"
+        }
+      ],
+      "top_level_symbols": [
+        "VerifiedLifecycle",
+        "provisioned_vm"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/py.typed",
+      "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "action": "sonata",
+      "destinations": [
+        {
+          "repo": "sonata",
+          "path": "packages/sonata-tasks/src/sonata_tasks/py.typed"
+        }
+      ],
+      "top_level_symbols": []
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/registry.py",
+      "sha256": "c479e298deff2f209eb422309aa8043ff192ab0642388364abb7ac36a54337f6",
+      "action": "sonata",
+      "destinations": [
+        {
+          "repo": "sonata",
+          "path": "packages/sonata-tasks/src/sonata_tasks/registry.py"
+        }
+      ],
+      "top_level_symbols": [
+        "_answers",
+        "_docker_run",
+        "_registry_state",
+        "_release",
+        "_ensure_running",
+        "_wait_ready",
+        "_cleanup_failed_acquire",
+        "_acquire",
+        "docker_registry_resource"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/registry_tunnel.py",
+      "sha256": "aa973646250e6cc4c52c36bcb063b30008955dbf5bfb56d2b92897abc8122d93",
+      "action": "sonata",
+      "destinations": [
+        {
+          "repo": "sonata",
+          "path": "packages/sonata-tasks/src/sonata_tasks/registry_tunnel.py"
+        }
+      ],
+      "top_level_symbols": [
+        "_run",
+        "_exec_quietly",
+        "_stop_and_reset",
+        "_acquire_tunnel",
+        "_release_tunnel",
+        "_registry_title",
+        "registry_tunnel_resource"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/release_composites.py",
+      "sha256": "541260b6cfbb5f73fd3050b1e0c90166e34e9fbc77b6ab0bb8975a87fa708910",
+      "action": "split",
+      "destinations": [
+        {
+          "repo": "sonata",
+          "path": "packages/sonata-tasks/src/sonata_tasks/composites.py",
+          "scope": "command_specs_composite to composites.py"
+        },
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/release_composites.py",
+          "scope": "all remaining symbols to release_composites.py"
+        }
+      ],
+      "top_level_symbols": [
+        "command_specs_composite",
+        "registry_push_composite",
+        "_AttestImageTask",
+        "attest_composite",
+        "_artifact_slug"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/resources.py",
+      "sha256": "a0c057f788613669333fdfc0a6eba592159ca8030dc322d7b082a4453578715f",
+      "action": "nanolab",
+      "destinations": [
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/resources.py"
+        }
+      ],
+      "top_level_symbols": [
+        "_payload",
+        "_compare",
+        "_halves",
+        "ContainerResourceCheckTask",
+        "_k8s_cpu",
+        "K8sResourceCheckTask"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/shell.py",
+      "sha256": "6796f081d8284cdd2faa9e3cada9aca6424cf395a72c73c32d503778314d4589",
+      "action": "sonata",
+      "destinations": [
+        {
+          "repo": "sonata",
+          "path": "packages/sonata-tasks/src/sonata_tasks/shell.py"
+        }
+      ],
+      "top_level_symbols": [
+        "SubprocessShell"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/skopeo.py",
+      "sha256": "7152a8878768c11834aa021cdc09499d194f6167a3a55b72baeb5d5c826e10a1",
+      "action": "sonata",
+      "destinations": [
+        {
+          "repo": "sonata",
+          "path": "packages/sonata-tasks/src/sonata_tasks/skopeo.py"
+        }
+      ],
+      "top_level_symbols": [
+        "SkopeoCopyTask",
+        "SkopeoInspectTask"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/syft.py",
+      "sha256": "b2dd0518d4d8a2656bdb96436facc80ceb78f0d76e81dc8c620201c80c7bf53b",
+      "action": "sonata",
+      "destinations": [
+        {
+          "repo": "sonata",
+          "path": "packages/sonata-tasks/src/sonata_tasks/syft.py"
+        }
+      ],
+      "top_level_symbols": [
+        "SyftTask"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/tasks/executors.py",
+      "sha256": "9daa2297dd817d1e6ab7efc3a451a815347e4d29f6a1118f2dedef38dfadad77",
+      "action": "sonata",
+      "destinations": [
+        {
+          "repo": "sonata",
+          "path": "packages/sonata-tasks/src/sonata_tasks/execution/adapters.py"
+        }
+      ],
+      "top_level_symbols": [
+        "CommandRunResult",
+        "HostCommandRunner",
+        "HostCommandTaskExecutor",
+        "VmCommandResult",
+        "VmCommandRunner",
+        "VmCommandTaskExecutor"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/tasks/models.py",
+      "sha256": "a31b502ac89953c5490c78af019740f3ce6cac03e08a8d2ee6231e7716e812de",
+      "action": "sonata",
+      "destinations": [
+        {
+          "repo": "sonata",
+          "path": "packages/sonata-tasks/src/sonata_tasks/execution/models.py"
+        }
+      ],
+      "top_level_symbols": [
+        "CommandTaskSpec",
+        "TaskResult"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/telegram.py",
+      "sha256": "27f1260d8795ee109bb3ed422f358a09e3ee70d622209131810783ae0055f1ee",
+      "action": "nanolab",
+      "destinations": [
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/telegram.py"
+        }
+      ],
+      "top_level_symbols": [
+        "TelegramWorkflowObserver",
+        "telegram_observer_from_environment",
+        "_message",
+        "_telegram_sender"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/testing.py",
+      "sha256": "94c855d7ac31e64a454944a1f4037d94be61c48e3e8b024bfae8afdc49e4e9c1",
+      "action": "nanolab",
+      "destinations": [
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/testing.py"
+        }
+      ],
+      "top_level_symbols": [
+        "passed",
+        "cli_response",
+        "cli_function_steps",
+        "cli_task_ids"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/transfer.py",
+      "sha256": "89c1cff99a94c69aff58c13998ea2bb63127690d6c7519e5fd4317a5163216d7",
+      "action": "sonata",
+      "destinations": [
+        {
+          "repo": "sonata",
+          "path": "packages/sonata-tasks/src/sonata_tasks/transfer.py"
+        }
+      ],
+      "top_level_symbols": [
+        "FileTransferTask"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/validate.py",
+      "sha256": "eb3ee0c3ae9831e0c207fe8233fd0c0e009197ab3a8beb5ef28380188e5d0420",
+      "action": "nanolab",
+      "destinations": [
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/validate.py"
+        }
+      ],
+      "top_level_symbols": [
+        "EnvelopeCheck",
+        "AsyncCheck",
+        "ValidateWorkflowRequest",
+        "_inspection_task",
+        "build_validate_workflow"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/validate_recovery.py",
+      "sha256": "e520163ef6c9f60b8409c0a2bdc6ba175837a340a5b3deffe36ae3f05f60f24b",
+      "action": "nanolab",
+      "destinations": [
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/validate_recovery.py"
+        }
+      ],
+      "top_level_symbols": [
+        "_result",
+        "_container_ids",
+        "ManagedContainerIdsTask",
+        "RemoveManagedContainersTask",
+        "managed_container_cleanup_resource",
+        "ContainerPersistentRecoveryTask",
+        "_uid",
+        "_control_plane_pod",
+        "KubernetesPersistentRecoveryTask"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/vm/__init__.py",
+      "sha256": "7d2fabca159e487890cb367f7927abd66358cce6ee64b5ef1bbfa72d4baf244c",
+      "action": "split",
+      "destinations": [
+        {
+          "repo": "sonata",
+          "path": "packages/sonata-tasks/src/sonata_tasks/vm/__init__.py",
+          "scope": "vm_resource using VmLifecycleProtocol"
+        },
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/vm/__init__.py",
+          "scope": "no client implementation"
+        }
+      ],
+      "top_level_symbols": [
+        "vm_resource"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/vm/adapters.py",
+      "sha256": "3756b244b64720160f4e6a1c051fecff2011f13004cf118b6499ed7c3f93b81d",
+      "action": "sonata",
+      "destinations": [
+        {
+          "repo": "sonata",
+          "path": "packages/sonata-tasks/src/sonata_tasks/vm/adapters.py"
+        }
+      ],
+      "top_level_symbols": [
+        "VmLifecycleAdapter",
+        "multipass_vm_adapter",
+        "azure_vm_adapter",
+        "proxmox_vm_adapter"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/vm/azure.py",
+      "sha256": "fe65c9a0642caf077b167476f95451fa3f7b8b02442a97fc1f1454a1b5f80c3c",
+      "action": "sonata",
+      "destinations": [
+        {
+          "repo": "sonata",
+          "path": "packages/sonata-tasks/src/sonata_tasks/vm/providers/azure.py"
+        }
+      ],
+      "top_level_symbols": [
+        "AzureVmFacts",
+        "AzureVmProvider",
+        "_disk_size_gb"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/vm/models.py",
+      "sha256": "a6158f1f6362cbbc789be952bb03e9f380427f60039737061bfc9e68edcb4a69",
+      "action": "split",
+      "destinations": [
+        {
+          "repo": "sonata",
+          "path": "packages/sonata-tasks/src/sonata_tasks/vm/models.py",
+          "scope": "VmConfig, VmInfo, VmLifecycle, VmRequest without hpa_scale_to_zero or environment settings, vm_remote_home"
+        },
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/vm/models.py",
+          "scope": "NanolabVmRequest subclass with hpa_scale_to_zero; _VmEnvSettings, vm_request_from_env"
+        }
+      ],
+      "top_level_symbols": [
+        "VmConfig",
+        "VmInfo",
+        "VmRequest",
+        "vm_remote_home",
+        "_VmEnvSettings",
+        "vm_request_from_env"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/vm/multipass.py",
+      "sha256": "774bec56fed6df74fc09539b13f322bf96c1be2ff53d18beffc2ef752103322d",
+      "action": "split",
+      "destinations": [
+        {
+          "repo": "sonata",
+          "path": "packages/sonata-tasks/src/sonata_tasks/vm/providers/multipass.py",
+          "scope": "MultipassVmProvider and provider-only helpers; shared SSH helpers to vm/ssh.py"
+        },
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/vm/sync.py",
+          "scope": "repo sync policy and builders to vm/sync.py"
+        }
+      ],
+      "top_level_symbols": [
+        "_vm_name_default",
+        "_ok",
+        "_sdk_error",
+        "_find_ssh_private_key_path",
+        "resolve_connection_host",
+        "repo_sync_ssh_rsh",
+        "repo_rsync_command",
+        "MultipassVmProvider"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/vm/orchestrator.py",
+      "sha256": "6cad40c6a717b727de4565efb9d3c97d5955e8783376d264377754d26df26953",
+      "action": "nanolab",
+      "destinations": [
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/vm/orchestrator.py"
+        }
+      ],
+      "top_level_symbols": [
+        "VmOrchestrator"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/vm/ports.py",
+      "sha256": "f4a2a8100db7ad39c0c46b883f35e64ad8d6119a19a3f819316f9123c646a2b7",
+      "action": "split",
+      "destinations": [
+        {
+          "repo": "sonata",
+          "path": "packages/sonata-tasks/src/sonata_tasks/vm/ports.py",
+          "scope": "provider protocols and lifecycle protocol"
+        },
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/vm/ports.py",
+          "scope": "product orchestration protocols if needed"
+        }
+      ],
+      "top_level_symbols": [
+        "VmLifecycleProtocol",
+        "VmCommandProvider"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/vm/proxmox.py",
+      "sha256": "e40f5a366b005db29ef00e3204d80c2c166f88f41d3ae6c72636f6631460538d",
+      "action": "sonata",
+      "destinations": [
+        {
+          "repo": "sonata",
+          "path": "packages/sonata-tasks/src/sonata_tasks/vm/providers/proxmox.py"
+        }
+      ],
+      "top_level_symbols": [
+        "_parse_memory_mb",
+        "_parse_disk_gb",
+        "ProxmoxVmProvider"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/vm/runners.py",
+      "sha256": "92485bb1436cdf3a3f8470d0cb67b076275653a6d00beceebed00b6065df0d76",
+      "action": "nanolab",
+      "destinations": [
+        {
+          "repo": "nanolab",
+          "path": "packages/nanolab/src/nanolab/tasks/vm/runners.py"
+        }
+      ],
+      "top_level_symbols": [
+        "VmFileFetcher"
+      ]
+    },
+    {
+      "source": "packages/sonata-tasks/src/sonata_tasks/vm/tasks.py",
+      "sha256": "93598518b54125710c1a0c9d4fcdd0e13b96aa8ca1ce308aa8a67195a219ef5e",
+      "action": "sonata",
+      "destinations": [
+        {
+          "repo": "sonata",
+          "path": "packages/sonata-tasks/src/sonata_tasks/vm/tasks.py"
+        }
+      ],
+      "top_level_symbols": [
+        "EnsureVmRunning",
+        "DestroyVm"
+      ]
+    }
+  ],
+  "decontamination_spec": "2026-09-05-shared-sonata-tasks-decontamination.md"
+}

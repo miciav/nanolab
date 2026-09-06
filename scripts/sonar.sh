@@ -90,8 +90,8 @@ scanner=(
     -Dsonar.projectKey=nanolab-python
     -Dsonar.projectName="NanoLab Python"
     -Dsonar.python.version=3.12
-    -Dsonar.sources=packages/nanolab/src,packages/sonata-tasks/src,packages/tui-toolkit/src
-    -Dsonar.tests=packages/nanolab/tests,packages/sonata-tasks/tests,packages/tui-toolkit/tests
+    -Dsonar.sources=packages/nanolab/src,packages/tui-toolkit/src
+    -Dsonar.tests=packages/nanolab/tests,packages/tui-toolkit/tests
     -Dsonar.exclusions="**/__pycache__/**,**/*.pyc"
     -Dsonar.sourceEncoding=UTF-8
 )

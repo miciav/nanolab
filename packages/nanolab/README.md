@@ -3,8 +3,9 @@
 The control-plane tool is the orchestration entry point for provisioning and
 validating NanoFaaS. A scenario defines *what* to execute; an environment binds
 each role to a local host, a managed VM, or an external SSH host. Task
-implementations live in `packages/sonata-tasks`; this package remains the
-product-facing composition layer.
+generic task implementations live in the pinned `sonata-tasks` package from
+the Sonata repository; this package remains the product-facing composition
+layer.
 
 It is intentionally separate from the `nanofaas` CLI: the CLI calls the
 control-plane HTTP API to manage functions, while this tool creates VMs, installs

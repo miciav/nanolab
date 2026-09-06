@@ -1,3 +1,4 @@
+from sonata_tasks.execution.models import CommandOptions
 import json
 from collections.abc import Callable
 from dataclasses import replace
@@ -6,33 +7,34 @@ from typing import Any, cast
 
 from multipass import find_ssh_public_key
 from sonata_engine import Resource, TaskInputs, Workflow
-from sonata_tasks.cli import (
+from nanolab.tasks.cli import (
     RUNTIME_CONFIG_NAMESPACE,
     CliFunction,
     CliWorkflowRequest,
     build_cli_workflow,
 )
 from sonata_tasks.command import CommandTask
-from sonata_tasks.deployment import CONTROL_PLANE_NODE_PORT, DEFAULT_NAMESPACE, LOCAL_REGISTRY
+from nanolab.tasks.deployment import CONTROL_PLANE_NODE_PORT, DEFAULT_NAMESPACE, LOCAL_REGISTRY, REGISTRY_CONTAINER_NAME
 from sonata_tasks.helm import HelmReleaseSpec, helm_release_resource
 from sonata_tasks.process import managed_process_resource
 from sonata_tasks.registry import docker_registry_resource
-from sonata_tasks.provisioning.resources import provisioned_vm
-from sonata_tasks.components.bootstrap import (
+from nanolab.tasks.provisioning.resources import provisioned_vm
+from nanolab.tasks.components.bootstrap import (
     plan_k3s_install,
     plan_repo_sync_to_vm,
     plan_vm_provision_base,
     remote_project_dir,
     retarget_bootstrap_operation,
 )
-from sonata_tasks.components.context import ScenarioExecutionContext
-from sonata_tasks.components.helm import control_plane_helm_values, helm_set_args
-from sonata_tasks.components.images import control_image
-from sonata_tasks.components.operations import RemoteCommandOperation, ScenarioOperation
+from nanolab.tasks.components.context import ScenarioExecutionContext
+from nanolab.tasks.components.helm import control_plane_helm_values, helm_set_args
+from nanolab.tasks.components.images import control_image
+from nanolab.tasks.components.operations import RemoteCommandOperation, ScenarioOperation
 from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
-from sonata_tasks.execution.roles import ExecutionRole
-from sonata_tasks.vm.models import VmInfo, VmRequest
-from sonata_tasks.vm.multipass import _find_ssh_private_key_path, repo_sync_ssh_rsh
+from nanolab.tasks.execution import ExecutionRole
+from nanolab.tasks.vm.models import VmInfo, VmRequest
+from sonata_tasks.vm.ssh import find_ssh_private_key_path
+from nanolab.tasks.vm.sync import repo_sync_ssh_rsh
 
 from nanolab.cli.vm_provider import provider_for_environment, vm_request_for_role
 from nanolab.config.environment import EnvironmentConfig
@@ -157,7 +159,7 @@ def _bootstrap_tasks(
     def resolve_private_key() -> Path | None:
         nonlocal private_key, private_key_resolved
         if not private_key_resolved:
-            private_key = _find_ssh_private_key_path(find_ssh_public_key())
+            private_key = find_ssh_private_key_path(find_ssh_public_key())
             private_key_resolved = True
         return private_key
 
@@ -186,7 +188,8 @@ def _bootstrap_tasks(
                 argv=resolve_argv,
                 executor=executor,
                 role="host",
-                env=base_operation.env,
+                options=CommandOptions(env=base_operation.env),
+                semantic_key=f"nanolab.cli.bootstrap:{title}",
             )
         )
 
@@ -214,6 +217,7 @@ def _bootstrap_tasks(
             argv=resolve_cli_sync_argv,
             executor=executor,
             role="host",
+            semantic_key="nanolab.cli.sync-cli:v1",
         )
     )
     return tuple(tasks)
@@ -253,7 +257,7 @@ def _control_plane_helm_resource(
         namespace=namespace,
         values=helm_set_args(values),
     )
-    resource = helm_release_resource(spec, executor=executor, requires=(vm,))
+    resource = helm_release_resource(spec, executor=executor, role="stack", requires=(vm,))
     # Retitled so the compiled id reads "acquire-control-plane-helm-release":
     # `helm_release_resource`'s own title is generic ("Acquire Helm release
     # <name>"), but this workflow's topology names the release by what it's for.
@@ -401,6 +405,7 @@ def build_cli_plan(  # NOSONAR (S3776): selects one complete deployment graph
         docker_registry_resource(
             executor=RoleBoundCommandTaskExecutor(bindings),
             role="host",
+            container=REGISTRY_CONTAINER_NAME,
         )
         if local
         else None

@@ -35,7 +35,7 @@ from nanolab.plans.loadtest import (
     waits_for_parking,
 )
 from sonata_tasks.execution.bindings import RoleBindings
-from sonata_tasks.platform import Backend
+from nanolab.tasks.platform import Backend
 
 from .test_loadtest import NoopPrometheus, RecordingExecutor
 
@@ -196,7 +196,7 @@ def test_the_plan_still_compiles_for_the_governor_scenario(
     workflow = build_loadtest_plan(
         CONCURRENCY_SCENARIO,
         EnvironmentConfig(provider="local"),
-        RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor()),
+        RoleBindings({'host': RecordingExecutor(), 'stack': RecordingExecutor()}),
         control_plane_url="http://127.0.0.1:8080",
         prometheus_client=NoopPrometheus(),
         run_dir=tmp_path,

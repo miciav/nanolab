@@ -16,12 +16,14 @@ them, and a build made on an arm64 laptop is not the artefact under measurement.
 
 from __future__ import annotations
 
+from sonata_tasks.execution.models import CommandOptions
+
 from collections.abc import Sequence
 from typing import Any
 
 from sonata_engine import Workflow
 from sonata_tasks.command import CommandTask
-from sonata_tasks.components.operations import RemoteCommandOperation
+from nanolab.tasks.components.operations import RemoteCommandOperation
 
 from nanolab.images.control_plane_variants import (
     ControlPlaneVariant,
@@ -186,8 +188,7 @@ def prepare_workflow(
                 argv=tuple(operation.argv),
                 executor=executor,
                 role="stack",
-                env=dict(operation.env),
-                remote_dir=remote_dir,
+                options=CommandOptions(env=dict(operation.env), remote_dir=remote_dir),
             )
         )
     return workflow

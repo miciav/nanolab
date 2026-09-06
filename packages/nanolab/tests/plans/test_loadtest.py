@@ -7,7 +7,7 @@ from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.plans.loadtest import build_loadtest_plan
 from sonata_tasks.execution.bindings import RoleBindings
-from sonata_tasks.loadtest.models import TimeWindow
+from nanolab.tasks.loadtest.models import TimeWindow
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 
@@ -17,6 +17,9 @@ CONTROL_PLANE_LOG = "InternalScaler starting with poll interval 5000ms\n"
 @dataclass
 class RecordingExecutor:
     seen: list[CommandTaskSpec] = field(default_factory=list)
+
+    def binding_key(self, role: str) -> str:
+        return f"test-recording:{role}"
 
     def run(self, task: CommandTaskSpec, *, dry_run: bool = False) -> TaskResult:
         self.seen.append(task)
@@ -58,7 +61,7 @@ def _no_real_waiting(monkeypatch: pytest.MonkeyPatch) -> None:
     """The autoscaling verifier polls for real: 90s settle plus 2x24 polls at 5s.
     These tests now run the workflow rather than inspecting it, so without this
     the file takes six and a half minutes to assert on argv."""
-    monkeypatch.setattr("sonata_tasks.loadtest.autoscaling.time.sleep", lambda _seconds: None)
+    monkeypatch.setattr("nanolab.tasks.loadtest.autoscaling.time.sleep", lambda _seconds: None)
 
 
 SCENARIO = ScenarioConfig(workflow="loadtest", functions=["word-stats-java"])
@@ -161,7 +164,7 @@ def test_provider_contract_selects_role_and_result_transport(
     workflow = build_loadtest_plan(
         SCENARIO,
         environment,
-        RoleBindings(host=executor, stack=executor, loadgen=executor),
+        RoleBindings({'host': executor, 'stack': executor, 'loadgen': executor}),
         control_plane_url="http://stack:30080",
         prometheus_client=NoopPrometheus(),
         run_dir=tmp_path,
@@ -179,7 +182,7 @@ def test_loadtest_defaults_preserve_task_ids_byte_for_byte(tmp_path: Path) -> No
     workflow = build_loadtest_plan(
         SCENARIO,
         EnvironmentConfig(provider="local"),
-        RoleBindings(host=executor, stack=executor),
+        RoleBindings({'host': executor, 'stack': executor}),
         control_plane_url="http://stack:30080",
         prometheus_client=NoopPrometheus(),
         run_dir=tmp_path,
@@ -196,7 +199,7 @@ def test_container_loadtest_uses_compose_without_kubernetes(
     workflow = build_loadtest_plan(
         CONTAINER_SCENARIO,
         EnvironmentConfig(provider="local"),
-        RoleBindings(host=executor, stack=executor),
+        RoleBindings({'host': executor, 'stack': executor}),
         control_plane_url="http://127.0.0.1:8080",
         prometheus_client=NoopPrometheus(),
         run_dir=tmp_path,
@@ -224,10 +227,7 @@ def test_container_loadtest_rejects_remote_environment(tmp_path: Path) -> None:
             EnvironmentConfig.model_validate(
                 {"provider": "multipass", "roles": {"stack": {"name": "stack"}}}
             ),
-            RoleBindings(
-                host=RecordingExecutor(),
-                stack=RecordingExecutor(),
-            ),
+            RoleBindings({'host': RecordingExecutor(), 'stack': RecordingExecutor()}),
             control_plane_url="http://127.0.0.1:8080",
             prometheus_client=NoopPrometheus(),
             run_dir=tmp_path,
@@ -254,7 +254,7 @@ def test_scale_to_zero_scenario_rejects_an_environment_without_the_feature_gate(
             EnvironmentConfig.model_validate(
                 {"provider": "multipass", "roles": {"stack": {"name": "stack"}}}
             ),
-            RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor()),
+            RoleBindings({'host': RecordingExecutor(), 'stack': RecordingExecutor()}),
             control_plane_url="http://127.0.0.1:8080",
             prometheus_client=NoopPrometheus(),
             run_dir=tmp_path,
@@ -278,7 +278,7 @@ def test_scale_to_zero_scenario_accepts_an_environment_that_provides_the_gate(
                 "roles": {"stack": {"name": "stack", "hpaScaleToZero": True}},
             }
         ),
-        RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor()),
+        RoleBindings({'host': RecordingExecutor(), 'stack': RecordingExecutor()}),
         control_plane_url="http://127.0.0.1:8080",
         prometheus_client=NoopPrometheus(),
         run_dir=tmp_path,
@@ -301,7 +301,7 @@ def test_dedicated_loadgen_uses_the_staged_nanolab_k6_asset(tmp_path: Path) -> N
     workflow = build_loadtest_plan(
         SCENARIO,
         environment,
-        RoleBindings(host=executor, stack=executor, loadgen=executor),
+        RoleBindings({'host': executor, 'stack': executor, 'loadgen': executor}),
         control_plane_url="http://stack:30080",
         prometheus_client=NoopPrometheus(),
         run_dir=tmp_path,
@@ -327,7 +327,7 @@ def test_explicit_remote_run_directory_is_cleaned_before_k6(tmp_path: Path) -> N
                 },
             }
         ),
-        RoleBindings(host=executor, stack=executor, loadgen=executor),
+        RoleBindings({'host': executor, 'stack': executor, 'loadgen': executor}),
         control_plane_url="http://stack:30080",
         prometheus_client=NoopPrometheus(),
         run_dir=tmp_path,
@@ -373,7 +373,7 @@ def test_remote_cleanup_rejects_paths_outside_release_benchmark_run(
             EnvironmentConfig.model_validate(
                 {"provider": "multipass", "roles": {"stack": {"name": "stack"}}}
             ),
-            RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor()),
+            RoleBindings({'host': RecordingExecutor(), 'stack': RecordingExecutor()}),
             control_plane_url="http://stack:30080",
             prometheus_client=NoopPrometheus(),
             run_dir=tmp_path,
@@ -393,7 +393,7 @@ def test_a_remote_run_dir_must_be_an_absolute_run_child(tmp_path: Path) -> None:
             EnvironmentConfig.model_validate(
                 {"provider": "multipass", "roles": {"stack": {"name": "nanofaas-stack"}}}
             ),
-            RoleBindings(host=executor, stack=executor),
+            RoleBindings({'host': executor, 'stack': executor}),
             control_plane_url="http://stack:30080",
             prometheus_client=NoopPrometheus(),
             run_dir=tmp_path,
@@ -409,7 +409,7 @@ def test_local_loadtest_reads_k6_script_from_the_nanolab_package(
     workflow = build_loadtest_plan(
         SCENARIO,
         EnvironmentConfig(provider="local"),
-        RoleBindings(host=executor, stack=executor),
+        RoleBindings({'host': executor, 'stack': executor}),
         control_plane_url="http://stack:30080",
         prometheus_client=NoopPrometheus(),
         run_dir=tmp_path / "run",
@@ -429,7 +429,7 @@ def test_loadtest_plan_deploys_exact_prebuilt_images(tmp_path: Path) -> None:
     workflow = build_loadtest_plan(
         SCENARIO,
         EnvironmentConfig(provider="local"),
-        RoleBindings(host=executor, stack=executor),
+        RoleBindings({'host': executor, 'stack': executor}),
         control_plane_url="http://stack:30080",
         prometheus_client=NoopPrometheus(),
         run_dir=tmp_path,
@@ -456,7 +456,7 @@ def test_remote_prebuilt_loadtest_uses_the_staged_chart_path(tmp_path: Path) -> 
         EnvironmentConfig.model_validate(
             {"provider": "multipass", "roles": {"stack": {"name": "stack"}}}
         ),
-        RoleBindings(host=executor, stack=executor),
+        RoleBindings({'host': executor, 'stack': executor}),
         control_plane_url="http://stack:30080",
         prometheus_client=NoopPrometheus(),
         run_dir=tmp_path,
@@ -480,7 +480,7 @@ def test_prebuilt_loadtest_requires_function_images(tmp_path: Path) -> None:
         build_loadtest_plan(
             SCENARIO,
             EnvironmentConfig(provider="local"),
-            RoleBindings(host=executor, stack=executor),
+            RoleBindings({'host': executor, 'stack': executor}),
             control_plane_url="http://stack:30080",
             prometheus_client=NoopPrometheus(),
             run_dir=tmp_path,
@@ -500,7 +500,7 @@ def test_prebuilt_loadtest_reports_missing_selected_function_images(
         build_loadtest_plan(
             SCENARIO,
             EnvironmentConfig(provider="local"),
-            RoleBindings(host=executor, stack=executor),
+            RoleBindings({'host': executor, 'stack': executor}),
             control_plane_url="http://stack:30080",
             prometheus_client=NoopPrometheus(),
             run_dir=tmp_path,
@@ -517,7 +517,7 @@ def test_loadtest_plan_owns_stack_registration_and_cleanup(tmp_path: Path) -> No
         EnvironmentConfig.model_validate(
             {"provider": "multipass", "roles": {"stack": {"name": "stack"}}}
         ),
-        RoleBindings(host=executor, stack=executor),
+        RoleBindings({'host': executor, 'stack': executor}),
         control_plane_url="http://stack:30080",
         prometheus_client=NoopPrometheus(),
         run_dir=tmp_path,
@@ -539,7 +539,7 @@ def test_loadtest_plan_enables_advanced_metrics(tmp_path: Path) -> None:
         EnvironmentConfig.model_validate(
             {"provider": "multipass", "roles": {"stack": {"name": "stack"}}}
         ),
-        RoleBindings(host=executor, stack=executor),
+        RoleBindings({'host': executor, 'stack': executor}),
         control_plane_url="http://stack:30080",
         prometheus_client=NoopPrometheus(),
         run_dir=tmp_path,
@@ -566,7 +566,7 @@ def test_autoscaling_loadtest_builds_registers_and_observes_scaler(tmp_path: Pat
         EnvironmentConfig.model_validate(
             {"provider": "multipass", "roles": {"stack": {"name": "stack"}}}
         ),
-        RoleBindings(host=executor, stack=executor),
+        RoleBindings({'host': executor, 'stack': executor}),
         control_plane_url="http://stack:30080",
         prometheus_client=NoopPrometheus(),
         run_dir=tmp_path,
@@ -611,7 +611,7 @@ def test_hpa_autoscaling_loadtest_enables_adapter_and_keeps_one_replica(tmp_path
         EnvironmentConfig.model_validate(
             {"provider": "multipass", "roles": {"stack": {"name": "stack"}}}
         ),
-        RoleBindings(host=executor, stack=executor),
+        RoleBindings({'host': executor, 'stack': executor}),
         control_plane_url="http://stack:30080",
         prometheus_client=NoopPrometheus(),
         run_dir=tmp_path,
@@ -662,7 +662,7 @@ def test_hpa_scale_to_zero_loadtest_registers_a_zero_replica_floor(tmp_path: Pat
                 "roles": {"stack": {"name": "stack", "hpaScaleToZero": True}},
             }
         ),
-        RoleBindings(host=executor, stack=executor),
+        RoleBindings({'host': executor, 'stack': executor}),
         control_plane_url="http://stack:30080",
         prometheus_client=NoopPrometheus(),
         run_dir=tmp_path,
@@ -699,7 +699,7 @@ def test_autoscaling_loadtest_rejects_nonzero_initial_replicas_before_k6(
         EnvironmentConfig.model_validate(
             {"provider": "multipass", "roles": {"stack": {"name": "stack"}}}
         ),
-        RoleBindings(host=executor, stack=executor),
+        RoleBindings({'host': executor, 'stack': executor}),
         control_plane_url="http://stack:30080",
         prometheus_client=NoopPrometheus(),
         run_dir=tmp_path,
@@ -733,7 +733,7 @@ def test_internal_autoscaling_waits_for_the_park_at_zero_it_configures(tmp_path:
         EnvironmentConfig.model_validate(
             {"provider": "multipass", "roles": {"stack": {"name": "stack"}}}
         ),
-        RoleBindings(host=executor, stack=executor),
+        RoleBindings({'host': executor, 'stack': executor}),
         control_plane_url="http://stack:30080",
         prometheus_client=NoopPrometheus(),
         run_dir=tmp_path,

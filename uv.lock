@@ -14,7 +14,6 @@ resolution-markers = [
 members = [
     "nanolab",
     "nanolab-workspace",
-    "sonata-tasks",
     "tui-toolkit",
 ]
 
@@ -645,7 +644,7 @@ requires-dist = [
     { name = "questionary", specifier = ">=2.1.1" },
     { name = "rich", specifier = ">=13.8" },
     { name = "sonata-engine", git = "https://github.com/miciav/sonata.git?rev=e81d559" },
-    { name = "sonata-tasks", editable = "packages/sonata-tasks" },
+    { name = "sonata-tasks", git = "https://github.com/miciav/sonata.git?rev=d1001e17df32511168796857471c8d1dbad60a81", subdirectory = "packages/sonata-tasks" },
     { name = "tui-toolkit", editable = "packages/tui-toolkit" },
     { name = "typer", specifier = ">=0.12.5" },
 ]
@@ -1253,18 +1252,9 @@ source = { git = "https://github.com/miciav/sonata.git?rev=e81d559#e81d559952d4a
 
 [[package]]
 name = "sonata-tasks"
-version = "0.1.0"
-source = { editable = "packages/sonata-tasks" }
+version = "0.2.0"
+source = { git = "https://github.com/miciav/sonata.git?rev=d1001e17df32511168796857471c8d1dbad60a81#d1001e17df32511168796857471c8d1dbad60a81", subdirectory = "packages/sonata-tasks" }
 dependencies = [
-    { name = "azure-vm-sdk" },
-    { name = "httpx" },
-    { name = "multipass-sdk" },
-    { name = "pandas" },
-    { name = "plotly" },
-    { name = "proxmox-sdk" },
-    { name = "pydantic" },
-    { name = "pydantic-settings" },
-    { name = "shellcraft" },
     { name = "sonata-engine" },
 ]
 
@@ -1272,6 +1262,7 @@ dependencies = [
 dev = [
     { name = "basedpyright" },
     { name = "grimp" },
+    { name = "httpx" },
     { name = "import-linter" },
     { name = "pytest" },
     { name = "pytest-cov" },
@@ -1280,15 +1271,6 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "azure-vm-sdk", git = "https://github.com/miciav/azure-vm-sdk.git?rev=eb8a542" },
-    { name = "httpx", specifier = ">=0.27" },
-    { name = "multipass-sdk", git = "https://github.com/miciav/multipass-sdk.git?rev=402c406" },
-    { name = "pandas", specifier = ">=2.2" },
-    { name = "plotly", specifier = ">=5.24" },
-    { name = "proxmox-sdk", git = "https://github.com/miciav/proxmox-sdk.git?rev=9e20703" },
-    { name = "pydantic", specifier = ">=2.9.2" },
-    { name = "pydantic-settings", specifier = ">=2.5" },
-    { name = "shellcraft", git = "https://github.com/miciav/shellcraft.git?rev=b6547835aac88d058810c7b9a592ad442c54ac99" },
     { name = "sonata-engine", git = "https://github.com/miciav/sonata.git?rev=e81d559" },
 ]
 

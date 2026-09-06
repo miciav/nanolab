@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sonata_tasks.infra.ansible import bundled_ansible_root
+from nanolab.tasks.infra.ansible import bundled_ansible_root
 
 _ANSIBLE_ROOT = bundled_ansible_root()
 

@@ -6,7 +6,7 @@ from typing import cast
 
 import yaml
 
-from sonata_tasks.deployment import LOCAL_REGISTRY
+from nanolab.tasks.deployment import LOCAL_REGISTRY
 
 from nanolab.core.models import FunctionRuntimeKind
 from nanolab.workspace.paths import default_tool_paths

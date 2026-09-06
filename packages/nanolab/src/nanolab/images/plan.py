@@ -8,7 +8,7 @@ from typing import Literal
 from nanolab.functions.catalog import FunctionDefinition, list_functions
 from nanolab.images.control_plane_variants import VARIANTS_BY_KEY, jvm_optimization
 from nanolab.release.versioning import normalize_version
-from sonata_tasks.deployment import LOCAL_REGISTRY
+from nanolab.tasks.deployment import LOCAL_REGISTRY
 
 
 ImageArchitecture = Literal["amd64", "arm64"]

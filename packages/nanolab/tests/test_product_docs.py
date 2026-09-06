@@ -60,7 +60,6 @@ def test_workspace_readme_documents_local_sonarqube_analysis() -> None:
         "sonar-scanner",
         "127.0.0.1:9000",
         "packages/nanolab/src",
-        "packages/sonata-tasks/src",
         "packages/tui-toolkit/src",
         ".scannerwork/issues.json",
     ):

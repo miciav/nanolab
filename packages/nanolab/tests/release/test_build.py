@@ -22,7 +22,7 @@ def test_source_tests_reuse_gradle_and_uv_and_pin_container_toolchains() -> None
     gradle_cmd = commands[0]
     assert gradle_cmd.task_id == "release.source.gradle"
     assert gradle_cmd.role == "stack"
-    assert gradle_cmd.remote_dir == "/srv/nanofaas-source"
+    assert gradle_cmd.options.remote_dir == "/srv/nanofaas-source"
     assert gradle_cmd.argv[:2] == ("bash", "-c")
     script = gradle_cmd.argv[2]
     assert "./gradlew test" in script
@@ -56,7 +56,7 @@ def test_source_tests_reuse_gradle_and_uv_and_pin_container_toolchains() -> None
         assert command.argv[-1].startswith("set -eu; cp -a /source/. /workspace && ")
         image = next(value for value in command.argv if "@sha256:" in value)
         assert len(image.rsplit("@sha256:", 1)[1]) == 64
-        assert command.remote_dir == "/srv/nanofaas-source"
+        assert command.options.remote_dir == "/srv/nanofaas-source"
 
 
 def test_amd64_build_commands_prepare_jvm_cells_and_bake_everything() -> None:
@@ -96,7 +96,7 @@ def test_amd64_build_commands_prepare_jvm_cells_and_bake_everything() -> None:
     )
     # No separate native build step exists any more; the bake is the last command.
     assert bake_index == len(commands) - 1
-    assert all(c.role == "stack" and c.remote_dir == "/remote/source" for c in commands)
+    assert all(c.role == "stack" and c.options.remote_dir == "/remote/source" for c in commands)
 
 
 def test_amd64_commands_contain_no_gradle_image_builds() -> None:

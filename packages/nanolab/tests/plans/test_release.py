@@ -14,7 +14,7 @@ import yaml
 from sonata_engine import JournalConfig, Resource, Selection
 from sonata_tasks.execution.bindings import RoleBindings
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
-from sonata_tasks.vm.models import VmInfo
+from nanolab.tasks.vm.models import VmInfo
 
 import nanolab.plans.release as release_plan
 import nanolab.release.resources as release_resources
@@ -245,6 +245,9 @@ class _ArmWorkflowExecutor:
         # Set by a test to fail a chosen command; None means everything passes.
         self.fail_when: Callable[[CommandTaskSpec], bool] | None = None
 
+    def binding_key(self, role: str) -> str:
+        return f"test-arm:{role}"
+
     def run(self, task, *, dry_run=False):
         del dry_run
         self.commands.append(task)
@@ -361,13 +364,7 @@ def _arm_failure_workflow(
         release_plan,
         "build_role_bindings",
         lambda *_args, **_kwargs: (
-            RoleBindings(
-                host=executor,
-                stack=executor,
-                loadgen=executor,
-                cloud=executor,
-                arm_builder=executor,
-            ),
+            RoleBindings({'host': executor, 'stack': executor, 'loadgen': executor, 'cloud': executor, 'arm-builder': executor}),
             None,
         ),
     )

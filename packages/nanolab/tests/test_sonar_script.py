@@ -11,11 +11,11 @@ def test_sonar_script_scans_every_workspace_package() -> None:
     assert 'SONAR_HOST="http://127.0.0.1:9000"' in script
     assert "-Dsonar.projectKey=nanolab-python" in script
     assert (
-        "-Dsonar.sources=packages/nanolab/src,packages/sonata-tasks/src,packages/tui-toolkit/src"
+        "-Dsonar.sources=packages/nanolab/src,packages/tui-toolkit/src"
         in script
     )
     assert (
-        "-Dsonar.tests=packages/nanolab/tests,packages/sonata-tasks/tests,packages/tui-toolkit/tests"
+        "-Dsonar.tests=packages/nanolab/tests,packages/tui-toolkit/tests"
         in script
     )
     assert 'docker rm -f "$CONTAINER_NAME"' in script

@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 from sonata_engine import Evidence, Resource, Steps
 from sonata_tasks.command import CommandTask
 from sonata_tasks.cosign import CosignTask
-from sonata_tasks.release_composites import (
+from nanolab.tasks.release_composites import (
     attest_composite,
     command_specs_composite,
     registry_push_composite,
@@ -120,10 +120,10 @@ def build_source_test_phase(
             "commands": tuple(
                 (
                     command.argv,
-                    tuple(sorted(command.env.items())),
-                    str(command.remote_dir),
-                    str(command.cwd),
-                    command.timeout_seconds,
+                    tuple(sorted(command.options.env.items())),
+                    str(command.options.remote_dir),
+                    str(command.options.cwd),
+                    command.options.timeout_seconds,
                 )
                 for command in source_commands
             )
@@ -163,7 +163,7 @@ def build_amd64_phase(
         run_dir=run_dir,
         phase_inputs={
             "commands": tuple(
-                (command.argv, command.role, str(command.remote_dir))
+                (command.argv, command.role, str(command.options.remote_dir))
                 for command in amd64_commands
             ),
             "maxParallelism": max_parallelism,

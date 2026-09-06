@@ -20,15 +20,13 @@ since `platform.py` skips its own build entirely when an image is supplied.
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping
 from pathlib import Path
 
 from sonata_engine import Workflow
-from sonata_tasks.deployment import DEFAULT_NAMESPACE, LOCAL_REGISTRY
+from nanolab.tasks.deployment import LOCAL_REGISTRY
 from sonata_tasks.execution.bindings import RoleBindings
-from sonata_tasks.loadtest.models import PrometheusQuery
-from sonata_tasks.loadtest.ports import PrometheusClient, RemoteFileFetcher
+from nanolab.tasks.loadtest.ports import PrometheusClient, RemoteFileFetcher
 
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig

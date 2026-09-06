@@ -10,7 +10,7 @@ from nanolab.functions.catalog import (
     resolve_function_definition,
     resolve_function_preset,
 )
-from sonata_tasks.deployment import LOCAL_REGISTRY
+from nanolab.tasks.deployment import LOCAL_REGISTRY
 
 
 def _write(path: Path, text: str) -> None:

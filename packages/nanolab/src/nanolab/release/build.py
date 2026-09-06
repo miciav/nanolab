@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from sonata_tasks.execution.models import CommandOptions
+
 from collections.abc import Callable, Iterable, Mapping
 import json
 import os
@@ -249,7 +251,7 @@ def source_test_commands(remote_source_dir: Path) -> tuple[CommandTaskSpec, ...]
             summary="Run Java source tests",
             argv=("bash", "-c", diagnostic_script),
             role="stack",
-            remote_dir=source,
+            options=CommandOptions(remote_dir=source),
         ),
         CommandTaskSpec(
             task_id="release.source.python-sdk",
@@ -270,7 +272,7 @@ def source_test_commands(remote_source_dir: Path) -> tuple[CommandTaskSpec, ...]
                 "functions/python/roman-numeral/tests",
             ),
             role="stack",
-            remote_dir=source,
+            options=CommandOptions(remote_dir=source),
         ),
         CommandTaskSpec(
             task_id="release.source.go",
@@ -285,7 +287,7 @@ def source_test_commands(remote_source_dir: Path) -> tuple[CommandTaskSpec, ...]
                 'functions/go/roman-numeral; do (cd "$d" && go test ./...); done',
             ),
             role="stack",
-            remote_dir=source,
+            options=CommandOptions(remote_dir=source),
         ),
         CommandTaskSpec(
             task_id="release.source.node",
@@ -301,7 +303,7 @@ def source_test_commands(remote_source_dir: Path) -> tuple[CommandTaskSpec, ...]
                 'functions/javascript/roman-numeral; do (cd "$d" && npm ci && npm test); done',
             ),
             role="stack",
-            remote_dir=source,
+            options=CommandOptions(remote_dir=source),
         ),
         CommandTaskSpec(
             task_id="release.source.rust",
@@ -317,7 +319,7 @@ def source_test_commands(remote_source_dir: Path) -> tuple[CommandTaskSpec, ...]
                 "bash runtimes/watchdog/test-local.sh",
             ),
             role="stack",
-            remote_dir=source,
+            options=CommandOptions(remote_dir=source),
         ),
         CommandTaskSpec(
             task_id="release.source.bash",
@@ -331,7 +333,7 @@ def source_test_commands(remote_source_dir: Path) -> tuple[CommandTaskSpec, ...]
                 "bash functions/bash/roman-numeral/tests/test_handler.sh",
             ),
             role="stack",
-            remote_dir=source,
+            options=CommandOptions(remote_dir=source),
         ),
     )
 
@@ -361,7 +363,7 @@ def amd64_build_commands(
                 summary=f"Prepare {cell.target.name} JVM image",
                 argv=prerequisite,
                 role="stack",
-                remote_dir=remote_source_dir,
+                options=CommandOptions(remote_dir=remote_source_dir),
             )
         )
     commands.append(
@@ -380,7 +382,7 @@ def amd64_build_commands(
                 "docker-amd64",
             ),
             role="stack",
-            remote_dir=remote_source_dir,
+            options=CommandOptions(remote_dir=remote_source_dir),
         )
     )
     return tuple(commands)
@@ -543,7 +545,7 @@ def _build_arm64_images(
             provider,
             request,
             command.argv,
-            remote_dir=command.remote_dir,
+            remote_dir=command.options.remote_dir,
             # The builder task's stdout is parsed below — keep it clean.
             bounded=command.task_id != _ARM64_BUILDER_ID,
         )

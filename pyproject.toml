@@ -12,9 +12,9 @@ package = false
 [tool.uv.workspace]
 members = [
     "packages/nanolab",
-    "packages/sonata-tasks",
     "packages/tui-toolkit",
 ]
 
 [tool.uv.sources]
 sonata-engine = { git = "https://github.com/miciav/sonata.git", rev = "e81d559" }
+sonata-tasks = { git = "https://github.com/miciav/sonata.git", rev = "d1001e1", subdirectory = "packages/sonata-tasks" }

@@ -4,7 +4,7 @@
 from nanofaas. It contains three Python workspace members:
 
 - `packages/nanolab`: the nanofaas operations CLI and supporting tooling
-- `packages/sonata-tasks`: reusable workflow task primitives
+- the pinned `sonata-tasks` package from the Sonata repository: reusable workflow task primitives
 - `packages/tui-toolkit`: shared terminal UI components
 
 The initial source snapshot comes from nanofaas commit
@@ -55,16 +55,16 @@ uv lock --check
 uv sync --locked --all-packages --all-groups
 
 uv run --locked --all-packages --all-groups pytest -c packages/nanolab/pyproject.toml packages/nanolab/tests
-uv run --locked --all-packages --all-groups pytest -c packages/sonata-tasks/pyproject.toml packages/sonata-tasks/tests
+uv run --locked --all-packages --all-groups pytest packages/nanolab/tests
 uv run --locked --all-packages --all-groups pytest -c packages/tui-toolkit/pyproject.toml packages/tui-toolkit/tests
 
 uv run --locked --all-packages --all-groups ruff check packages
 uv run --locked --all-packages --all-groups basedpyright --project packages/nanolab
-uv run --locked --all-packages --all-groups basedpyright --project packages/sonata-tasks
+uv run --locked --all-packages --all-groups basedpyright --project packages/nanolab
 uv run --locked --all-packages --all-groups basedpyright --project packages/tui-toolkit
 
 uv run --locked --all-packages --all-groups lint-imports --config packages/nanolab/.importlinter --no-cache
-uv run --locked --all-packages --all-groups lint-imports --config packages/sonata-tasks/.importlinter --no-cache
+uv run --locked --all-packages --all-groups lint-imports --config packages/nanolab/.importlinter --no-cache
 uv run --locked --all-packages --all-groups lint-imports --config packages/tui-toolkit/.importlinter --no-cache
 
 uv build --all-packages --out-dir dist --clear
@@ -91,8 +91,8 @@ on macOS), scan all three workspace packages with:
 ```
 
 The script starts an ephemeral SonarQube Community container on
-`127.0.0.1:9000`, analyses `packages/nanolab/src`,
-`packages/sonata-tasks/src`, and `packages/tui-toolkit/src` together with their
+`127.0.0.1:9000`, analyses `packages/nanolab/src` and
+`packages/tui-toolkit/src` together with their
 test trees, then prints the open issue counts. It leaves the server running so
 the findings remain browsable and writes their complete API response to
 `.scannerwork/issues.json`. Use `./scripts/sonar.sh --rm` to remove the server

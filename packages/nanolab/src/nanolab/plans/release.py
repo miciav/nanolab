@@ -15,7 +15,7 @@ from typing import Any, cast
 import yaml
 from sonata_engine import JournalConfig, Verifier, Workflow
 from sonata_tasks.buildx import buildx_builder_resource
-from sonata_tasks.provisioning.providers import provider_for
+from nanolab.tasks.provisioning.providers import provider_for
 from sonata_tasks.registry_tunnel import registry_tunnel_resource
 from sonata_tasks.execution.bindings import RoleBoundCommandTaskExecutor
 
@@ -367,6 +367,10 @@ def build_release_workflow(
         registry_upstream=lambda: provider.connection_host(stack_req),
         provider=provider,
         request=arm_req,
+        unit_name="nanofaas-registry-tunnel",
+        listen_port=5000,
+        upstream_port=5000,
+        title="Acquire registry tunnel to <release-stack>:5000",
         requires=(infrastructure.stack, infrastructure.arm_builder),
     )
     arm64_builder = buildx_builder_resource(
@@ -376,6 +380,7 @@ def build_release_workflow(
         requires=(infrastructure.arm_builder, arm_inputs),
         buildkitd_config=f"{remote_root}/buildkitd-arm64.toml",
         validate=release_arm.require_arm64_builder,
+        validation_key="nanolab.release.arm64-builder:v1",
         replace_existing=True,
     )
     arm_runtime_plan, arm_images, arm64_build, arm64_smoke = build_arm64_phase(

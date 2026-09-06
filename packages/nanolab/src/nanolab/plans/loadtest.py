@@ -1,3 +1,4 @@
+from sonata_tasks.execution.models import CommandOptions
 import math
 from collections.abc import Mapping
 from dataclasses import replace
@@ -6,15 +7,15 @@ from typing import Any, cast
 
 from sonata_engine import Steps, Task, Workflow
 from sonata_tasks.command import CommandTask
-from sonata_tasks.compose import DockerComposeProject, docker_compose_resource
+from nanolab.tasks.compose import DockerComposeProject, docker_compose_resource
 from sonata_tasks.registry import docker_registry_resource
-from sonata_tasks.loadtest.report import ReportPhase, WriteConcurrencyReport
-from sonata_tasks.loadtest.resources import (
+from nanolab.tasks.loadtest.report import ReportPhase, WriteConcurrencyReport
+from nanolab.tasks.loadtest.resources import (
     DockerEngineProbe,
     ResourceWatcher,
     ResourceWatcherGroup,
 )
-from sonata_tasks.loadtest import (
+from nanolab.tasks.loadtest import (
     SideCommandTask,
     ReportCoTenancyTask,
     VerifyConcurrencyTask,
@@ -29,18 +30,19 @@ from sonata_tasks.loadtest import (
     build_loadtest_workflow,
     loadtest_composite,
 )
-from sonata_tasks.platform import Backend, Build, PlatformRequest
-from sonata_tasks.components.bootstrap import remote_project_dir
-from sonata_tasks.components.helm import control_plane_helm_values, helm_set_args
+from nanolab.tasks.platform import Backend, Build, PlatformRequest
+from nanolab.tasks.deployment import REGISTRY_CONTAINER_NAME
+from nanolab.tasks.components.bootstrap import remote_project_dir
+from nanolab.tasks.components.helm import control_plane_helm_values, helm_set_args
 from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
-from sonata_tasks.execution.roles import ExecutionRole
-from sonata_tasks.k6 import K6Task
-from sonata_tasks.loadtest.concurrency import (
+from nanolab.tasks.execution import ExecutionRole
+from nanolab.tasks.k6 import K6Task
+from nanolab.tasks.loadtest.concurrency import (
     ConcurrencyWatcher,
     ConcurrencyWatcherGroup,
     ScrapeConcurrencyProbe,
 )
-from sonata_tasks.loadtest.autoscaling import (
+from nanolab.tasks.loadtest.autoscaling import (
     HttpReplicaProbe,
     ReplicaProbe,
     ReplicaWatcher,
@@ -48,9 +50,9 @@ from sonata_tasks.loadtest.autoscaling import (
     VerifyInitialAutoscalingReplicas,
     VerifyAutoscalingReplicas,
 )
-from sonata_tasks.loadtest.models import K6Config, K6Stage, PrometheusQuery
-from sonata_tasks.loadtest.ports import PrometheusClient, RemoteFileFetcher
-from sonata_tasks.loadtest.tasks import (
+from nanolab.tasks.loadtest.models import K6Config, K6Stage, PrometheusQuery
+from nanolab.tasks.loadtest.ports import PrometheusClient, RemoteFileFetcher
+from nanolab.tasks.loadtest.tasks import (
     CapturePrometheusSnapshot,
     FetchVmResults,
     WriteK6Report,
@@ -119,8 +121,7 @@ class _RoleRunner:
                 summary="Run k6",
                 argv=argv,
                 role=self._role,
-                env=env,
-                remote_dir=remote_dir,
+                options=CommandOptions(env=env, remote_dir=remote_dir),
             ),
             dry_run=dry_run,
         )
@@ -608,7 +609,7 @@ def _build_platform_requires(
 ) -> tuple[Any, ...]:
     platform_requires = ()
     if backend == "container":
-        registry = docker_registry_resource(executor=executor, role="host")
+        registry = docker_registry_resource(executor=executor, role="host", container=REGISTRY_CONTAINER_NAME)
         env = {
             "NANOFAAS_CONTROL_PLANE_MODULES": compose_control_plane_modules(
                 additional_modules
@@ -838,7 +839,7 @@ def _build_concurrency_watcher(
 
     The API port serves no view of the effective limit — there is no endpoint
     for it, only the `function_effective_concurrency` gauge in the metrics
-    scrape — so the URL is derived the same way sonata_tasks.metrics derives it.
+    scrape — so the URL is derived the same way nanolab.tasks.metrics derives it.
     """
     if not config.concurrency_control:
         return None
@@ -1402,6 +1403,7 @@ def build_loadtest_plan(
                 argv=prepare_argv,
                 executor=executor,
                 role=load_role,
+                semantic_key="nanolab.loadtest.prepare-run-directory:v1",
             ),
             run_k6=RunK6Task(
                 run_k6=run_k6,

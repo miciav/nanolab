@@ -8,9 +8,9 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Callable, TypeVar
 
 from sonata_engine import Resource, TaskInputs
-from sonata_tasks.provisioning.resources import provisioned_vm
+from nanolab.tasks.provisioning.resources import provisioned_vm
 from sonata_tasks.compensation import best_effort
-from sonata_tasks.components.bootstrap import (
+from nanolab.tasks.components.bootstrap import (
     plan_assets_sync_to_vm,
     plan_k3s_configure_registry,
     plan_k3s_install,
@@ -18,10 +18,10 @@ from sonata_tasks.components.bootstrap import (
     plan_registry_ensure_container,
     plan_vm_provision_base,
 )
-from sonata_tasks.vm.models import VmInfo, VmRequest
-from sonata_tasks.deployment import CONTROL_PLANE_NODE_PORT, PROMETHEUS_NODE_PORT
+from nanolab.tasks.vm.models import VmInfo, VmRequest
+from nanolab.tasks.deployment import CONTROL_PLANE_NODE_PORT, PROMETHEUS_NODE_PORT
 
-from sonata_tasks.provisioning import (
+from nanolab.tasks.provisioning import (
     remote_operations,
     retarget_cloud_operations,
     run_bootstrap_operations,

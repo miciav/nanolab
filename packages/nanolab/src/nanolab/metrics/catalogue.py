@@ -26,8 +26,8 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Iterable, Mapping
 
-from sonata_tasks.deployment import DEFAULT_NAMESPACE
-from sonata_tasks.loadtest.models import PrometheusQuery
+from nanolab.tasks.deployment import DEFAULT_NAMESPACE
+from nanolab.tasks.loadtest.models import PrometheusQuery
 
 CONTROL_PLANE_SELECTOR = '{app="nanofaas-control-plane"}'
 

@@ -14,6 +14,9 @@ NANOLAB_ROOT = Path(__file__).resolve().parents[2]
 
 
 class _RecordingExecutor:
+    def binding_key(self, role: str) -> str:
+        return f"test-recording:{role}"
+
     def run(self, task: CommandTaskSpec, *, dry_run: bool = False) -> TaskResult:
         del dry_run
         return TaskResult(
@@ -22,7 +25,7 @@ class _RecordingExecutor:
 
 
 def _bindings() -> RoleBindings:
-    return RoleBindings(host=_RecordingExecutor(), stack=_RecordingExecutor())
+    return RoleBindings({'host': _RecordingExecutor(), 'stack': _RecordingExecutor()})
 
 
 def _scenario() -> ScenarioConfig:

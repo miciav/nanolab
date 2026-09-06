@@ -18,7 +18,7 @@ from __future__ import annotations
 import urllib.request
 from pathlib import Path
 
-from sonata_tasks.deployment import (
+from nanolab.tasks.deployment import (
     LOCAL_CONTROL_PLANE_API_PORT,
     LOCAL_CONTROL_PLANE_MANAGEMENT_PORT,
 )

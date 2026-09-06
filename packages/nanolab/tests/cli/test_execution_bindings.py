@@ -5,7 +5,7 @@ import nanolab.cli.execution as execution
 from nanolab.cli.execution import build_role_bindings, resolve_loadtest_urls
 from nanolab.config.environment import EnvironmentConfig
 from sonata_tasks.tasks.models import CommandTaskSpec
-from sonata_tasks.vm.models import VmRequest
+from nanolab.tasks.vm.models import VmRequest
 
 
 @dataclass
@@ -71,7 +71,7 @@ def test_external_stack_uses_ssh_in_remote_repository() -> None:
     )
 
     bindings, _ = build_role_bindings(environment, runner=runner)
-    bindings.stack.run(
+    bindings.executor_for("stack").run(
         CommandTaskSpec(
             task_id="check",
             summary="check",
@@ -105,7 +105,7 @@ def test_multipass_stack_uses_provider_ssh_execution(monkeypatch) -> None:
     )
 
     bindings, _ = build_role_bindings(environment, runner=runner)
-    bindings.stack.run(
+    bindings.executor_for("stack").run(
         CommandTaskSpec(task_id="check", summary="check", argv=("kubectl", "version"), role="stack")
     )
 
@@ -133,8 +133,7 @@ def test_a_role_without_defaults_sends_no_environment(monkeypatch) -> None:
     )
 
     bindings, _ = build_role_bindings(environment, runner=runner)
-    assert bindings.loadgen is not None
-    bindings.loadgen.run(
+    bindings.executor_for("loadgen").run(
         CommandTaskSpec(task_id="k6", summary="k6", argv=("k6", "version"), role="loadgen")
     )
 
@@ -158,7 +157,7 @@ def test_remote_stack_exports_its_kubeconfig() -> None:
     )
 
     bindings, _ = build_role_bindings(environment, runner=runner)
-    bindings.stack.run(
+    bindings.executor_for("stack").run(
         CommandTaskSpec(task_id="check", summary="check", argv=("kubectl", "get", "nodes"))
     )
 
@@ -179,7 +178,7 @@ def test_distinct_external_loadgen_gets_distinct_executor_and_fetcher() -> None:
 
     bindings, fetcher = build_role_bindings(environment, runner=runner)
 
-    assert bindings.loadgen is not bindings.stack
+    assert bindings.executor_for("loadgen") is not bindings.executor_for("stack")
     assert fetcher is not None
 
 
@@ -200,8 +199,7 @@ def test_multipass_three_role_environment_binds_cloud_like_stack(monkeypatch) ->
 
     bindings, _ = build_role_bindings(environment, runner=runner)
 
-    assert bindings.cloud is not None
-    bindings.cloud.run(
+    bindings.executor_for("cloud").run(
         CommandTaskSpec(task_id="check", summary="check", argv=("kubectl", "version"), role="cloud")
     )
 
@@ -274,7 +272,7 @@ def test_azure_role_uses_provider_native_execution_and_fetch(tmp_path: Path) -> 
     bindings, fetcher = build_role_bindings(
         environment, runner=runner, vm_provider=provider, repo_root=tmp_path
     )
-    bindings.stack.run(
+    bindings.executor_for("stack").run(
         CommandTaskSpec(task_id="check", summary="check", argv=("kubectl", "get", "nodes"))
     )
     assert fetcher is not None
@@ -301,7 +299,7 @@ def test_proxmox_role_uses_provider_native_execution(monkeypatch, tmp_path: Path
     )
 
     bindings, _ = build_role_bindings(environment, vm_provider=provider, repo_root=tmp_path)
-    bindings.stack.run(
+    bindings.executor_for("stack").run(
         CommandTaskSpec(task_id="check", summary="check", argv=("kubectl", "version"))
     )
 

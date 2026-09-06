@@ -23,9 +23,9 @@ from sonata_engine import (
 from sonata_engine import Workflow as SonataWorkflow
 from sonata_engine.journal import JournalConfig
 from sonata_engine.workflow.context import bind_workflow_sink
-from sonata_tasks.loadtest.adapters import HttpPrometheusClient
-from sonata_tasks.provisioning.providers import provider_for
-from sonata_tasks.telegram import telegram_observer_from_environment
+from nanolab.tasks.loadtest.adapters import HttpPrometheusClient
+from nanolab.tasks.provisioning.providers import provider_for
+from nanolab.tasks.telegram import telegram_observer_from_environment
 
 from nanolab.cli import diagnostics
 from nanolab.config import EnvironmentConfig, ScenarioConfig

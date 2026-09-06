@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from sonata_tasks.execution.models import CommandOptions
+
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -69,7 +71,7 @@ def arm64_build_commands(
             summary="Tunnel localhost:5000 to the stack registry",
             argv=registry_tunnel_command(registry_upstream),
             role="arm-builder",
-            remote_dir=remote_source_dir,
+            options=CommandOptions(remote_dir=remote_source_dir),
         ),
         # Buildx builders are per-daemon state, so the name the stack VM created
         # means nothing here: this VM needs its own, with the same parallelism
@@ -90,14 +92,14 @@ def arm64_build_commands(
                 "--use",
             ),
             role="arm-builder",
-            remote_dir=remote_source_dir,
+            options=CommandOptions(remote_dir=remote_source_dir),
         ),
         CommandTaskSpec(
             task_id="release.arm64.builder",
             summary="Require ARM64 support from the release builder",
             argv=("docker", "buildx", "inspect", builder_name, "--bootstrap"),
             role="arm-builder",
-            remote_dir=remote_source_dir,
+            options=CommandOptions(remote_dir=remote_source_dir),
         ),
     ]
     seen: set[str] = set()
@@ -112,7 +114,7 @@ def arm64_build_commands(
                 summary=f"Prepare {cell.target.name} ARM64 JVM image",
                 argv=prerequisite,
                 role="arm-builder",
-                remote_dir=remote_source_dir,
+                options=CommandOptions(remote_dir=remote_source_dir),
             )
         )
     commands.append(
@@ -131,7 +133,7 @@ def arm64_build_commands(
                 "docker-arm64",
             ),
             role="arm-builder",
-            remote_dir=remote_source_dir,
+            options=CommandOptions(remote_dir=remote_source_dir),
         )
     )
     return tuple(commands)

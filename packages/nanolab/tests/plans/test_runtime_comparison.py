@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
-from sonata_tasks.platform import PlatformFunction
+from nanolab.tasks.platform import PlatformFunction
 
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.plans import loadtest as loadtest_mod
@@ -202,7 +202,7 @@ def test_the_helm_chart_is_an_absolute_path_on_a_remote_provider() -> None:
         )
     )
     from nanolab.cli.vm_provider import vm_request_for_role
-    from sonata_tasks.components.bootstrap import remote_project_dir
+    from nanolab.tasks.components.bootstrap import remote_project_dir
 
     root = _Path(remote_project_dir(vm_request_for_role(environment, "stack")))
     request = _build_platform_request(

@@ -6,6 +6,7 @@ from sonata_tasks.tasks.models import (
     TaskResult,
     TaskStatus,
 )
+from sonata_tasks.execution.models import CommandOptions
 
 
 def test_task_type_aliases_cover_expected_values() -> None:
@@ -20,10 +21,10 @@ def test_command_task_spec_defaults_to_the_host_role_and_empty_env() -> None:
     )
 
     assert task.execution_role == "host"
-    assert task.env == {}
-    assert task.cwd is None
-    assert task.remote_dir is None
-    assert task.expected_exit_codes == frozenset({0})
+    assert task.options.env == {}
+    assert task.options.cwd is None
+    assert task.options.remote_dir is None
+    assert task.options.expected_exit_codes == frozenset({0})
 
 
 def test_vm_command_task_can_declare_remote_dir() -> None:
@@ -32,11 +33,11 @@ def test_vm_command_task_can_declare_remote_dir() -> None:
         summary="Build control-plane image",
         argv=("docker", "build", "-t", "image", "."),
         role="stack",
-        remote_dir="/home/ubuntu/nanofaas",
+        options=CommandOptions(remote_dir="/home/ubuntu/nanofaas"),
     )
 
     assert task.execution_role == "stack"
-    assert task.remote_dir == "/home/ubuntu/nanofaas"
+    assert task.options.remote_dir == "/home/ubuntu/nanofaas"
 
 
 def test_command_task_spec_defensively_copies_env() -> None:
@@ -45,12 +46,12 @@ def test_command_task_spec_defensively_copies_env() -> None:
         task_id="x",
         summary="X",
         argv=("echo", "x"),
-        env=env,
+        options=CommandOptions(env=env),
     )
 
     env["A"] = "changed"
 
-    assert dict(task.env) == {"A": "B"}
+    assert dict(task.options.env) == {"A": "B"}
 
 
 def test_command_task_spec_env_is_immutable() -> None:
@@ -58,10 +59,10 @@ def test_command_task_spec_env_is_immutable() -> None:
         task_id="x",
         summary="X",
         argv=("echo", "x"),
-        env={"A": "B"},
+        options=CommandOptions(env={"A": "B"}),
     )
 
-    assert isinstance(task.env, MappingProxyType)
+    assert isinstance(task.options.env, MappingProxyType)
 
 
 def test_task_result_reports_success_from_expected_exit_codes() -> None:

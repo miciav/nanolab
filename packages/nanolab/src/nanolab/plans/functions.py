@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
-from sonata_tasks.validate import ValidateFunction as SonataFunction
+from nanolab.tasks.validate import ValidateFunction as SonataFunction
 
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.functions.catalog import FunctionDefinition, resolve_function_definition

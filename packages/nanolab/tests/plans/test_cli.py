@@ -2,17 +2,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import SimpleNamespace
 
 from typing import cast
 
 import pytest
 import yaml
 from sonata_engine import Selection
-from sonata_tasks.components import bootstrap
+from nanolab.tasks.components import bootstrap
 from sonata_tasks.command import CommandTask
 from sonata_tasks.execution.bindings import RoleBindings
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
-from sonata_tasks.testing import (
+from nanolab.tasks.testing import (
     CLI_CONTRACT_STEPS,
     CLI_RUNTIME_CONFIG_STEPS,
     INVOCATION_SUCCESS,
@@ -21,7 +22,7 @@ from sonata_tasks.testing import (
     cli_task_ids,
 )
 from sonata_tasks.vm import multipass
-from sonata_tasks.vm.models import VmInfo, VmRequest
+from nanolab.tasks.vm.models import VmInfo, VmRequest
 
 from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
@@ -42,6 +43,9 @@ SUCCESS = INVOCATION_SUCCESS
 class RecordingExecutor:
     seen: list[CommandTaskSpec] = field(default_factory=list)
 
+    def binding_key(self, role: str) -> str:
+        return f"test-recording:{role}"
+
     def run(self, task: CommandTaskSpec, *, dry_run: bool = False) -> TaskResult:
         self.seen.append(task)
         return cli_response(task.argv)
@@ -60,14 +64,16 @@ class FakeMultipassOrchestrator:
     ensured: list[VmRequest] = field(default_factory=list)
     torn_down: list[VmRequest] = field(default_factory=list)
 
-    def ensure_running(self, request: VmRequest) -> None:
+    def ensure_running(self, request: VmRequest) -> object:
         self.ensured.append(request)
+        return SimpleNamespace(return_code=0, stdout="", stderr="")
 
     def connection_host(self, request: VmRequest) -> str:
         return self.host
 
-    def teardown(self, request: VmRequest) -> None:
+    def teardown(self, request: VmRequest) -> object:
         self.torn_down.append(request)
+        return SimpleNamespace(return_code=0, stdout="", stderr="")
 
 
 @dataclass
@@ -152,7 +158,7 @@ def test_cli_plan_uses_the_selected_role_binding() -> None:
 
     build_cli_plan(
         _scenario(),
-        RoleBindings(host=host, stack=stack),
+        RoleBindings({'host': host, 'stack': stack}),
         cli_role="stack",
         endpoint="http://stack.example:30080",
     ).run()
@@ -174,7 +180,7 @@ def test_cli_plan_compiles_every_selected_function() -> None:
             functions=["word-stats-java", "json-transform-python"],
             resources={"word-stats-java": {"limits": {"memoryMiB": 512}}},
         ),
-        RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor()),
+        RoleBindings({'host': RecordingExecutor(), 'stack': RecordingExecutor()}),
         endpoint="http://stack.example:8080",
     )
 
@@ -196,7 +202,7 @@ def test_cli_plan_passes_the_endpoint_and_resolved_resources_through() -> None:
 
     build_cli_plan(
         _scenario(resources={"word-stats-java": {"limits": {"memoryMiB": 512}}}),
-        RoleBindings(host=executor, stack=RecordingExecutor()),
+        RoleBindings({'host': executor, 'stack': RecordingExecutor()}),
         endpoint="http://stack.example:8080",
     ).run()
 
@@ -212,7 +218,7 @@ def test_cli_plan_sends_only_the_payload_input_to_invoke() -> None:
 
     build_cli_plan(
         _scenario(),
-        RoleBindings(host=executor, stack=RecordingExecutor()),
+        RoleBindings({'host': executor, 'stack': RecordingExecutor()}),
         endpoint="http://stack.example:30080",
     ).run()
 
@@ -225,7 +231,7 @@ def test_cli_plan_supports_slicing_by_slug() -> None:
 
     build_cli_plan(
         _scenario(),
-        RoleBindings(host=executor, stack=RecordingExecutor()),
+        RoleBindings({'host': executor, 'stack': RecordingExecutor()}),
         endpoint="http://stack.example:30080",
     ).run(select=Selection(only="list-functions"))
 
@@ -242,14 +248,14 @@ def test_cli_plan_rejects_a_non_cli_scenario() -> None:
             ScenarioConfig.model_validate(
                 {"workflow": "validate", "backend": "k8s", "functions": ["word-stats-java"]}
             ),
-            RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor()),
+            RoleBindings({'host': RecordingExecutor(), 'stack': RecordingExecutor()}),
         )
 
 
 def test_container_backend_wraps_the_workflow_in_a_local_control_plane() -> None:
     plan = build_cli_plan(
         _scenario(backend="container"),
-        RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor()),
+        RoleBindings({'host': RecordingExecutor(), 'stack': RecordingExecutor()}),
     )
 
     assert [task.task_id for task in plan.compile().tasks] == cli_task_ids(
@@ -276,7 +282,7 @@ def test_container_backend_wraps_the_workflow_in_a_local_control_plane() -> None
 def test_container_backend_builds_the_control_plane_with_the_container_module() -> None:
     plan = build_cli_plan(
         _scenario(backend="container"),
-        RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor()),
+        RoleBindings({'host': RecordingExecutor(), 'stack': RecordingExecutor()}),
     )
     build = next(
         task for task in plan.compile().tasks
@@ -298,7 +304,7 @@ def test_container_backend_targets_the_local_control_plane_port() -> None:
 
     plan = build_cli_plan(
         _scenario(backend="container"),
-        RoleBindings(host=executor, stack=RecordingExecutor()),
+        RoleBindings({'host': executor, 'stack': RecordingExecutor()}),
     )
     invoke = next(
         task for task in plan.compile().tasks if task.task_id.endswith(".invoke-word-stats-java")
@@ -310,7 +316,7 @@ def test_container_backend_targets_the_local_control_plane_port() -> None:
 def test_k8s_backend_keeps_the_explicit_endpoint_and_starts_nothing() -> None:
     plan = build_cli_plan(
         _scenario(backend="k8s"),
-        RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor()),
+        RoleBindings({'host': RecordingExecutor(), 'stack': RecordingExecutor()}),
         endpoint="http://stack.example:30080",
     )
     task_ids = [task.task_id for task in plan.compile().tasks]
@@ -329,7 +335,7 @@ def test_k8s_backend_requires_an_explicit_endpoint() -> None:
     with pytest.raises(ValueError, match="explicit control-plane URL"):
         build_cli_plan(
             _scenario(backend="k8s"),
-            RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor()),
+            RoleBindings({'host': RecordingExecutor(), 'stack': RecordingExecutor()}),
         )
 
 
@@ -337,13 +343,13 @@ def test_container_backend_runs_only_on_the_host_role() -> None:
     with pytest.raises(ValueError, match="host role"):
         build_cli_plan(
             _scenario(backend="container"),
-            RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor()),
+            RoleBindings({'host': RecordingExecutor(), 'stack': RecordingExecutor()}),
             cli_role="stack",
         )
 
 
 def test_provisioned_k8s_plan_compiles_the_expected_12_task_topology() -> None:
-    plan = _provisioned_plan(RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor()))
+    plan = _provisioned_plan(RoleBindings({'host': RecordingExecutor(), 'stack': RecordingExecutor()}))
 
     assert [task.task_id for task in plan.compile().tasks] == cli_task_ids(
         "Build nanofaas-cli",
@@ -370,7 +376,7 @@ def test_provisioned_k8s_bootstrap_sets_up_no_local_registry() -> None:
     Pinned because the bootstrap sequence is borrowed from `validate`, which does
     build and push locally — reusing it wholesale silently reintroduces both steps.
     """
-    plan = _provisioned_plan(RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor()))
+    plan = _provisioned_plan(RoleBindings({'host': RecordingExecutor(), 'stack': RecordingExecutor()}))
 
     task_ids = [task.task_id for task in plan.compile().tasks]
 
@@ -390,7 +396,7 @@ def test_provisioned_k8s_uses_the_published_release_images() -> None:
     )
     stack = RecordingExecutor()
 
-    _provisioned_plan(RoleBindings(host=RecordingExecutor(), stack=stack)).run()
+    _provisioned_plan(RoleBindings({'host': RecordingExecutor(), 'stack': stack})).run()
 
     helm = next(spec for spec in stack.seen if spec.summary.startswith("Install Helm"))
     apply = next(spec for spec in stack.seen if spec.summary.startswith("Apply"))
@@ -445,7 +451,7 @@ def test_provisioned_k8s_plan_compilation_does_not_discover_ssh_credentials(
 
     plan = build_cli_plan(
         _scenario(backend="k8s"),
-        RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor()),
+        RoleBindings({'host': RecordingExecutor(), 'stack': RecordingExecutor()}),
         repo_root=default_tool_paths().nanofaas_root,
         environment=_multipass_environment(),
     )
@@ -457,7 +463,7 @@ def test_provisioned_k8s_builds_the_cli_on_host_and_runs_everything_else_on_stac
     host = RecordingExecutor()
     stack = RecordingExecutor()
 
-    _provisioned_plan(RoleBindings(host=host, stack=stack)).run()
+    _provisioned_plan(RoleBindings({'host': host, 'stack': stack})).run()
 
     assert [spec.summary for spec in host.seen] == [
         "Build nanofaas-cli",
@@ -485,7 +491,7 @@ def test_provisioned_k8s_bootstrap_argv_is_resolved_from_the_acquired_vm() -> No
     orchestrator = FakeMultipassOrchestrator(host="192.0.2.42")
 
     _provisioned_plan(
-        RoleBindings(host=host, stack=RecordingExecutor()), orchestrator=orchestrator
+        RoleBindings({'host': host, 'stack': RecordingExecutor()}), orchestrator=orchestrator
     ).run()
 
     sync = next(spec for spec in host.seen if spec.summary == "Sync repository into VM")
@@ -499,7 +505,7 @@ def test_azure_k8s_plan_restricts_nodeports_to_the_operator() -> None:
 
     build_cli_plan(
         _scenario(),
-        RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor()),
+        RoleBindings({'host': RecordingExecutor(), 'stack': RecordingExecutor()}),
         repo_root=default_tool_paths().nanofaas_root,
         environment=_azure_environment(),
         orchestrator_factory=lambda _root: provider,
@@ -513,7 +519,7 @@ def test_azure_k8s_plan_restricts_nodeports_to_the_operator() -> None:
 def test_provisioned_k8s_endpoint_is_the_incluster_node_port() -> None:
     stack = RecordingExecutor()
 
-    _provisioned_plan(RoleBindings(host=RecordingExecutor(), stack=stack)).run()
+    _provisioned_plan(RoleBindings({'host': RecordingExecutor(), 'stack': stack})).run()
 
     invoke = next(spec for spec in stack.seen if spec.summary.startswith("Invoke"))
     assert PROVISIONED_ENDPOINT == "http://127.0.0.1:30080"
@@ -521,7 +527,7 @@ def test_provisioned_k8s_endpoint_is_the_incluster_node_port() -> None:
 
 
 def test_provisioned_k8s_helm_requires_the_vm_and_the_function_requires_helm() -> None:
-    plan = _provisioned_plan(RoleBindings(host=RecordingExecutor(), stack=RecordingExecutor()))
+    plan = _provisioned_plan(RoleBindings({'host': RecordingExecutor(), 'stack': RecordingExecutor()}))
 
     tasks = {task.task_id: task for task in plan.compile().tasks}
     helm_acquire = tasks["007.acquire-control-plane-helm-release"]
@@ -537,7 +543,7 @@ def test_provisioned_k8s_helm_requires_the_vm_and_the_function_requires_helm() -
 def test_provisioned_k8s_slice_keeps_the_vm_helm_and_function() -> None:
     stack = RecordingExecutor()
 
-    _provisioned_plan(RoleBindings(host=RecordingExecutor(), stack=stack)).run(
+    _provisioned_plan(RoleBindings({'host': RecordingExecutor(), 'stack': stack})).run(
         select=Selection(only="invoke-word-stats-java")
     )
 
@@ -560,7 +566,7 @@ def test_provisioned_k8s_keep_preserves_the_vm_and_helm_but_not_the_function() -
     orchestrator = FakeMultipassOrchestrator()
 
     plan = _provisioned_plan(
-        RoleBindings(host=RecordingExecutor(), stack=stack), orchestrator=orchestrator
+        RoleBindings({'host': RecordingExecutor(), 'stack': stack}), orchestrator=orchestrator
     )
     plan.keep = True
     plan.run()

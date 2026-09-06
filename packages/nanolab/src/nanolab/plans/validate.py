@@ -3,14 +3,14 @@ import json
 from pathlib import Path
 
 from sonata_engine import Workflow
-from sonata_tasks.compose import DockerComposeProject, docker_compose_resource
-from sonata_tasks.deployment import LOCAL_REGISTRY
+from nanolab.tasks.compose import DockerComposeProject, docker_compose_resource
+from nanolab.tasks.deployment import LOCAL_REGISTRY, REGISTRY_CONTAINER_NAME
 from sonata_tasks.registry import docker_registry_resource
-from sonata_tasks.http_function import HttpFunctionExpectation
-from sonata_tasks.validate_recovery import managed_container_cleanup_resource
-from sonata_tasks.validate import AsyncCheck, EnvelopeCheck, ValidateFunction as SonataFunction
-from sonata_tasks.validate import ValidateWorkflowRequest, build_validate_workflow
-from sonata_tasks.components.helm import control_plane_helm_values, helm_set_args
+from nanolab.tasks.http_function import HttpFunctionExpectation
+from nanolab.tasks.validate_recovery import managed_container_cleanup_resource
+from nanolab.tasks.validate import AsyncCheck, EnvelopeCheck, ValidateFunction as SonataFunction
+from nanolab.tasks.validate import ValidateWorkflowRequest, build_validate_workflow
+from nanolab.tasks.components.helm import control_plane_helm_values, helm_set_args
 from sonata_tasks.execution.bindings import RoleBindings, RoleBoundCommandTaskExecutor
 
 from nanolab.config.scenario import ScenarioConfig
@@ -260,6 +260,7 @@ def build_validate_plan(  # NOSONAR (S3776): backend-specific resource graph is 
         registry = docker_registry_resource(
             executor=RoleBoundCommandTaskExecutor(bindings),
             role="host",
+            container=REGISTRY_CONTAINER_NAME,
         )
         project = DockerComposeProject(
             name="nanofaas-recovery" if config.persistent_recovery else "nanofaas-validate",

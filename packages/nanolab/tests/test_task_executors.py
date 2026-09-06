@@ -6,6 +6,7 @@ from pathlib import Path
 
 from sonata_tasks.tasks.executors import HostCommandTaskExecutor, VmCommandTaskExecutor
 from sonata_tasks.tasks.models import CommandTaskSpec
+from sonata_tasks.execution.models import CommandOptions
 
 
 @dataclass(frozen=True)
@@ -51,8 +52,7 @@ def test_host_executor_runs_task_with_cwd_env_and_dry_run() -> None:
         task_id="x",
         summary="X",
         argv=("echo", "hi"),
-        env={"A": "B"},
-        cwd=Path("/repo"),
+        options=CommandOptions(env={"A": "B"}, cwd=Path("/repo")),
     )
 
     result = executor.run(task, dry_run=True)
@@ -99,13 +99,12 @@ class _RecordingVmRunner:
 
 def test_vm_executor_delegates_to_injected_runner() -> None:
     runner = _RecordingVmRunner()
-    executor = VmCommandTaskExecutor(runner=runner)
+    executor = VmCommandTaskExecutor(runner=runner, target_key="test-vm")
     task = CommandTaskSpec(
         task_id="vm.x",
         summary="VM X",
         argv=("docker", "ps"),
-        env={"A": "B"},
-        remote_dir="/home/ubuntu/nanofaas",
+        options=CommandOptions(env={"A": "B"}, remote_dir="/home/ubuntu/nanofaas"),
     )
 
     result = executor.run(task, dry_run=True)

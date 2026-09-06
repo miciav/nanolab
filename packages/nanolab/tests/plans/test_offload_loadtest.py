@@ -14,7 +14,7 @@ from nanolab.plans.offload_loadtest import (
     build_offload_loadtest_plan,
 )
 from sonata_tasks.execution.bindings import RoleBindings
-from sonata_tasks.platform import PlatformFunction, PlatformRequest
+from nanolab.tasks.platform import PlatformFunction, PlatformRequest
 from sonata_tasks.registry import docker_registry_resource
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
@@ -31,6 +31,9 @@ SCENARIO = ScenarioConfig(
 @dataclass
 class RecordingExecutor:
     seen: list[CommandTaskSpec] = field(default_factory=list)
+
+    def binding_key(self, role: str) -> str:
+        return f"test-recording:{role}"
 
     def run(self, task: CommandTaskSpec, *, dry_run: bool = False) -> TaskResult:
         self.seen.append(task)
@@ -60,7 +63,7 @@ def _external_environment() -> EnvironmentConfig:
 
 
 def _bindings(executor: RecordingExecutor) -> RoleBindings:
-    return RoleBindings(host=executor, stack=executor, loadgen=executor, cloud=executor)
+    return RoleBindings({'host': executor, 'stack': executor, 'loadgen': executor, 'cloud': executor})
 
 
 def test_platform_returns_helm_arguments_in_the_platform_request() -> None:

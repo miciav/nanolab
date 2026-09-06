@@ -40,7 +40,7 @@ dev = [
 ]
 
 [tool.uv.sources]
-sonata-tasks = { workspace = true }
+sonata-tasks = { git = "https://github.com/miciav/sonata.git", rev = "d1001e1", subdirectory = "packages/sonata-tasks" }
 tui-toolkit = { workspace = true }
 
 [tool.pytest.ini_options]
