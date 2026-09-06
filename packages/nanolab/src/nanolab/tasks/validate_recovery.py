@@ -197,7 +197,10 @@ class ContainerPersistentRecoveryTask(Task[None]):
                 options=CommandOptions(env=self._project.env, cwd=self._cwd),
             ).run(inputs)
         _ = WaitForDockerCompose(
-            self._project, executor=self._executor, cwd=self._cwd
+            self._project,
+            executor=self._executor,
+            role=self._project.role,
+            options=CommandOptions(env=self._project.env, cwd=self._cwd),
         ).run(inputs)
         _ = HttpFunctionBackendTask(
             self._name,

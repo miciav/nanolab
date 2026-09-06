@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import Any, Callable
+from typing import Any, Callable, cast
 
 from sonata_engine import Resource
 
 from sonata_tasks.vm import vm_resource
 from sonata_tasks.vm.adapters import VmLifecycleAdapter
+from sonata_tasks.vm.ports import VmOrchestratorProtocol
 from nanolab.tasks.vm.models import VmConfig, VmInfo, VmRequest, vm_remote_home
 
 
@@ -49,7 +50,11 @@ def provisioned_vm(
         disk=request.disk,
     )
     lifecycle = VerifiedLifecycle(
-        VmLifecycleAdapter(provider, lifecycle=request.lifecycle, credentials=request),
+        VmLifecycleAdapter(
+            cast(VmOrchestratorProtocol, provider),
+            lifecycle=request.lifecycle,
+            credentials=request,
+        ),
         after_ensure or (lambda _info: None),
     )
     resource = vm_resource(

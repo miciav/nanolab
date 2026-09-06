@@ -57,3 +57,5 @@ include = ["src/tui_toolkit"]
 typeCheckingMode = "basic"
 reportMissingTypeStubs = false
 reportPrivateUsage = false
+venvPath = "../.."
+venv = ".venv"

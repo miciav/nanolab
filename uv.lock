@@ -16,6 +16,7 @@ members = [
     "nanolab-workspace",
     "tui-toolkit",
 ]
+overrides = [{ name = "sonata-engine", git = "https://github.com/miciav/sonata.git?rev=e81d559" }]
 
 [[package]]
 name = "annotated-doc"
@@ -51,7 +52,7 @@ wheels = [
 [[package]]
 name = "azure-vm-sdk"
 version = "0.1.0"
-source = { git = "https://github.com/miciav/azure-vm-sdk.git?rev=eb8a542#eb8a54203e36ea48cb37ba26044353ba4afc8259" }
+source = { git = "https://github.com/miciav/azure-vm-sdk.git?rev=eb8a54203e36ea48cb37ba26044353ba4afc8259#eb8a54203e36ea48cb37ba26044353ba4afc8259" }
 dependencies = [
     { name = "paramiko" },
     { name = "pyyaml" },
@@ -606,7 +607,7 @@ wheels = [
 [[package]]
 name = "multipass-sdk"
 version = "0.6.0"
-source = { git = "https://github.com/miciav/multipass-sdk.git?rev=402c406#402c4061e6b32cc6dda5e7a9876fa7cefd6f9ae1" }
+source = { git = "https://github.com/miciav/multipass-sdk.git?rev=402c4061e6b32cc6dda5e7a9876fa7cefd6f9ae1#402c4061e6b32cc6dda5e7a9876fa7cefd6f9ae1" }
 dependencies = [
     { name = "haikunator" },
     { name = "pyyaml" },
@@ -617,12 +618,20 @@ name = "nanolab"
 version = "0.1.0"
 source = { editable = "packages/nanolab" }
 dependencies = [
+    { name = "azure-vm-sdk" },
+    { name = "httpx" },
+    { name = "multipass-sdk" },
+    { name = "pandas" },
+    { name = "plotly" },
+    { name = "proxmox-sdk" },
     { name = "pydantic" },
+    { name = "pydantic-settings" },
     { name = "pyyaml" },
     { name = "questionary" },
     { name = "rich" },
+    { name = "shellcraft" },
     { name = "sonata-engine" },
-    { name = "sonata-tasks" },
+    { name = "sonata-tasks", extra = ["azure", "multipass", "prometheus", "proxmox", "shell"] },
     { name = "tui-toolkit" },
     { name = "typer" },
 ]
@@ -639,12 +648,20 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "azure-vm-sdk", git = "https://github.com/miciav/azure-vm-sdk.git?rev=eb8a54203e36ea48cb37ba26044353ba4afc8259" },
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "multipass-sdk", git = "https://github.com/miciav/multipass-sdk.git?rev=402c4061e6b32cc6dda5e7a9876fa7cefd6f9ae1" },
+    { name = "pandas", specifier = ">=2.2" },
+    { name = "plotly", specifier = ">=5.24" },
+    { name = "proxmox-sdk", git = "https://github.com/miciav/proxmox-sdk.git?rev=9e2070384c92a03dffdfb3ac7e248f0861cb0537" },
     { name = "pydantic", specifier = ">=2.9.2" },
+    { name = "pydantic-settings", specifier = ">=2.5" },
     { name = "pyyaml", specifier = ">=6.0.2" },
     { name = "questionary", specifier = ">=2.1.1" },
     { name = "rich", specifier = ">=13.8" },
+    { name = "shellcraft", git = "https://github.com/miciav/shellcraft.git?rev=b6547835aac88d058810c7b9a592ad442c54ac99" },
     { name = "sonata-engine", git = "https://github.com/miciav/sonata.git?rev=e81d559" },
-    { name = "sonata-tasks", git = "https://github.com/miciav/sonata.git?rev=d1001e17df32511168796857471c8d1dbad60a81", subdirectory = "packages/sonata-tasks" },
+    { name = "sonata-tasks", extras = ["shell", "prometheus", "multipass", "azure", "proxmox"], git = "https://github.com/miciav/sonata.git?subdirectory=packages%2Fsonata-tasks&rev=5bd4bf805a03f0a8716b0d5d1a5778f9eb4ca345" },
     { name = "tui-toolkit", editable = "packages/tui-toolkit" },
     { name = "typer", specifier = ">=0.12.5" },
 ]
@@ -875,7 +892,7 @@ wheels = [
 [[package]]
 name = "proxmox-sdk"
 version = "0.2.0"
-source = { git = "https://github.com/miciav/proxmox-sdk.git?rev=9e20703#9e2070384c92a03dffdfb3ac7e248f0861cb0537" }
+source = { git = "https://github.com/miciav/proxmox-sdk.git?rev=9e2070384c92a03dffdfb3ac7e248f0861cb0537#9e2070384c92a03dffdfb3ac7e248f0861cb0537" }
 dependencies = [
     { name = "paramiko" },
     { name = "proxmoxer" },
@@ -1253,35 +1270,32 @@ source = { git = "https://github.com/miciav/sonata.git?rev=e81d559#e81d559952d4a
 [[package]]
 name = "sonata-tasks"
 version = "0.2.0"
-source = { git = "https://github.com/miciav/sonata.git?rev=d1001e17df32511168796857471c8d1dbad60a81#d1001e17df32511168796857471c8d1dbad60a81", subdirectory = "packages/sonata-tasks" }
+source = { git = "https://github.com/miciav/sonata.git?subdirectory=packages%2Fsonata-tasks&rev=5bd4bf805a03f0a8716b0d5d1a5778f9eb4ca345#5bd4bf805a03f0a8716b0d5d1a5778f9eb4ca345" }
 dependencies = [
     { name = "sonata-engine" },
 ]
 
-[package.dev-dependencies]
-dev = [
-    { name = "basedpyright" },
-    { name = "grimp" },
+[package.optional-dependencies]
+azure = [
+    { name = "azure-vm-sdk" },
+    { name = "pydantic" },
+    { name = "shellcraft" },
+]
+multipass = [
+    { name = "multipass-sdk" },
+    { name = "pydantic" },
+    { name = "shellcraft" },
+]
+prometheus = [
     { name = "httpx" },
-    { name = "import-linter" },
-    { name = "pytest" },
-    { name = "pytest-cov" },
-    { name = "ruff" },
 ]
-
-[package.metadata]
-requires-dist = [
-    { name = "sonata-engine", git = "https://github.com/miciav/sonata.git?rev=e81d559" },
+proxmox = [
+    { name = "proxmox-sdk" },
+    { name = "pydantic" },
+    { name = "shellcraft" },
 ]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "basedpyright", specifier = ">=1.39.3" },
-    { name = "grimp", specifier = ">=3.14" },
-    { name = "import-linter", specifier = ">=2.11" },
-    { name = "pytest", specifier = ">=9.0.3" },
-    { name = "pytest-cov", specifier = ">=6.0" },
-    { name = "ruff", specifier = ">=0.15.12" },
+shell = [
+    { name = "shellcraft" },
 ]
 
 [[package]]

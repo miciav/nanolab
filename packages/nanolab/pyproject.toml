@@ -4,13 +4,21 @@ version = "0.1.0"
 description = "Control-plane orchestration product for build, test, and reporting"
 requires-python = ">=3.12"
 dependencies = [
+    "azure-vm-sdk @ git+https://github.com/miciav/azure-vm-sdk.git@eb8a54203e36ea48cb37ba26044353ba4afc8259",
+    "httpx>=0.27",
+    "multipass-sdk @ git+https://github.com/miciav/multipass-sdk.git@402c4061e6b32cc6dda5e7a9876fa7cefd6f9ae1",
+    "pandas>=2.2",
+    "plotly>=5.24",
+    "pydantic-settings>=2.5",
+    "proxmox-sdk @ git+https://github.com/miciav/proxmox-sdk.git@9e2070384c92a03dffdfb3ac7e248f0861cb0537",
+    "shellcraft @ git+https://github.com/miciav/shellcraft.git@b6547835aac88d058810c7b9a592ad442c54ac99",
     "typer>=0.12.5",
     "questionary>=2.1.1",
     "pydantic>=2.9.2",
     "pyyaml>=6.0.2",
     "rich>=13.8",
-    "sonata-engine",
-    "sonata-tasks",
+    "sonata-engine @ git+https://github.com/miciav/sonata.git@e81d559952d4a168edffbe3c7108bd9a017046e9",
+    "sonata-tasks[shell,prometheus,multipass,azure,proxmox] @ git+https://github.com/miciav/sonata.git@5bd4bf805a03f0a8716b0d5d1a5778f9eb4ca345#subdirectory=packages/sonata-tasks",
     "tui-toolkit",
 ]
 
@@ -29,6 +37,14 @@ package-dir = {"" = "src"}
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+nanolab = [
+    "py.typed",
+    "tasks/infra/ansible_assets/ansible.cfg",
+    "tasks/infra/ansible_assets/requirements.txt",
+    "tasks/infra/ansible_assets/playbooks/*.yml",
+]
+
 [dependency-groups]
 dev = [
     "basedpyright>=1.39.3",
@@ -40,7 +56,7 @@ dev = [
 ]
 
 [tool.uv.sources]
-sonata-tasks = { git = "https://github.com/miciav/sonata.git", rev = "d1001e1", subdirectory = "packages/sonata-tasks" }
+sonata-tasks = { git = "https://github.com/miciav/sonata.git", rev = "5bd4bf805a03f0a8716b0d5d1a5778f9eb4ca345", subdirectory = "packages/sonata-tasks" }
 tui-toolkit = { workspace = true }
 
 [tool.pytest.ini_options]
@@ -66,3 +82,5 @@ include = [
 typeCheckingMode = "basic"
 reportMissingTypeStubs = false
 reportPrivateUsage = false
+venvPath = "../.."
+venv = ".venv"

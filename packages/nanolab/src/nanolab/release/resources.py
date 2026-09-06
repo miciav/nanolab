@@ -139,9 +139,7 @@ def ghcr_credentials_resource(
 ) -> Resource[CredentialLease[RemoteDockerCredentials]]:
     return _credential_resource(
         "Acquire staged GHCR credentials",
-        lambda: stage_ghcr_credentials(
-            provider, request, username=username, token_file=token_file
-        ),
+        lambda: stage_ghcr_credentials(provider, request, username=username, token_file=token_file),
         requires,
     )
 

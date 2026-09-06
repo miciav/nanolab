@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from sonata_tasks.command import CommandTask
+
 from nanolab.comparison.prepare import (
     function_build_operations,
     leftover_cleanup_operations,
@@ -169,9 +171,7 @@ class _RecordingExecutor:
         from sonata_tasks.tasks.models import TaskResult
 
         self.seen.append(tuple(spec.argv))
-        return TaskResult(
-            task_id="", status="passed", return_code=0, stdout="", stderr=""
-        )
+        return TaskResult(task_id="", status="passed", return_code=0, stdout="", stderr="")
 
 
 def test_prepare_is_a_workflow_of_the_operations_in_order() -> None:
@@ -229,6 +229,7 @@ def test_prepare_tasks_run_inside_the_checkout() -> None:
     )
 
     for compiled in workflow.compile().tasks:
+        assert isinstance(compiled.task, CommandTask)
         assert compiled.task.options.remote_dir == "/home/azureuser/nanofaas"
 
 

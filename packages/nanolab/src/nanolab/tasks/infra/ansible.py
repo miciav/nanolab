@@ -13,7 +13,7 @@ from sonata_tasks.shell import (
     ShellExecutionResult,
     SubprocessShell,
 )
-from nanolab.tasks.vm.models import VmRequest
+from sonata_tasks.vm.models import VmRequest
 
 
 class HostResolver(Protocol):
@@ -38,9 +38,7 @@ class AnsibleAdapter:
         self.repo_root = Path(repo_root)
         # Playbooks are bundled with the library; callers may override.
         self.ansible_root = (
-            Path(ansible_root)
-            if ansible_root is not None
-            else bundled_ansible_root()
+            Path(ansible_root) if ansible_root is not None else bundled_ansible_root()
         )
         self.shell = shell or SubprocessShell()
         if host_resolver is None:
@@ -67,13 +65,15 @@ class AnsibleAdapter:
         dry_run: bool = False,
     ) -> tuple[list[str], dict[str, str]]:
         playbook = self.ansible_root / "playbooks" / playbook_name
-        command = list(build_ansible_argv(
-            playbook=playbook,
-            inventory=self._inventory_target(request, dry_run=dry_run),
-            user=request.user,
-            private_key_path=self.private_key_path,
-            extra_vars=extra_vars,
-        ))
+        command = list(
+            build_ansible_argv(
+                playbook=playbook,
+                inventory=self._inventory_target(request, dry_run=dry_run),
+                user=request.user,
+                private_key_path=self.private_key_path,
+                extra_vars=extra_vars,
+            )
+        )
         env = {"ANSIBLE_CONFIG": str(self.ansible_root / "ansible.cfg")}
         return command, env
 
@@ -233,9 +233,7 @@ class RunPlaybook:
     extra_vars: dict[str, str] | None = None
 
     def run(self) -> None:
-        result = self.adapter.run_playbook(
-            self.playbook, self.request, extra_vars=self.extra_vars
-        )
+        result = self.adapter.run_playbook(self.playbook, self.request, extra_vars=self.extra_vars)
         if result.return_code != 0:
             # Surface stdout AND stderr: ansible reports task failures on stdout
             # (PLAY RECAP / "fatal: ... FAILED!") while benign warnings go to stderr,
@@ -243,9 +241,7 @@ class RunPlaybook:
             detail = "\n".join(
                 part for part in (result.stdout.strip(), result.stderr.strip()) if part
             )
-            raise RuntimeError(
-                detail or f"{self.task_id} failed (exit {result.return_code})"
-            )
+            raise RuntimeError(detail or f"{self.task_id} failed (exit {result.return_code})")
 
 
 def install_k6_task(

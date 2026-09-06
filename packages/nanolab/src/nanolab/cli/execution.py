@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
+from pathlib import PurePosixPath
 import shlex
 import socket
 import subprocess
@@ -12,7 +14,8 @@ from urllib.parse import urlsplit
 
 from multipass import MultipassClient
 from nanolab.tasks.deployment import CONTROL_PLANE_NODE_PORT, PROMETHEUS_NODE_PORT
-from sonata_tasks.execution.bindings import RoleBindings
+from sonata_tasks.execution.bindings import CommandTaskExecutor, RoleBindings
+from sonata_tasks.execution.models import CommandTaskSpec, TaskResult
 from nanolab.tasks.provisioning.providers import provider_for
 from sonata_tasks.tasks.executors import (
     HostCommandRunner,
@@ -34,6 +37,59 @@ from nanolab.workspace.paths import default_tool_paths
 
 
 StackHostResolver = Callable[[RoleTarget], str]
+
+
+class _RemoteProjectExecutor:
+    """Translate a local project cwd into the corresponding VM directory."""
+
+    def __init__(
+        self,
+        delegate: CommandTaskExecutor,
+        *,
+        local_root: Path,
+        remote_root: str,
+    ) -> None:
+        self._delegate = delegate
+        self._local_root = local_root.resolve()
+        self._remote_root = PurePosixPath(remote_root)
+
+    def binding_key(self, role: str) -> str:
+        return self._delegate.binding_key(role)
+
+    def run(self, task: CommandTaskSpec, *, dry_run: bool = False) -> TaskResult:
+        options = task.options
+        if options.cwd is None:
+            return self._delegate.run(task, dry_run=dry_run)
+        if options.remote_dir is not None:
+            raise ValueError("a remote command cannot declare both cwd and remote_dir")
+        local = options.cwd
+        if not local.is_absolute():
+            local = self._local_root / local
+        try:
+            relative = local.resolve().relative_to(self._local_root)
+        except ValueError as error:
+            raise ValueError(
+                f"remote command cwd {options.cwd} is outside project root {self._local_root}"
+            ) from error
+        remote = self._remote_root.joinpath(*relative.parts).as_posix()
+        translated = replace(
+            task,
+            options=replace(options, cwd=None, remote_dir=remote),
+        )
+        return self._delegate.run(translated, dry_run=dry_run)
+
+
+def _remote_project_executor(
+    executor: CommandTaskExecutor,
+    *,
+    local_root: Path,
+    remote_home: str,
+) -> CommandTaskExecutor:
+    return _RemoteProjectExecutor(
+        executor,
+        local_root=local_root,
+        remote_root=f"{remote_home.rstrip('/')}/nanofaas",
+    )
 
 
 def _container_urls(
@@ -402,6 +458,7 @@ def _provider_bindings(
     environment: EnvironmentConfig,
     provider: object,
     host: HostCommandTaskExecutor,
+    local_root: Path,
 ) -> tuple[RoleBindings, VmRequest]:
     def make(role: str):
         request = vm_request_for_role(environment, role)  # type: ignore[arg-type]
@@ -429,7 +486,14 @@ def _provider_bindings(
                 f"{request.user}"
             ),
         )
-        return executor, request
+        return (
+            _remote_project_executor(
+                executor,
+                local_root=local_root,
+                remote_home=vm_remote_home(request),
+            ),
+            request,
+        )
 
     stack, stack_request = make("stack")
     loadgen_result = make("loadgen") if "loadgen" in environment.roles else None
@@ -450,6 +514,7 @@ def _ssh_bindings(
     environment: EnvironmentConfig,
     command_runner: HostCommandRunner,
     host: HostCommandTaskExecutor,
+    local_root: Path,
 ) -> tuple[RoleBindings, RoleTarget]:
     def remote(role: str):
         target = environment.target(role)  # type: ignore[arg-type]
@@ -463,7 +528,11 @@ def _ssh_bindings(
             target_key=(f"{environment.provider}:{role}:{target.host}:"
                         f"{target.user}:{target.remote_home}"),
         )
-        return executor
+        return _remote_project_executor(
+            executor,
+            local_root=local_root,
+            remote_home=target.remote_home,
+        )
 
     stack = remote("stack")
     loadgen = remote("loadgen") if "loadgen" in environment.roles else None
@@ -487,14 +556,17 @@ def build_role_bindings(
     command_runner = runner or SubprocessShell()
     host = HostCommandTaskExecutor(command_runner)
     if environment.provider == "local":
-        return RoleBindings({role: host for role in (
-            "host", "stack", "loadgen", "cloud", "arm-builder"
-        )}), None
+        local_roles = ("host", "stack", "loadgen", "cloud", "arm-builder")
+        return RoleBindings(dict.fromkeys(local_roles, host)), None
 
     if environment.provider in {"multipass", "azure", "proxmox"}:
-        provider = _provider_for_stack(environment, vm_provider, command_runner, repo_root)
-        bindings, fetch_request = _provider_bindings(environment, provider, host)
+        local_root = (repo_root or default_tool_paths().nanofaas_root).resolve()
+        provider = _provider_for_stack(environment, vm_provider, command_runner, local_root)
+        bindings, fetch_request = _provider_bindings(
+            environment, provider, host, local_root
+        )
         return bindings, VmFileFetcher(provider, fetch_request)
 
-    bindings, fetch_target = _ssh_bindings(environment, command_runner, host)
+    local_root = (repo_root or default_tool_paths().nanofaas_root).resolve()
+    bindings, fetch_target = _ssh_bindings(environment, command_runner, host, local_root)
     return bindings, _RemoteFetcher(command_runner, fetch_target, environment.provider)

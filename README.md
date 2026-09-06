@@ -70,7 +70,7 @@ uv run --locked --all-packages --all-groups lint-imports --config packages/tui-t
 uv build --all-packages --out-dir dist --clear
 
 uv venv .wheel-smoke
-uv pip install dist/nanolab-0.1.0-py3-none-any.whl dist/sonata_tasks-0.1.0-py3-none-any.whl dist/tui_toolkit-0.1.0-py3-none-any.whl --python .wheel-smoke/bin/python
+uv pip install dist/*.whl --python .wheel-smoke/bin/python
 .wheel-smoke/bin/python -c "import nanolab, sonata_tasks, tui_toolkit"
 .wheel-smoke/bin/nanolab --help
 

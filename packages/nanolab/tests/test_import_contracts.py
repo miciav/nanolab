@@ -3,13 +3,14 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 import subprocess
+import sys
 
 
 def test_controlplane_import_contracts_pass() -> None:
     tool_root = Path(__file__).resolve().parents[1]
 
     result = subprocess.run(
-        ["uv", "run", "lint-imports"],
+        [str(Path(sys.executable).with_name("lint-imports"))],
         cwd=tool_root,
         text=True,
         capture_output=True,

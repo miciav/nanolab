@@ -14,6 +14,7 @@ from nanolab.tasks.execution import ExecutionRole
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 from sonata_tasks.command import Argv, CommandTask
+from sonata_tasks.core.fingerprint import fingerprint_digest
 from sonata_tasks.execution.models import CommandOptions
 from sonata_tasks.http import Endpoint, HttpStatusCheckTask as SharedHttpStatusCheckTask
 from sonata_tasks.http import endpoint_argv
@@ -31,6 +32,24 @@ _CONTENT_TYPE_HEADER_NAME = "content-type"
 
 def _argv(endpoint: Endpoint, build: Callable[[str], tuple[str, ...]]) -> Argv:
     return endpoint_argv(endpoint, build)
+
+
+def _endpoint_identity(endpoint: Endpoint) -> dict[str, str]:
+    if isinstance(endpoint, str):
+        return {"kind": "static", "url": endpoint}
+    return {"kind": "resource", "title": endpoint.title}
+
+
+def _semantic_key(namespace: str, **payload: object) -> str:
+    """Hash captured configuration so journals contain no request secrets."""
+    return f"{namespace}:{fingerprint_digest(payload)}"
+
+
+def _task_fingerprint(namespace: str, **payload: object) -> object:
+    return {
+        "schema": 1,
+        "digest": fingerprint_digest({"namespace": namespace, **payload}),
+    }
 
 
 
@@ -180,7 +199,13 @@ class HttpFunctionRegisterTask(CommandTask):
             executor=executor,
             role=role,
             options=CommandOptions(cwd=cwd, expected_exit_codes=frozenset({0, 22})),
-            semantic_key=f"nanolab.http-function.register:{manifest.name}:v1",
+            semantic_key=_semantic_key(
+                "nanolab.http-function.register:v2",
+                endpoint=_endpoint_identity(endpoint),
+                manifest=manifest.body(),
+                expected_backend=expected_backend,
+                expected_endpoint_prefix=expected_endpoint_prefix,
+            ),
             verify=verify if expected_backend is not None or expected_endpoint_prefix is not None else None,
         )
 
@@ -198,7 +223,10 @@ class HttpFunctionRegisterTask(CommandTask):
                     summary=f"Check existing registration for {self._manifest.name}",
                     argv=("curl", "-fsS", f"{base}/v1/functions/{self._manifest.name}"),
                     role=self.role,
-                    options=CommandOptions(env=self.env, cwd=self.cwd, remote_dir=self.remote_dir, expected_exit_codes=frozenset({0}), timeout_seconds=self.timeout_seconds),
+                    options=replace(
+                        self.options,
+                        expected_exit_codes=frozenset({0}),
+                    ),
                 )
             )
             if existing.status == "passed":
@@ -239,7 +267,11 @@ class HttpFunctionDeleteTask(CommandTask):
             executor=executor,
             role=role,
             options=CommandOptions(cwd=cwd, expected_exit_codes=frozenset({0, 7, 22})),
-            semantic_key=f"nanolab.http-function.delete:{name}:v1",
+            semantic_key=_semantic_key(
+                "nanolab.http-function.delete:v2",
+                endpoint=_endpoint_identity(endpoint),
+                name=name,
+            ),
         )
 
 
@@ -275,7 +307,12 @@ class HttpFunctionSetReplicasTask(CommandTask):
             executor=executor,
             role=role,
             options=CommandOptions(cwd=cwd),
-            semantic_key=f"nanolab.http-function.set-replicas:{name}:{replicas}:v1",
+            semantic_key=_semantic_key(
+                "nanolab.http-function.set-replicas:v2",
+                endpoint=_endpoint_identity(endpoint),
+                name=name,
+                replicas=replicas,
+            ),
         )
 
 
@@ -312,7 +349,12 @@ class HttpFunctionBackendTask(CommandTask):
             executor=executor,
             role=role,
             options=CommandOptions(cwd=cwd),
-            semantic_key=f"nanolab.http-function.backend:{name}:{backend}:v1",
+            semantic_key=_semantic_key(
+                "nanolab.http-function.backend:v2",
+                endpoint=_endpoint_identity(endpoint),
+                name=name,
+                backend=backend,
+            ),
             verify=verify,
         )
 
@@ -345,6 +387,20 @@ class HttpFunctionReplicaStatusTask(Task[None]):
         self._clock = clock
         self._sleep = sleep_fn
         self._cwd = cwd
+        self._fingerprint = _task_fingerprint(
+            "nanolab.http-function.replica-status:v2",
+            endpoint=_endpoint_identity(endpoint),
+            name=name,
+            replicas=replicas,
+            role=role,
+            binding_key=executor.binding_key(role),
+            timeout_seconds=timeout_seconds,
+            poll_seconds=poll_seconds,
+            cwd=cwd,
+        )
+
+    def _fingerprint_payload(self) -> object:
+        return self._fingerprint
 
     def run(self, inputs: TaskInputs) -> TaskOutcome[None]:
         command = CommandTask(
@@ -356,7 +412,12 @@ class HttpFunctionReplicaStatusTask(Task[None]):
                       executor=self._executor,
                       role=self._role,
                       options=CommandOptions(cwd=self._cwd),
-                      semantic_key=f"nanolab.http-function.replica-status:{self._name}:{self._replicas}:v1",
+                      semantic_key=_semantic_key(
+                          "nanolab.http-function.replica-status:v2",
+                          endpoint=_endpoint_identity(self._endpoint),
+                          name=self._name,
+                          replicas=self._replicas,
+                      ),
                   )
         deadline = self._clock() + self._timeout_seconds
         last_response: object = None
@@ -401,6 +462,17 @@ class HttpFunctionEnqueueTask(Task[str]):
         self.title = title or f"Enqueue {name}"
         self._name = name
         self._match_upstream = match_upstream
+        self._fingerprint = _task_fingerprint(
+            "nanolab.http-function.enqueue-task:v2",
+            endpoint=_endpoint_identity(endpoint),
+            name=name,
+            payload=payload,
+            idempotency_key=idempotency_key,
+            match_upstream=match_upstream,
+            role=role,
+            binding_key=executor.binding_key(role),
+            cwd=cwd,
+        )
         self._command = CommandTask(
                             title=self.title,
                             argv=_argv(
@@ -420,8 +492,18 @@ class HttpFunctionEnqueueTask(Task[str]):
                             executor=executor,
                             role=role,
                             options=CommandOptions(cwd=cwd),
-                            semantic_key=f"nanolab.http-function.enqueue:{name}:{idempotency_key}:v1",
+                            semantic_key=_semantic_key(
+                                "nanolab.http-function.enqueue:v2",
+                                endpoint=_endpoint_identity(endpoint),
+                                name=name,
+                                payload=payload,
+                                idempotency_key=idempotency_key,
+                                match_upstream=match_upstream,
+                            ),
                         )
+
+    def _fingerprint_payload(self) -> object:
+        return self._fingerprint
 
     def run(self, inputs: TaskInputs) -> TaskOutcome[str]:
         result = _command_result(self._command.run(inputs), self._name)
@@ -477,6 +559,22 @@ class HttpExecutionSuccessTask(Task[None]):
         self._expected_output = expected_output
         self._expected_status_code = expected_status_code
         self._cwd = cwd
+        self._fingerprint = _task_fingerprint(
+            "nanolab.http-function.execution-success:v2",
+            endpoint=_endpoint_identity(endpoint),
+            role=role,
+            binding_key=executor.binding_key(role),
+            timeout_seconds=timeout_seconds,
+            poll_seconds=poll_seconds,
+            expected_output=("unset" if expected_output is _UNSET else expected_output),
+            expected_status_code=(
+                "unset" if expected_status_code is _UNSET else expected_status_code
+            ),
+            cwd=cwd,
+        )
+
+    def _fingerprint_payload(self) -> object:
+        return self._fingerprint
 
     def run(self, inputs: TaskInputs) -> TaskOutcome[None]:  # NOSONAR (S3776): polling state machine reports precise failures
         execution_id = inputs.upstream()
@@ -488,7 +586,19 @@ class HttpExecutionSuccessTask(Task[None]):
                       executor=self._executor,
                       role=self._role,
                       options=CommandOptions(cwd=self._cwd),
-                      semantic_key="nanolab.http-function.execution-success:v1",
+                      semantic_key=_semantic_key(
+                          "nanolab.http-function.execution-success:v2",
+                          endpoint=_endpoint_identity(self._endpoint),
+                          execution_id=execution_id,
+                          expected_output=(
+                              "unset" if self._expected_output is _UNSET else self._expected_output
+                          ),
+                          expected_status_code=(
+                              "unset"
+                              if self._expected_status_code is _UNSET
+                              else self._expected_status_code
+                          ),
+                      ),
                   )
         deadline = monotonic() + self._timeout_seconds
         while True:
@@ -752,7 +862,31 @@ class HttpFunctionContractTask(CommandTask):
             executor=executor,
             role=role,
             options=CommandOptions(cwd=cwd),
-            semantic_key=f"nanolab.http-function.contract:{name}:v1",
+            semantic_key=_semantic_key(
+                "nanolab.http-function.contract:v2",
+                endpoint=_endpoint_identity(endpoint),
+                name=name,
+                payload=payload,
+                headers=headers,
+                content_type=content_type,
+                expectation={
+                    "status": expectation.status,
+                    "api_status": "unset" if expectation.api_status is _UNSET else expectation.api_status,
+                    "output": "unset" if expectation.output is _UNSET else expectation.output,
+                    "status_code": (
+                        "unset" if expectation.status_code is _UNSET else expectation.status_code
+                    ),
+                    "api_headers": (
+                        "unset" if expectation.api_headers is _UNSET else expectation.api_headers
+                    ),
+                    "encoding": "unset" if expectation.encoding is _UNSET else expectation.encoding,
+                    "required_headers": expectation.required_headers,
+                    "forbidden_headers": expectation.forbidden_headers,
+                    "forbidden_header_values": expectation.forbidden_header_values,
+                    "decoded_bytes": expectation.decoded_bytes,
+                    "decoded_prefix": expectation.decoded_prefix,
+                },
+            ),
             verify=verify,
         )
 
@@ -812,7 +946,13 @@ class HttpFunctionInvokeTask(CommandTask):
             executor=executor,
             role=role,
             options=CommandOptions(cwd=cwd),
-            semantic_key=f"nanolab.http-function.invoke:{name}:{require_header or 'none'}:v1",
+            semantic_key=_semantic_key(
+                "nanolab.http-function.invoke:v2",
+                endpoint=_endpoint_identity(endpoint),
+                name=name,
+                payload=payload,
+                require_header=require_header,
+            ),
             verify=verify,
         )
 

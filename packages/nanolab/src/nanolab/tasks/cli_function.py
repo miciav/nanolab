@@ -12,6 +12,7 @@ from sonata_tasks.execution.bindings import CommandTaskExecutor
 from nanolab.tasks.execution import ExecutionRole
 
 from sonata_tasks.command import CommandTask
+from sonata_tasks.core.fingerprint import fingerprint_digest
 from nanolab.tasks.invocation import verify_invocation
 from nanolab.tasks.manifest import FunctionManifest
 from sonata_tasks.tasks.models import TaskResult
@@ -20,6 +21,10 @@ from sonata_tasks.tasks.models import TaskResult
 # `shlex.quote` leaves it alone: it is always its own word, never a substring of
 # one, so substituting the shell variable back in cannot corrupt a neighbour.
 FILE = "@FILE@"
+
+
+def _semantic_key(kind: str, **payload: object) -> str:
+    return f"{kind}:{fingerprint_digest(payload)}"
 
 
 def _script_with_file(content: str, *commands: tuple[str, ...]) -> str:
@@ -135,7 +140,9 @@ class CliFunctionInvokeTask(CommandTask):
             executor=executor,
             role=role,
             options=CommandOptions(cwd=cwd),
-            semantic_key=f"nanolab.cli-function.invoke:{name}:v1",
+            semantic_key=_semantic_key(
+                "nanolab.cli-function.invoke:v2", name=name, payload=payload
+            ),
             verify=verify_invocation,
         )
 
@@ -227,7 +234,9 @@ def function_update_task(
                executor=executor,
                role=role,
                options=CommandOptions(cwd=cwd),
-               semantic_key=f"nanolab.cli-function.update:{name}:v1",
+               semantic_key=_semantic_key(
+                   "nanolab.cli-function.update:v2", name=name, patch=patch
+               ),
                verify=verify,
            )
 
@@ -260,7 +269,9 @@ def function_replicas_tasks(
             executor=executor,
             role=role,
             options=CommandOptions(cwd=cwd),
-            semantic_key=f"nanolab.cli-function.scale:{name}:v1",
+            semantic_key=_semantic_key(
+                "nanolab.cli-function.scale:v2", name=name, replicas=replicas
+            ),
             verify=verify_set,
         ),
         CommandTask(
@@ -269,7 +280,9 @@ def function_replicas_tasks(
             executor=executor,
             role=role,
             options=CommandOptions(cwd=cwd),
-            semantic_key=f"nanolab.cli-function.replicas:{name}:v1",
+            semantic_key=_semantic_key(
+                "nanolab.cli-function.replicas:v2", name=name, replicas=replicas
+            ),
             verify=verify_get,
         ),
     )
@@ -319,8 +332,10 @@ def function_replace_tasks(
             argv=("bash", "-lc", script),
             executor=executor,
             role=role,
-            options=CommandOptions(cwd=cwd, expected_exit_codes=frozenset({1})),
-            semantic_key=f"nanolab.cli-function.replace-refusal:{manifest.name}:v1",
+            options=CommandOptions(cwd=cwd, expected_exit_codes=frozenset({0, 1})),
+            semantic_key=_semantic_key(
+                "nanolab.cli-function.replace-refusal:v2", manifest=changed.body()
+            ),
             verify=verify_refusal,
         ),
         CommandTask(
@@ -329,7 +344,9 @@ def function_replace_tasks(
             executor=executor,
             role=role,
             options=CommandOptions(cwd=cwd),
-            semantic_key=f"nanolab.cli-function.replace:{manifest.name}:v1",
+            semantic_key=_semantic_key(
+                "nanolab.cli-function.replace:v2", manifest=changed.body()
+            ),
             verify=verify_replaced,
         ),
     )
@@ -396,7 +413,15 @@ def runtime_config_tasks(
                    executor=executor,
                    role=role,
                    options=CommandOptions(cwd=cwd, expected_exit_codes=exit_codes),
-                   semantic_key=f"nanolab.cli-function.runtime-config:{title}:v1",
+                   semantic_key=_semantic_key(
+                       "nanolab.cli-function.runtime-config:v2",
+                       title=title,
+                       namespace=namespace,
+                       content=content,
+                       patch=patch,
+                       invalid_patch=invalid_patch,
+                       exit_codes=exit_codes,
+                   ),
                    verify=verify,
                )
 
@@ -415,7 +440,7 @@ def runtime_config_tasks(
             namespace,
             content=invalid_patch,
             verify=verify_rejected,
-            exit_codes=frozenset({1}),
+            exit_codes=frozenset({0, 1}),
         ),
         config_task(
             "Patch runtime config",

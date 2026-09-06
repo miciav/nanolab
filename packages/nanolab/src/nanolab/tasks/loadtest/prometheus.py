@@ -17,16 +17,14 @@ def sum_series_by_timestamp(series: tuple[PrometheusSeries, ...]) -> dict[float,
     return merged
 
 
-def _client(base_url: str) -> HttpPrometheusClient:
-    return HttpPrometheusClient(base_url,
+def _client(base_url: str, timeout_seconds: float = 20) -> HttpPrometheusClient:
+    return HttpPrometheusClient(base_url, timeout_seconds=timeout_seconds,
                                 retry_policy=PrometheusRetryPolicy(
                                     attempts=3, backoff_seconds=2))
 
 
 def query_prometheus_server_time(base_url: str, timeout_seconds: float = 20) -> float:
-    return HttpPrometheusClient(base_url, timeout_seconds=timeout_seconds,
-                                retry_policy=PrometheusRetryPolicy(
-                                    attempts=3, backoff_seconds=2)).server_time()
+    return _client(base_url, timeout_seconds).server_time()
 
 
 def query_prometheus_range_series(base_url: str, metric_name: str, start: datetime,

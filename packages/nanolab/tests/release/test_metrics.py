@@ -117,7 +117,8 @@ def test_the_container_working_set_is_recorded_for_builds_with_no_heap_gauge() -
     summaries = []
     for value in (30, 10, 20):
         summary = _summary_without_heap_pools(value)
-        summary["prometheus"]["container_memory_bytes@control-plane"] = {
+        prometheus = cast(dict[str, object], summary["prometheus"])
+        prometheus["container_memory_bytes@control-plane"] = {
             "points": 40,
             "max": value * 1_000_000,
         }
@@ -329,9 +330,7 @@ def test_regression_policy_checks_throughput_p95_and_error_rate() -> None:
         POLICY,
         k6_passed=True,
         autoscaling_passed=True,
-    ).failures == (
-        "p95 increase 15.69% exceeds 15.00%",
-    )
+    ).failures == ("p95 increase 15.69% exceeds 15.00%",)
 
 
 def test_release_configuration_owns_the_versioned_policy() -> None:

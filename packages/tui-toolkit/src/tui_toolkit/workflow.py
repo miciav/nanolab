@@ -1,7 +1,7 @@
 """tui-toolkit workflow — startup banner only.
 
 The workflow event types, context management, event builders, and reporting
-helpers live in sonata_tasks. The Rich renderer lives in
+helpers live in sonata_engine. The Rich renderer lives in
 nanolab/tui/workflow.py.
 """
 from __future__ import annotations

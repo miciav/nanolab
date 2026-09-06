@@ -3,11 +3,14 @@ name = "nanolab-workspace"
 version = "0.0.0"
 requires-python = ">=3.12"
 dependencies = [
-    "sonata-engine",
+    "sonata-engine @ git+https://github.com/miciav/sonata.git@e81d559952d4a168edffbe3c7108bd9a017046e9",
 ]
 
 [tool.uv]
 package = false
+override-dependencies = [
+    "sonata-engine @ git+https://github.com/miciav/sonata.git@e81d559952d4a168edffbe3c7108bd9a017046e9",
+]
 
 [tool.uv.workspace]
 members = [
@@ -17,4 +20,4 @@ members = [
 
 [tool.uv.sources]
 sonata-engine = { git = "https://github.com/miciav/sonata.git", rev = "e81d559" }
-sonata-tasks = { git = "https://github.com/miciav/sonata.git", rev = "d1001e1", subdirectory = "packages/sonata-tasks" }
+sonata-tasks = { git = "https://github.com/miciav/sonata.git", rev = "5bd4bf805a03f0a8716b0d5d1a5778f9eb4ca345", subdirectory = "packages/sonata-tasks" }

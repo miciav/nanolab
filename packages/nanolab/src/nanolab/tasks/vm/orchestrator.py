@@ -10,7 +10,7 @@ from nanolab.tasks.deployment import LOCAL_REGISTRY, REGISTRY_CONTAINER_NAME
 from sonata_tasks.vm.providers.multipass import MultipassVmProvider
 from sonata_tasks.vm.results import successful_result
 from nanolab.tasks.vm.sync import repo_rsync_command, repo_sync_ssh_rsh
-from nanolab.tasks.vm.models import VmRequest
+from sonata_tasks.vm.models import VmRequest
 
 if TYPE_CHECKING:
     from shellcraft.backend import ShellBackend
@@ -45,9 +45,7 @@ class VmOrchestrator(MultipassVmProvider):
             )
         self.ansible = ansible
 
-    def ensure_running(
-        self, request: VmRequest, *, dry_run: bool = False
-    ) -> ShellExecutionResult:
+    def ensure_running(self, request: VmRequest, *, dry_run: bool = False) -> ShellExecutionResult:
         result = super().ensure_running(request, dry_run=dry_run)
         if self._owns_ansible and not dry_run:
             self.ansible.private_key_path = self._ssh_credentials()[1]
@@ -217,6 +215,7 @@ class VmOrchestrator(MultipassVmProvider):
         try:
             self._client.get_vm(name).transfer(f"{name}:{kubeconfig_path}", str(destination))
         except MultipassCommandError as e:
-            return ShellExecutionResult(command=e.args_list, return_code=e.returncode,
-                                        stdout=e.stdout, stderr=e.stderr)
+            return ShellExecutionResult(
+                command=e.args_list, return_code=e.returncode, stdout=e.stdout, stderr=e.stderr
+            )
         return successful_result(transfer_cmd)

@@ -33,6 +33,7 @@ CONTROL_PLANE_SELECTOR = '{app="nanofaas-control-plane"}'
 
 Queries = tuple[PrometheusQuery, ...]
 QueryBuilder = Callable[[str], Queries]
+_NO_CPU_QUOTA = "no CPU limit, so the cgroup enforces no quota"
 
 
 def _fn(function_name: str) -> str:
@@ -684,9 +685,9 @@ _MAY_BE_ABSENT: Mapping[str, str] = {
     # that sets no CPU limit produces none of it, and that is a fact about the run
     # rather than a broken scrape - unlike the container memory series beside
     # them, which cAdvisor reports for every container alike.
-    "container_cpu_throttled_periods@control-plane": "no CPU limit, so the cgroup enforces no quota",
-    "container_cpu_periods@control-plane": "no CPU limit, so the cgroup enforces no quota",
-    "container_cpu_throttled_seconds@control-plane": "no CPU limit, so the cgroup enforces no quota",
+    "container_cpu_throttled_periods@control-plane": _NO_CPU_QUOTA,
+    "container_cpu_periods@control-plane": _NO_CPU_QUOTA,
+    "container_cpu_throttled_seconds@control-plane": _NO_CPU_QUOTA,
 }
 
 

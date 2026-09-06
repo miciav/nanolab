@@ -470,9 +470,7 @@ def test_documentation_failure_resumes_finalize_without_reattesting(tmp_path: Pa
         return (Evidence("file-digest", str(documentation), digest_path(documentation)),)
 
     workflow = Workflow("release-finalize-resume")
-    attestation = attest_task(
-        identity=_identity(), run_dir=tmp_path, phase_inputs={}, work=sign
-    )
+    attestation = attest_task(identity=_identity(), run_dir=tmp_path, phase_inputs={}, work=sign)
     finalize = finalize_task(
         identity=_identity(),
         run_dir=tmp_path,
@@ -734,6 +732,9 @@ def test_image_steps_capture_every_current_registry_digest() -> None:
         def __init__(self):
             self.commands = []
 
+        def binding_key(self, role: str) -> str:
+            return f"test:{role}"
+
         def run(self, task, *, dry_run=False):
             self.commands.append(task.argv)
             return TaskResult(
@@ -771,6 +772,9 @@ def test_image_steps_reject_malformed_digest_output(stdout) -> None:
             return TaskOutcome()
 
     class Executor:
+        def binding_key(self, role: str) -> str:
+            return f"test:{role}"
+
         def run(self, task: CommandTaskSpec, *, dry_run: bool = False) -> TaskResult:
             del task, dry_run
             return TaskResult(task_id="", status="passed", return_code=0, stdout=stdout)
@@ -792,6 +796,9 @@ class _ScriptedExecutor:
 
     def __init__(self, responses: dict[tuple[str, ...], str]) -> None:
         self._responses = responses
+
+    def binding_key(self, role: str) -> str:
+        return f"test:{role}"
 
     def run(self, task, *, dry_run=False):
         return TaskResult(
@@ -877,6 +884,9 @@ def test_run_image_steps_retries_the_read_only_matrix_inspection(monkeypatch) ->
     class Executor:
         def __init__(self) -> None:
             self.calls = 0
+
+        def binding_key(self, role: str) -> str:
+            return f"test:{role}"
 
         def run(self, task, *, dry_run=False):
             del task, dry_run

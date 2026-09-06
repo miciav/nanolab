@@ -1,6 +1,7 @@
 # Piano esecutivo: catalogo condiviso dei task in Sonata
 
-Data: 2026-09-05. Stato: **piano da eseguire; nessuna implementazione effettuata**.
+Data: 2026-09-05. Stato: **T00–T12 eseguite e rivalidate; SHA Sonata finale,
+lock nanolab e installazioni da wheel verificati**.
 
 Documento di motivazione: [proposta architetturale](2026-09-05-shared-sonata-tasks-proposal.md).
 Inventario vincolante: [mappa dei file](2026-09-05-shared-sonata-tasks-migration-map.json).
@@ -791,24 +792,24 @@ una nuova approvazione progettuale se rientra chiaramente nelle regole della map
 
 ## 9. Checklist di completamento
 
-- [ ] Ogni voce dell'inventario ha destinazione implementata; nessun test perso.
-- [ ] Solo Sonata distribuisce sonata-tasks; nanolab non ne conserva una copia.
-- [ ] Engine indipendente e senza nuove dipendenze di esecuzione.
-- [ ] Base catalogo installabile/importabile senza VM, reportistica o nanoFaaS.
-- [ ] Opzioni immutabili con un'unica fonte; nessun passthrough perso.
-- [ ] Timeout locale verificato, adapter incapaci rifiutano esplicitamente.
-- [ ] Ruolo builder funziona; binding assente e risultato malformato falliscono.
-- [ ] Fingerprint copre opzioni/binding/chiavi; callable non eseguite a compile.
-- [ ] Nessuna nuova idempotenza o possibilità di skip implicita.
-- [ ] Default di prodotto trasferiti al client senza rinominare risorse.
-- [ ] Audit per responsabilità C01–C08 completato: meccanismi estratti una volta,
+- [x] Ogni voce dell'inventario ha destinazione implementata; nessun test perso.
+- [x] Solo Sonata distribuisce sonata-tasks; nanolab non ne conserva una copia.
+- [x] Engine indipendente e senza nuove dipendenze di esecuzione.
+- [x] Base catalogo installabile/importabile senza VM, reportistica o nanoFaaS.
+- [x] Opzioni immutabili con un'unica fonte; nessun passthrough perso.
+- [x] Timeout locale verificato, adapter incapaci rifiutano esplicitamente.
+- [x] Ruolo builder funziona; binding assente e risultato malformato falliscono.
+- [x] Fingerprint copre opzioni/binding/chiavi; callable non eseguite a compile.
+- [x] Nessuna nuova idempotenza o possibilità di skip implicita.
+- [x] Default di prodotto trasferiti al client senza rinominare risorse.
+- [x] Audit per responsabilità C01–C08 completato: meccanismi estratti una volta,
       politiche client in adapter/composite/specializzazioni con test separati.
-- [ ] Cleanup, compensazione, retention e credenziali VM preservati dai test.
-- [ ] Consumer indipendente e nanolab usano la stessa wheel, fuori dai workspace.
-- [ ] QN/QS, build, smoke e import isolati completati o gate pendenti dichiarati.
+- [x] Cleanup, compensazione, retention e credenziali VM preservati dai test.
+- [x] Consumer indipendente e nanolab usano la stessa wheel, fuori dai workspace.
+- [x] QN/QS, build, smoke e import isolati completati o gate pendenti dichiarati.
 - [ ] E/S coerenti in metadata e lock, nessun placeholder o path personale.
-- [ ] Istruzioni journal/rollback e cambi incompatibili consegnati.
-- [ ] Registro progressi contiene commit effettivi e risultati, non solo caselle.
+- [x] Istruzioni journal/rollback e cambi incompatibili consegnati.
+- [x] Registro progressi contiene commit effettivi e risultati, non solo caselle.
 
 La consegna finale deve elencare i due cambi, le verifiche effettuate e gli
 eventuali passaggi esterni ancora pendenti. Non dichiarare terminata la migrazione

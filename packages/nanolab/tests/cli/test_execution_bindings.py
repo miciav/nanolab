@@ -1,11 +1,14 @@
 from dataclasses import dataclass
 from pathlib import Path
 
+import pytest
+
 import nanolab.cli.execution as execution
 from nanolab.cli.execution import build_role_bindings, resolve_loadtest_urls
 from nanolab.config.environment import EnvironmentConfig
 from sonata_tasks.tasks.models import CommandTaskSpec
-from nanolab.tasks.vm.models import VmRequest
+from sonata_tasks.execution.models import CommandOptions
+from sonata_tasks.vm.models import VmRequest
 
 
 @dataclass
@@ -43,10 +46,12 @@ class RecordingVmProvider:
         self.exec_calls.append((request, tuple(argv), env, remote_dir, dry_run))
         return _Result()
 
-    def transfer_from(
-        self, request: VmRequest, *, source: str, destination: Path
-    ) -> _Result:
+    def transfer_from(self, request: VmRequest, *, source: str, destination: Path) -> _Result:
         self.fetch_calls.append((request, source, destination))
+        return _Result()
+
+    def transfer_to(self, request: VmRequest, *, source: Path, destination: str) -> _Result:
+        del request, source, destination
         return _Result()
 
     def connection_host(self, request):
@@ -86,6 +91,74 @@ def test_external_stack_uses_ssh_in_remote_repository() -> None:
     ) in runner.calls[0][0][-1]
 
 
+def test_external_stack_maps_local_project_cwd_to_remote_subdirectory(tmp_path) -> None:
+    runner = RecordingRunner()
+    root = tmp_path / "project with spaces"
+    root.mkdir()
+    environment = EnvironmentConfig.model_validate(
+        {
+            "provider": "external",
+            "roles": {"stack": {"host": "vm.example", "user": "alice", "home": "/srv/alice"}},
+        }
+    )
+
+    bindings, _ = build_role_bindings(environment, runner=runner, repo_root=root)
+    bindings.executor_for("stack").run(
+        CommandTaskSpec(
+            task_id="check",
+            summary="check",
+            argv=("pwd",),
+            role="stack",
+            options=CommandOptions(cwd=root / "deploy" / "charts"),
+        )
+    )
+
+    assert "cd /srv/alice/nanofaas/deploy/charts && env " in runner.calls[0][0][-1]
+    assert runner.calls[0][0][-1].endswith(" pwd'")
+
+
+def test_external_stack_rejects_cwd_outside_the_synced_project(tmp_path) -> None:
+    runner = RecordingRunner()
+    root = tmp_path / "project"
+    root.mkdir()
+    environment = EnvironmentConfig.model_validate(
+        {"provider": "external", "roles": {"stack": {"host": "vm.example"}}}
+    )
+    bindings, _ = build_role_bindings(environment, runner=runner, repo_root=root)
+
+    with pytest.raises(ValueError, match="outside project root"):
+        bindings.executor_for("stack").run(
+            CommandTaskSpec(
+                task_id="check",
+                summary="check",
+                argv=("pwd",),
+                role="stack",
+                options=CommandOptions(cwd=tmp_path / "elsewhere"),
+            )
+        )
+
+
+def test_remote_command_rejects_both_local_and_remote_directory(tmp_path) -> None:
+    runner = RecordingRunner()
+    root = tmp_path / "project"
+    root.mkdir()
+    environment = EnvironmentConfig.model_validate(
+        {"provider": "external", "roles": {"stack": {"host": "vm.example"}}}
+    )
+    bindings, _ = build_role_bindings(environment, runner=runner, repo_root=root)
+
+    with pytest.raises(ValueError, match="both cwd and remote_dir"):
+        bindings.executor_for("stack").run(
+            CommandTaskSpec(
+                task_id="check",
+                summary="check",
+                argv=("pwd",),
+                role="stack",
+                options=CommandOptions(cwd=root, remote_dir="/explicit"),
+            )
+        )
+
+
 def test_container_loadtest_uses_compose_ports() -> None:
     assert resolve_loadtest_urls(
         EnvironmentConfig(provider="local"),
@@ -99,7 +172,9 @@ def test_container_loadtest_uses_compose_ports() -> None:
 def test_multipass_stack_uses_provider_ssh_execution(monkeypatch) -> None:
     runner = RecordingRunner()
     provider = RecordingVmProvider()
-    monkeypatch.setattr(execution, "VmOrchestrator", lambda *_args, **_kwargs: provider, raising=False)
+    monkeypatch.setattr(
+        execution, "VmOrchestrator", lambda *_args, **_kwargs: provider, raising=False
+    )
     environment = EnvironmentConfig.model_validate(
         {"provider": "multipass", "roles": {"stack": {"name": "nanofaas-stack"}}}
     )
@@ -124,7 +199,9 @@ def test_a_role_without_defaults_sends_no_environment(monkeypatch) -> None:
     export' to a reader."""
     runner = RecordingRunner()
     provider = RecordingVmProvider()
-    monkeypatch.setattr(execution, "VmOrchestrator", lambda *_args, **_kwargs: provider, raising=False)
+    monkeypatch.setattr(
+        execution, "VmOrchestrator", lambda *_args, **_kwargs: provider, raising=False
+    )
     environment = EnvironmentConfig.model_validate(
         {
             "provider": "multipass",

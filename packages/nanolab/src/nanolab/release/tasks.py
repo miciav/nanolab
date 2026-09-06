@@ -283,6 +283,40 @@ def run_source_steps(
     return (Evidence("file-digest", str(source_archive), digest_path(source_archive)),)
 
 
+def _image_inspection_argv(
+    images: tuple[str, ...], *, registry: bool, architecture: str | None
+) -> tuple[str, ...]:
+    if registry:
+        return (
+            "sh",
+            "-c",
+            "for image do skopeo inspect --tls-verify=false "
+            "--format='{{.Digest}}' \"docker://$image\" || exit; done",
+            "verify-images",
+            *images,
+        )
+    output_format = "--format={{.Architecture}}|{{.Id}}" if architecture else "--format={{.Id}}"
+    return ("docker", "image", "inspect", output_format, *images)
+
+
+def _digest_from_inspection(line: str, image: str, architecture: str | None) -> str:
+    if architecture is None:
+        return line.strip()
+    actual, separator, digest = line.partition("|")
+    if not separator or actual != architecture:
+        raise RuntimeError(
+            f"image architecture mismatch for {image}: "
+            f"expected {architecture}, got {actual or 'empty'}"
+        )
+    return digest.strip()
+
+
+def _image_evidence(image: str, digest: str, *, registry: bool) -> Evidence:
+    if registry:
+        return Evidence("local-registry-digest", f"docker://{image}", digest)
+    return Evidence("local-image-digest", f"docker-daemon:{image}", digest)
+
+
 def run_image_steps(
     steps: Task[Any],
     inputs: TaskInputs,
@@ -303,24 +337,7 @@ def run_image_steps(
     if not images:
         return ()
 
-    argv = (
-        (
-            "sh",
-            "-c",
-            "for image do skopeo inspect --tls-verify=false "
-            "--format='{{.Digest}}' \"docker://$image\" || exit; done",
-            "verify-images",
-            *images,
-        )
-        if registry
-        else (
-            "docker",
-            "image",
-            "inspect",
-            "--format={{.Architecture}}|{{.Id}}" if architecture else "--format={{.Id}}",
-            *images,
-        )
-    )
+    argv = _image_inspection_argv(images, registry=registry, architecture=architecture)
     result = retry_on_connection_death(
         lambda: executor.run(
             CommandTaskSpec(
@@ -338,25 +355,10 @@ def run_image_steps(
 
     evidence: list[Evidence] = []
     for image, line in zip(images, lines, strict=True):
-        if architecture is not None:
-            actual, separator, digest = line.partition("|")
-            if not separator or actual != architecture:
-                raise RuntimeError(
-                    f"image architecture mismatch for {image}: "
-                    f"expected {architecture}, got {actual or 'empty'}"
-                )
-        else:
-            digest = line
-        digest = digest.strip()
+        digest = _digest_from_inspection(line, image, architecture)
         if not is_sha256_digest(digest):
             raise RuntimeError(f"invalid image digest for {image}")
-        evidence.append(
-            Evidence(
-                "local-registry-digest" if registry else "local-image-digest",
-                f"docker://{image}" if registry else f"docker-daemon:{image}",
-                digest,
-            )
-        )
+        evidence.append(_image_evidence(image, digest, registry=registry))
     return tuple(evidence)
 
 

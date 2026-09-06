@@ -12,6 +12,7 @@ from nanolab.tasks.execution import ExecutionRole
 from sonata_tasks.tasks.models import TaskResult
 
 from sonata_tasks.docker import DockerInspectTask
+from sonata_tasks.core.fingerprint import fingerprint_digest
 from nanolab.tasks.kubectl import KubectlTask
 
 ResourceSpec = Mapping[str, Any]
@@ -96,6 +97,11 @@ class ContainerResourceCheckTask(DockerInspectTask):
             title=f"Inspect resources of {container}",
             options=CommandOptions(cwd=cwd),
             verify=verify,
+            semantic_key=(
+                f"nanolab.container-resources:v2:{fingerprint_digest({'expected': expected})}"
+                if resources is not None
+                else None
+            ),
         )
 
 
@@ -160,4 +166,9 @@ class K8sResourceCheckTask(KubectlTask):
             title=f"Inspect resources of {deployment}",
             options=CommandOptions(cwd=cwd),
             verify=verify,
+            semantic_key=(
+                f"nanolab.k8s-resources:v2:{fingerprint_digest({'expected': expected})}"
+                if resources is not None
+                else None
+            ),
         )

@@ -6,6 +6,7 @@ from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 from nanolab.tasks.components.operations import RemoteCommandOperation
 from nanolab.tasks.provisioning.bootstrap import (
@@ -14,6 +15,7 @@ from nanolab.tasks.provisioning.bootstrap import (
     scenario_context,
 )
 from sonata_tasks.vm.adapters import VmLifecycleAdapter
+from sonata_tasks.vm.ports import VmOrchestratorProtocol
 from nanolab.tasks.vm.models import VmConfig, VmInfo, VmRequest, vm_remote_home
 from sonata_tasks.vm.tasks import DestroyVm, EnsureVmRunning
 from sonata_engine.workflow.reporting import subtask
@@ -28,7 +30,7 @@ class ProvisionedRole:
 
 def _ensure_vm(provider: object, request: VmRequest, *, role: str) -> VmRequest:
     lifecycle = VmLifecycleAdapter(
-        provider,
+        cast(VmOrchestratorProtocol, provider),
         lifecycle=request.lifecycle,
         credentials=request,
     )
@@ -60,7 +62,7 @@ def _destroy_task(provider: object, request: VmRequest, *, role: str) -> Destroy
     if request.lifecycle == "external":
         return None
     lifecycle = VmLifecycleAdapter(
-        provider,
+        cast(VmOrchestratorProtocol, provider),
         lifecycle=request.lifecycle,
         credentials=request,
     )
@@ -129,9 +131,7 @@ def provision_roles(
         for entry, request in zip(roles, resolved):
             if entry.operations:
                 context = scenario_context(repo_root, request, assets_root)
-                retargeted = retarget_cloud_operations(
-                    provider, context, entry.operations
-                )
+                retargeted = retarget_cloud_operations(provider, context, entry.operations)
                 run_bootstrap_operations(provider, retargeted, role=entry.role)
         yield
     except BaseException as exc:  # NOSONAR (S5754): cleanup must run across the yield boundary

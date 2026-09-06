@@ -46,4 +46,4 @@ class FunctionManifest:
 
     def json(self) -> str:
         """Compact JSON, so the payload survives being embedded in a shell word."""
-        return json.dumps(self.body(), separators=(",", ":"))
+        return json.dumps(self.body(), sort_keys=True, separators=(",", ":"))

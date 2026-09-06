@@ -134,12 +134,8 @@ class EvaluateOffloadConservation:
             encoding="utf-8",
         )
         if not report.passed:
-            raise RuntimeError(
-                "offload conservation check failed: " + "; ".join(report.failures)
-            )
+            raise RuntimeError("offload conservation check failed: " + "; ".join(report.failures))
         return {"passed": report.passed}
-
-
 
 
 def _offload_target(values: dict[str, str], target_url: str) -> dict[str, str]:
@@ -198,6 +194,120 @@ def _platform(
     return cast(PlatformRequest, replace(request, helm_values=helm_args))
 
 
+def _http_endpoint(host: str, port: int) -> str:
+    return f"http://{host}:{port}"  # NOSONAR (S5332): internal control-plane endpoint
+
+
+def _platform_endpoints(
+    environment: EnvironmentConfig, edge_host: str, cloud_host: str
+) -> tuple[bool, str, str, Literal["container", "k8s"]]:
+    if environment.provider == "local":
+        return (
+            True,
+            _http_endpoint(edge_host, _LOCAL_EDGE_CONTROL_PLANE_PORT),
+            _http_endpoint(cloud_host, _LOCAL_CLOUD_CONTROL_PLANE_PORT),
+            "container",
+        )
+    return (
+        False,
+        _http_endpoint(edge_host, _CONTROL_PLANE_PORT),
+        _http_endpoint(cloud_host, _CONTROL_PLANE_PORT),
+        "k8s",
+    )
+
+
+def _local_requirements(
+    *, local: bool, bindings: RoleBindings, root: Path
+) -> tuple[Any, ...]:
+    requirements: tuple[Any, ...] = ()
+    if not local:
+        return requirements
+    registry = docker_registry_resource(
+        executor=RoleBoundCommandTaskExecutor(bindings),
+        role="host",
+        container=REGISTRY_CONTAINER_NAME,
+    )
+    compose = docker_compose_resource(
+        DockerComposeProject(
+            name="nanofaas-offload-loadtest",
+            file=Path("deploy/compose/offload-loadtest.yaml"),
+            ready_url="http://127.0.0.1:8081/actuator/health/readiness",
+        ),
+        executor=RoleBoundCommandTaskExecutor(bindings),
+        cwd=root,
+        requires=(registry,),
+    )
+    requirements = (registry, compose)
+    return requirements
+
+
+def _loadtest_paths(
+    environment: EnvironmentConfig,
+    *,
+    remote: bool,
+    run_dir: Path,
+    tool_root: Path | None,
+) -> tuple[Path, Path]:
+    if remote:
+        home = environment.target("loadgen").remote_home
+        return (
+            Path(home) / "nanolab-assets/k6/offload-mixed.js",
+            Path(home) / "nanofaas-loadtest/k6-summary.json",
+        )
+    product_root = tool_root or discover_tool_root()
+    return product_root / "assets/k6/offload-mixed.js", run_dir / "k6-summary.json"
+
+
+def _append_result_collection_steps(
+    steps: list[Any],
+    *,
+    local: bool,
+    remote: bool,
+    fetcher: RemoteFileFetcher | None,
+    summary_path: Path,
+    run_dir: Path,
+    request: OffloadLoadtestRequest,
+    executor: RoleBoundCommandTaskExecutor,
+) -> Path:
+    local_summary_path = summary_path
+    if remote:
+        if fetcher is None:
+            raise ValueError("fetcher is required to retrieve remote k6 results")
+        steps.append(
+            FetchResultsTask(
+                fetch=FetchVmResults(
+                    task_id="",
+                    title="Fetch k6 results",
+                    fetcher=fetcher,
+                    remote_source=str(summary_path),
+                    local_dest=run_dir,
+                )
+            )
+        )
+        local_summary_path = run_dir / summary_path.name
+
+    if local:
+        return local_summary_path
+    platform_roles: tuple[tuple[str, PlatformRequest, Role], ...] = (
+        ("edge", request.edge, "stack"),
+        ("cloud", request.cloud, "cloud"),
+    )
+    for label, platform, role in platform_roles:
+        steps.append(
+            SideCommandTask(
+                title=f"Collect the {label} control-plane log",
+                command=collect_control_plane_log(
+                    executor=executor,
+                    role=role,
+                    namespace=platform.namespace,
+                    destination=run_dir / f"control-plane-{label}.log",
+                    title=f"Collect the {label} control-plane log",
+                ),
+            )
+        )
+    return local_summary_path
+
+
 def build_offload_loadtest_plan(
     config: ScenarioConfig,
     environment: EnvironmentConfig,
@@ -219,9 +329,7 @@ def build_offload_loadtest_plan(
     if config.workflow != "offload-loadtest":
         raise ValueError("offload load-test plan requires an offload-loadtest scenario")
     if len(config.functions) != 2:
-        raise ValueError(
-            "offload-loadtest requires exactly two functions: [offloadable, control]"
-        )
+        raise ValueError("offload-loadtest requires exactly two functions: [offloadable, control]")
     offloadable_key, control_key = config.functions
     root = repo_root or Path.cwd()
     # timeout_ms is also the offload gateway's remote-call budget (edge gives up
@@ -229,9 +337,7 @@ def build_offload_loadtest_plan(
     # to a function pod that may still be warming up under real load.
     offloadable = replace(
         sonata_function(
-            resolve_function(
-                config, offloadable_key, source_root=repo_root, tool_root=tool_root
-            )
+            resolve_function(config, offloadable_key, source_root=repo_root, tool_root=tool_root)
         ),
         concurrency=2,
         queue_size=8,
@@ -250,10 +356,9 @@ def build_offload_loadtest_plan(
 
     edge_host = _role_host(environment, "stack", dry_run=dry_run)
     cloud_host = _role_host(environment, "cloud", dry_run=dry_run)
-    local = environment.provider == "local"
-    edge_url = f"http://{edge_host}:{_LOCAL_EDGE_CONTROL_PLANE_PORT if local else _CONTROL_PLANE_PORT}"  # NOSONAR (S5332): local control-plane endpoint
-    cloud_url = f"http://{cloud_host}:{_LOCAL_CLOUD_CONTROL_PLANE_PORT if local else _CONTROL_PLANE_PORT}"  # NOSONAR (S5332): local control-plane endpoint
-    backend: Literal["container", "k8s"] = "container" if local else "k8s"
+    local, edge_url, cloud_url, backend = _platform_endpoints(
+        environment, edge_host, cloud_host
+    )
 
     request = OffloadLoadtestRequest(
         # The cloud absorbs whatever the edge sheds, so it must not reproduce the
@@ -278,33 +383,17 @@ def build_offload_loadtest_plan(
         ),
     )
 
-    requires = ()
-    if local:
-        registry = docker_registry_resource(executor=RoleBoundCommandTaskExecutor(bindings), role="host", container=REGISTRY_CONTAINER_NAME)
-        compose = docker_compose_resource(
-            DockerComposeProject(
-                name="nanofaas-offload-loadtest",
-                file=Path("deploy/compose/offload-loadtest.yaml"),
-                ready_url="http://127.0.0.1:8081/actuator/health/readiness",
-            ),
-            executor=RoleBoundCommandTaskExecutor(bindings),
-            cwd=root,
-            requires=(registry,),
-        )
-        requires = (registry, compose)
+    requires = _local_requirements(local=local, bindings=bindings, root=root)
 
     dedicated_loadgen = "loadgen" in environment.roles
     k6_role: Literal["stack", "loadgen"] = "loadgen" if dedicated_loadgen else "stack"
     remote = dedicated_loadgen and environment.provider != "local"
-    if remote:
-        role_target = environment.target("loadgen")
-        home = role_target.remote_home
-        script_path = Path(home) / "nanolab-assets/k6/offload-mixed.js"
-        summary_path = Path(home) / "nanofaas-loadtest/k6-summary.json"
-    else:
-        product_root = tool_root or discover_tool_root()
-        script_path = product_root / "assets/k6/offload-mixed.js"
-        summary_path = run_dir / "k6-summary.json"
+    script_path, summary_path = _loadtest_paths(
+        environment,
+        remote=remote,
+        run_dir=run_dir,
+        tool_root=tool_root,
+    )
 
     executor = RoleBoundCommandTaskExecutor(bindings)
     steps: list[Any] = [
@@ -346,43 +435,16 @@ def build_offload_loadtest_plan(
         ),
     ]
 
-    local_summary_path = summary_path
-    if remote:
-        if fetcher is None:
-            raise ValueError("fetcher is required to retrieve remote k6 results")
-        steps.append(
-            FetchResultsTask(
-                fetch=FetchVmResults(
-                    task_id="",
-                    title="Fetch k6 results",
-                    fetcher=fetcher,
-                    remote_source=str(summary_path),
-                    local_dest=run_dir,
-                )
-            )
-        )
-        local_summary_path = run_dir / summary_path.name
-
-    if not local:
-        # Two clusters, so two logs: one file would answer for whichever side
-        # happened to be asked, and the interesting failures here are precisely
-        # the ones where the edge and the cloud disagree.
-        for label, platform, role in (
-            ("edge", request.edge, "stack"),
-            ("cloud", request.cloud, "cloud"),
-        ):
-            steps.append(
-                SideCommandTask(
-                    title=f"Collect the {label} control-plane log",
-                    command=collect_control_plane_log(
-                        executor=executor,
-                        role=role,
-                        namespace=platform.namespace,
-                        destination=run_dir / f"control-plane-{label}.log",
-                        title=f"Collect the {label} control-plane log",
-                    ),
-                )
-            )
+    local_summary_path = _append_result_collection_steps(
+        steps,
+        local=local,
+        remote=remote,
+        fetcher=fetcher,
+        summary_path=summary_path,
+        run_dir=run_dir,
+        request=request,
+        executor=executor,
+    )
 
     steps.append(
         EvaluateConservationTask(

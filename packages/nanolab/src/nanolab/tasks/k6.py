@@ -5,6 +5,7 @@ from pathlib import Path
 from sonata_engine import TaskInputs
 from sonata_tasks.execution.models import CommandOptions
 from sonata_tasks.execution.ports import CommandTaskExecutor
+from sonata_tasks.core.fingerprint import fingerprint_digest
 from sonata_tasks.k6 import K6Task as SharedK6Task, k6_argv as shared_k6_argv
 from sonata_tasks.k6_models import K6Config as SharedK6Config
 
@@ -32,12 +33,25 @@ class K6Task(SharedK6Task):
                 else inputs.resource(config.target_url)
             return _shared_config(config, target)
 
-        key = repr((str(config.script_path), str(config.summary_output_path), config.stages,
-                    tuple(config.env.items()), config.vus, config.duration,
-                    str(config.payload_path), str(config.target_url)))
+        key = fingerprint_digest(
+            {
+                "script_path": config.script_path,
+                "summary_output_path": config.summary_output_path,
+                "stages": tuple((stage.duration, stage.target) for stage in config.stages),
+                "env": config.env,
+                "vus": config.vus,
+                "duration": config.duration,
+                "payload_path": config.payload_path,
+                "target": (
+                    config.target_url
+                    if isinstance(config.target_url, str)
+                    else {"resource": config.target_url.title}
+                ),
+            }
+        )
         super().__init__(resolve, executor=executor, role=role,
                          options=CommandOptions(cwd=cwd, remote_dir=remote_dir),
-                         title=title, semantic_key=f"nanolab-k6:v1:{key}",
+                         title=title, semantic_key=f"nanolab-k6:v2:{key}",
                          require_pass=require_pass)
 
 

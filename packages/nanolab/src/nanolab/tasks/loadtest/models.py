@@ -5,7 +5,9 @@ from datetime import datetime
 from pathlib import Path
 
 from sonata_engine import Resource
-from sonata_tasks.k6_models import K6Stage
+from sonata_tasks.k6_models import K6RunResult, K6Stage
+
+__all__ = ["K6Config", "K6RunResult", "K6Stage", "PrometheusQuery", "TimeWindow"]
 
 
 @dataclass(frozen=True)
