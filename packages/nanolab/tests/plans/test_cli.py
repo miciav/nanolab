@@ -90,7 +90,41 @@ class FakeAzureOrchestrator(FakeMultipassOrchestrator):
 def _multipass_environment(**role_overrides: object) -> EnvironmentConfig:
     role = {"name": "nanofaas-e2e-cli", **role_overrides}
     return EnvironmentConfig.model_validate(
-        {"provider": "multipass", "roles": {"stack": role}}
+        {
+            "provider": "multipass",
+            "roles": {"stack": role},
+            "containerdMavenRepository": "/tmp/test-containerd-maven",
+        }
+    )
+
+
+def test_containerd_cli_compiles_rootless_runtime_and_public_contract() -> None:
+    executor = RecordingExecutor()
+    plan = build_cli_plan(
+        ScenarioConfig(
+            workflow="cli", backend="containerd", functions=["word-stats-java"]
+        ),
+        RoleBindings({"host": executor, "stack": executor}),
+        repo_root=default_tool_paths().nanofaas_root,
+        environment=_multipass_environment(),
+    )
+
+    titles = [task.task.title for task in plan.compile().tasks]
+    assert "Acquire rootless containerd test registry" in titles
+    assert "Acquire rootless containerd test runtime" in titles
+    assert "List functions" in titles
+    assert not any("Docker Compose" in title or "Helm" in title for title in titles)
+    build = next(
+        task.task.argv
+        for task in plan.compile().tasks
+        if isinstance(task.task, CommandTask)
+        and task.task.title == "Build local control plane"
+    )
+    assert not callable(build)
+    assert "-PcontainerdMavenLocal=true" in build
+    assert any(
+        arg.startswith("-Dmaven.repo.local=/home/ubuntu/nanolab-containerd-maven-")
+        for arg in build
     )
 
 

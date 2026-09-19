@@ -161,7 +161,12 @@ def preflight(
         )
         image = config.images[target.role]
         digest_valid = (
-            re.fullmatch(r"[^\s@]+@sha256:[0-9a-f]{64}", target.image_digest)
+            re.fullmatch(
+                r"sha256:[0-9a-f]{64}"
+                if image.artifact_kind == "process"
+                else r"[^\s@]+@sha256:[0-9a-f]{64}",
+                target.image_digest,
+            )
             is not None
         )
         results.append(

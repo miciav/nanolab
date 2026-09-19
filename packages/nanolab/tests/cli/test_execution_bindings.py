@@ -374,6 +374,18 @@ def test_multipass_loadtest_urls_resolve_instance_address() -> None:
     assert urls == ("http://10.20.30.40:30080", "http://10.20.30.40:30090")
 
 
+def test_containerd_loadtest_urls_use_rootless_publications() -> None:
+    environment = EnvironmentConfig.model_validate(
+        {"provider": "multipass", "roles": {"stack": {"name": "rootless-stack"}}}
+    )
+
+    urls = resolve_loadtest_urls(
+        environment, backend="containerd", host_resolver=lambda _: "10.20.30.40"
+    )
+
+    assert urls == ("http://10.20.30.40:8080", "http://10.20.30.40:9090")
+
+
 def test_explicit_loadtest_urls_do_not_resolve_stack_address() -> None:
     environment = EnvironmentConfig.model_validate(
         {"provider": "multipass", "roles": {"stack": {"name": "nanofaas-stack"}}}

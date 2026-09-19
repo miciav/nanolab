@@ -74,6 +74,23 @@ def test_distinct_sources_and_labels():
     assert next(r for r in rows if r.labels == (("field", "pgfault"),)).unit == "raw"
 
 
+def test_containerd_cgroup_v2_samples_keep_their_real_source():
+    data = observation()
+    del data["stats"]
+    data["cgroup"] = {
+        "memory_current": 50000,
+        "memory_max": 100000,
+        "memory_stat": {"inactive_file": 1000, "pgfault": 3},
+    }
+    rows = probe_for(data).sample(TARGET, "steady", 1)
+    memory = [row for row in rows if row.metric == "cgroup_memory_usage_bytes"]
+    assert len(memory) == 1
+    assert memory[0].value == 50000
+    assert memory[0].source == "cgroup-v2/memory.current"
+    assert not any("docker-engine" in row.source for row in rows)
+    assert not any(row.metric == "docker_working_set_estimate_bytes" for row in rows)
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [

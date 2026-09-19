@@ -36,6 +36,14 @@ from nanolab.plans.functions import (
 from nanolab.tasks.components.bootstrap import remote_project_dir
 from nanolab.tasks.components.helm import control_plane_helm_values, helm_set_args
 from nanolab.tasks.compose import DockerComposeProject, docker_compose_resource
+from nanolab.tasks.containerd_maven import repository_for_build
+from nanolab.tasks.containerd_rootless import (
+    RootlessRun,
+    control_plane_resource,
+    prometheus_resource,
+    registry_resource,
+    run_for_environment,
+)
 from nanolab.tasks.deployment import REGISTRY_CONTAINER_NAME
 from nanolab.tasks.execution import ExecutionRole
 from nanolab.tasks.k6 import K6Task
@@ -627,13 +635,13 @@ def _build_platform_request(
         # Building follows the FUNCTION images, not the control plane's: a prebuilt
         # control plane says nothing about whether the functions exist yet.
         build_images=functions_prebuilt is False,
-        build_control_plane=backend == "k8s",
+        build_control_plane=backend in ("k8s", "containerd"),
         # Pushing does not follow building. On the container backend the control plane
         # validates a function image by pulling it from the run's own registry, which is
         # created empty every time, so an image that was built elsewhere still has to be
         # put there — otherwise naming a prebuilt function is the same as
         # naming one that does not exist.
-        push_function_images=backend == "container",
+        push_function_images=backend in ("container", "containerd"),
         control_plane_image=prebuilt_control_plane_image,
         source_fingerprint=source_fingerprint(root),
         helm_chart=(
@@ -738,6 +746,7 @@ def _build_platform_requires(
     budget: str = "",
     native_control_plane: bool = False,
     control_plane_image: str | None = None,
+    rootless_run: RootlessRun | None = None,
 ) -> tuple[Any, ...]:
     platform_requires = ()
     if backend == "container":
@@ -781,6 +790,14 @@ def _build_platform_requires(
             registry,
             compose,
         )
+    elif backend == "containerd":
+        if rootless_run is None:
+            raise ValueError("containerd load-test requires a rootless run")
+        registry = registry_resource(rootless_run, executor=executor, role="stack")
+        metrics = prometheus_resource(
+            rootless_run, executor=executor, role="stack", requires=(registry,)
+        )
+        platform_requires = (registry, metrics)
     return platform_requires
 
 
@@ -806,7 +823,7 @@ def management_url_for(backend: str, control_plane_url: str) -> str | None:
     observer does not own, and claiming an unproxied URL there would produce an
     unreachable sample rather than an honest absence.
     """
-    if backend != "container":
+    if backend not in ("container", "containerd"):
         return None
     return control_plane_url.rsplit(":", 1)[0] + ":8081"
 
@@ -1002,7 +1019,7 @@ def _build_replica_watcher(
     watcher: ReplicaWatcher | None = None
     replica_probe: ReplicaStatusProbe | None = None
     if config.autoscaling:
-        if backend == "container":
+        if backend in ("container", "containerd"):
             replica_probe = HttpReplicaProbe(
                 endpoint=control_plane_url,
                 function_name=target.name,
@@ -1536,8 +1553,17 @@ def build_loadtest_plan(
         container_metrics=container_metrics,
         control_plane_resources=_control_plane_resources(config),
     )
+    if backend == "containerd":
+        request = replace(
+            request, containerd_maven_repository=repository_for_build(environment)
+        )
     load_role: ExecutionRole = "loadgen" if dedicated else "stack"
     executor = RoleBoundCommandTaskExecutor(bindings)
+    rootless_run = (
+        run_for_environment(root, tool_root or discover_tool_root(), environment)
+        if backend == "containerd"
+        else None
+    )
     platform_requires = _build_platform_requires(
         backend,
         executor,
@@ -1547,6 +1573,7 @@ def build_loadtest_plan(
         concurrency_budget(config),
         config.control_plane_runtime == "native",
         control_plane_image=prebuilt_control_plane_image,
+        rootless_run=rootless_run,
     )
     run_k6 = _build_run_k6(
         executor=executor,
@@ -1625,6 +1652,22 @@ def build_loadtest_plan(
         bindings,
         cwd=root,
         requires=platform_requires,
+        control_plane_process=(
+            (
+                lambda: control_plane_resource(
+                    rootless_run,
+                    executor=executor,
+                    role="stack",
+                    requires=platform_requires,
+                    cpuset_cores=(
+                        _CONCURRENCY_FUNCTION_CPUS if shared_cpuset(config) else 0
+                    ),
+                    budget=concurrency_budget(config),
+                )
+            )
+            if rootless_run is not None
+            else None
+        ),
         local_endpoint=control_plane_url,
         load=loadtest_composite(
             preflight=preflight,

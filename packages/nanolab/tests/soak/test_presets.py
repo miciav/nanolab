@@ -246,8 +246,11 @@ def test_prerequisite_smoke_declares_coverage_without_claiming_saved_receipts():
     assert soak.purpose == "smoke"
     assert set(soak.prerequisites.required_coverage) == {
         "sync",
-        "error-timeout-cancellation",
-        "async-late-callback",
+        "error",
+        "timeout",
+        "cancellation",
+        "async",
+        "late-callback",
         "idempotent-replay",
         "function-name-churn",
     }

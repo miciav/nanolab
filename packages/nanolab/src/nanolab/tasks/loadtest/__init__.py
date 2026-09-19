@@ -455,6 +455,7 @@ def build_loadtest_workflow(
     workflow_id: str = "loadtest",
     cwd: Path | None = None,
     requires: tuple[Resource[Any], ...] = (),
+    control_plane_process: Callable[[], Resource[Any]] | None = None,
     local_endpoint: str = f"http://127.0.0.1:{LOCAL_CONTROL_PLANE_API_PORT}",
 ) -> Workflow:
     """Deploy the platform, register the functions, then put them under load.
@@ -475,6 +476,7 @@ def build_loadtest_workflow(
         request,
         executor=executor,
         cwd=cwd,
+        control_plane_process=control_plane_process,
         local_endpoint=local_endpoint,
         requires=requires,
     )

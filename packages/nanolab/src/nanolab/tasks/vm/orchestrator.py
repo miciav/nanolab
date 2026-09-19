@@ -5,7 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from multipass import MultipassCommandError
+from multipass import MultipassCommandError, VmNotFoundError
+from multipass.models import VmState
 from shellcraft.backend import ShellExecutionResult
 from sonata_tasks.vm.models import VmRequest
 from sonata_tasks.vm.providers.multipass import MultipassVmProvider
@@ -63,6 +64,20 @@ class VmOrchestrator(MultipassVmProvider):
         if self._owns_ansible and not dry_run:
             self.ansible.private_key_path = self._ssh_credentials()[1]
         return result
+
+    def vm_exists(self, request: VmRequest) -> bool:
+        """Check Multipass before ensure; a deleted VM must not trigger purge."""
+        if not request.name:
+            raise ValueError("managed Multipass VM requires a name")
+        try:
+            info = self._client.get_vm(request.name).info()
+        except VmNotFoundError:
+            return False
+        if info.state == VmState.DELETED:
+            raise RuntimeError(
+                f"Multipass VM {request.name} is deleted; refusing global purge"
+            )
+        return True
 
     def remote_project_dir(self, request: VmRequest) -> str:
         """Return the in-VM directory the repository is synced into."""

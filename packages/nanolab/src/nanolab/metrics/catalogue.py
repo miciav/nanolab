@@ -677,6 +677,7 @@ MODULES_WITHOUT_QUERIES: frozenset[str] = frozenset(
         "offload",
         "k8s-deployment-provider",
         "container-deployment-provider",
+        "containerd-deployment-provider",
     }
 )
 

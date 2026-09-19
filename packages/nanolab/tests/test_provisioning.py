@@ -6,6 +6,7 @@ import pytest
 
 from nanolab.cli.provisioning import provision_environment
 from nanolab.config import EnvironmentConfig, ScenarioConfig
+from nanolab.workspace.paths import discover_tool_root
 
 
 @dataclass
@@ -19,10 +20,17 @@ class RecordingShell:
     def __init__(self, events: list[tuple[str, Any]]) -> None:
         self.events = events
         self.fail_playbook: str | None = None
+        self.maven_receipt_seen = False
 
     def run(self, command, /, *, cwd=None, env=None, dry_run=False):
         argv = tuple(command)
         self.events.append(("command", argv))
+        if argv[0] == "rsync" and "nanolab-containerd-maven-" in argv[-1]:
+            source = Path(argv[-2].removesuffix("/"))
+            self.maven_receipt_seen = (source / "nanolab-receipt.json").is_file()
+            artifact = source / "io/nanofaas/containerd-java/0.4.0-SNAPSHOT"
+            assert (artifact / "containerd-java-0.4.0-SNAPSHOT.jar").is_file()
+            assert not (source / "com").exists()
         if self.fail_playbook and argv[-1].endswith(self.fail_playbook):
             return _Result(return_code=1, stderr=f"{self.fail_playbook} failed")
         return _Result()
@@ -36,6 +44,9 @@ class RecordingOrchestrator:
         self.restrictions: list[tuple[object, tuple[int, ...], tuple[str, ...]]] = []
         self.shell = RecordingShell(self.events)
         self.ensure_result = _Result()
+
+    def vm_exists(self, request):
+        return False
 
     def ensure_running(self, request):
         target = request.name or request.host or ""
@@ -73,6 +84,19 @@ def _commands(orchestrator: RecordingOrchestrator) -> list[tuple[str, ...]]:
     return [command for kind, command in orchestrator.events if kind == "command"]
 
 
+def _snapshot_repository(root: Path) -> Path:
+    for group, artifact, version in (
+        ("io/nanofaas", "containerd-java", "0.4.0-SNAPSHOT"),
+        ("io/nanofaas", "containerd-java-cni", "0.4.0-SNAPSHOT"),
+        ("io/libcni", "libcni-java", "0.1.1-SNAPSHOT"),
+    ):
+        folder = root / group / artifact / version
+        folder.mkdir(parents=True)
+        for suffix in ("jar", "pom"):
+            (folder / f"{artifact}-{version}.{suffix}").write_text(artifact)
+    return root
+
+
 def test_multipass_k8s_provisioning_composes_lifecycle_and_bootstrap_tasks(
     tmp_path: Path,
 ) -> None:
@@ -100,6 +124,105 @@ def test_multipass_k8s_provisioning_composes_lifecycle_and_bootstrap_tasks(
     ]
     assert _commands(orchestrator)[-1][0] == "rsync"
     assert orchestrator.events[-1] == ("teardown", "stack")
+
+
+def test_containerd_provisioning_installs_rootless_runtime_without_k3s(
+    tmp_path: Path,
+) -> None:
+    orchestrator = RecordingOrchestrator()
+    maven = _snapshot_repository(tmp_path / "m2")
+    environment = EnvironmentConfig.model_validate(
+        {
+            "provider": "multipass",
+            "roles": {"stack": {"name": "rootless-stack"}},
+            "containerdMavenRepository": str(maven),
+        }
+    )
+
+    with provision_environment(
+        ScenarioConfig(
+            workflow="validate", backend="containerd", functions=["word-stats-java"]
+        ),
+        environment,
+        repo_root=tmp_path,
+        orchestrator_factory=lambda _: orchestrator,
+    ):
+        pass
+
+    assert _playbooks(orchestrator) == [
+        "provision-base.yml",
+        "provision-containerd-rootless.yml",
+    ]
+    commands = _commands(orchestrator)
+    asset_root = discover_tool_root() / "assets"
+    assert (asset_root / "containerd-rootless/provision.sh").is_file()
+    assert (asset_root / "containerd-rootless/session.sh").is_file()
+    assert (asset_root / "containerd-rootless/soak_collect.py").is_file()
+    assert (asset_root / "containerd-rootless/source_verify.py").is_file()
+    assert any(
+        command[0] == "rsync"
+        and str(asset_root) + "/" in command
+        and "nanolab-assets" in command[-1]
+        for command in commands
+    )
+    assert commands[-1][0] == "rsync"
+    assert any("nanolab-containerd-maven-" in " ".join(command) for command in commands)
+    assert orchestrator.shell.maven_receipt_seen
+    assert orchestrator.events[-1] == ("teardown", "rootless-stack")
+
+
+def test_containerd_provisioning_rejects_root_vm_user_before_creation(
+    tmp_path: Path,
+) -> None:
+    orchestrator = RecordingOrchestrator()
+    environment = EnvironmentConfig.model_validate(
+        {
+            "provider": "multipass",
+            "roles": {"stack": {"name": "rootless-stack", "user": "root"}},
+        }
+    )
+
+    with (
+        pytest.raises(ValueError, match="unprivileged VM user"),
+        provision_environment(
+            ScenarioConfig(
+                workflow="validate", backend="containerd", functions=["word-stats-java"]
+            ),
+            environment,
+            repo_root=tmp_path,
+            orchestrator_factory=lambda _: orchestrator,
+        ),
+    ):
+        pass
+
+    assert orchestrator.events == []
+
+
+def test_containerd_provisioning_rejects_non_disposable_external_host(
+    tmp_path: Path,
+) -> None:
+    orchestrator = RecordingOrchestrator()
+    environment = EnvironmentConfig.model_validate(
+        {
+            "provider": "external",
+            "roles": {"stack": {"host": "shared.example", "user": "ubuntu"}},
+        }
+    )
+
+    with (
+        pytest.raises(ValueError, match="disposable Multipass VM"),
+        provision_environment(
+            ScenarioConfig(
+                workflow="validate", backend="containerd", functions=["word-stats-java"]
+            ),
+            environment,
+            repo_root=tmp_path,
+            orchestrator_factory=lambda _: orchestrator,
+        ),
+    ):
+        pass
+
+    assert orchestrator.events == []
 
 
 def test_external_provisioning_without_factory_falls_back_to_orchestrator(

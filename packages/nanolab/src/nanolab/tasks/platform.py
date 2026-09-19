@@ -38,7 +38,7 @@ from nanolab.tasks.kubectl import (
 )
 from nanolab.tasks.manifest import FunctionManifest
 
-Backend = Literal["container", "k8s"]
+Backend = Literal["container", "containerd", "k8s"]
 Build = Literal["docker", "buildpack"]
 
 CONTROL_PLANE_SERVICE = "control-plane"
@@ -46,6 +46,7 @@ CONTROL_PLANE_PORT = 8080
 
 _MODULES: dict[Backend, str] = {
     "container": "container-deployment-provider",
+    "containerd": "containerd-deployment-provider",
     "k8s": "k8s-deployment-provider",
 }
 
@@ -100,6 +101,7 @@ class PlatformRequest:
     build_images: bool = True
     build_control_plane: bool = True
     push_function_images: bool = False
+    containerd_maven_repository: Path | None = None
     control_plane_image: str | None = None
     # What the source being built looks like. Callers that can fingerprint their
     # checkout pass it here and the built image is named after it, so a rebuilt
@@ -140,7 +142,7 @@ class PlatformRequest:
         """Kubernetes work runs on the cluster's VM; container work runs here."""
         if self.execution_role is not None:
             return self.execution_role
-        return "stack" if self.backend == "k8s" else "host"
+        return "host" if self.backend == "container" else "stack"
 
     def control_plane_modules(self) -> tuple[str, ...]:
         """Return the backend's module plus every additional one requested."""
@@ -174,9 +176,28 @@ def _control_plane_build(
     request: PlatformRequest,
     executor: CommandTaskExecutor,
     cwd: Path | None,
-) -> GradleTask:
+) -> CommandTask:
     target = ":control-plane:bootJar"
     modules = request.control_plane_modules()
+    if request.backend == "containerd":
+        if request.containerd_maven_repository is None:
+            raise ValueError(
+                "containerd Maven repository is required for control-plane build"
+            )
+        return CommandTask(
+            title=request.titled("Build control plane"),
+            argv=(
+                "./gradlew",
+                target,
+                f"-PcontrolPlaneModules={','.join(modules)}",
+                "-PcontainerdMavenLocal=true",
+                f"-Dmaven.repo.local={request.containerd_maven_repository}",
+                "--no-daemon",
+            ),
+            executor=executor,
+            role=request.role,
+            options=CommandOptions(cwd=cwd),
+        )
     return GradleTask(
         target,
         title=request.titled("Build control plane"),

@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
+from sonata_tasks.command import CommandTask
 from sonata_tasks.execution.bindings import RoleBindings
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
@@ -82,6 +83,82 @@ CONTAINER_SCENARIO = ScenarioConfig(
     functions=["word-stats-java"],
     autoscaling=True,
 )
+
+
+def test_containerd_loadtest_starts_rootless_runtime_without_compose(
+    tmp_path: Path,
+) -> None:
+    executor = RecordingExecutor()
+    plan = build_loadtest_plan(
+        ScenarioConfig(
+            workflow="loadtest",
+            backend="containerd",
+            functions=["word-stats-java"],
+            autoscaling=True,
+        ),
+        EnvironmentConfig.model_validate(
+            {
+                "provider": "multipass",
+                "roles": {"stack": {"name": "rootless-stack"}},
+                "containerdMavenRepository": "/tmp/test-containerd-maven",
+            }
+        ),
+        RoleBindings({"host": executor, "stack": executor, "loadgen": executor}),
+        control_plane_url="http://127.0.0.1:8080",
+        prometheus_client=NoopPrometheus(),
+        run_dir=tmp_path,
+        fetcher=FakeFetcher(),
+    )
+
+    titles = [task.task.title for task in plan.compile().tasks]
+    assert "Acquire rootless containerd test registry" in titles
+    assert "Acquire rootless Prometheus" in titles
+    assert "Acquire rootless containerd test runtime" in titles
+    assert "Run the load test" in titles
+    assert not any("Docker Compose" in title for title in titles)
+    build = next(
+        task.task.argv
+        for task in plan.compile().tasks
+        if isinstance(task.task, CommandTask)
+        and task.task.title == "Build control plane"
+    )
+    assert not callable(build)
+    assert "-PcontainerdMavenLocal=true" in build
+    assert any(
+        arg.startswith("-Dmaven.repo.local=/home/ubuntu/nanolab-containerd-maven-")
+        for arg in build
+    )
+
+
+def test_containerd_co_tenancy_passes_core_count_and_budget(tmp_path: Path) -> None:
+    executor = RecordingExecutor()
+    plan = build_loadtest_plan(
+        ScenarioConfig(
+            workflow="loadtest",
+            backend="containerd",
+            functions=["word-stats-java", "word-stats-java-lite"],
+            concurrencyControl=True,
+            concurrencyMode="BUDGETED",
+        ),
+        EnvironmentConfig.model_validate(
+            {
+                "provider": "multipass",
+                "roles": {"stack": {"name": "rootless-stack"}},
+                "containerdMavenRepository": "/tmp/test-containerd-maven",
+            }
+        ),
+        RoleBindings({"host": executor, "stack": executor, "loadgen": executor}),
+        control_plane_url="http://127.0.0.1:8080",
+        prometheus_client=NoopPrometheus(),
+        run_dir=tmp_path,
+        fetcher=FakeFetcher(),
+    )
+
+    commands = _run(plan, executor)
+    assert any(
+        "control-start" in command and command.endswith(" 4 12") for command in commands
+    )
+
 
 # Twelve, not eighteen: the eight steps of the load itself are one composite,
 # because none of them can run without what the run before it produced.
@@ -256,6 +333,7 @@ def test_scale_to_zero_scenario_rejects_an_environment_without_the_feature_gate(
         build_loadtest_plan(
             ScenarioConfig(
                 workflow="loadtest",
+                backend="k8s",
                 functions=["word-stats-java"],
                 autoscaling=True,
                 autoscalingStrategy="HPA",
@@ -277,6 +355,7 @@ def test_scale_to_zero_scenario_accepts_an_environment_that_provides_the_gate(
     plan = build_loadtest_plan(
         ScenarioConfig(
             workflow="loadtest",
+            backend="k8s",
             functions=["word-stats-java"],
             autoscaling=True,
             autoscalingStrategy="HPA",

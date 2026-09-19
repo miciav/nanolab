@@ -1,0 +1,83 @@
+# Watches the per-function concurrency governor alone: replicas are pinned at 1
+# and the autoscaler is not compiled in, so every move of
+# `function_effective_concurrency` is the governor's.
+#
+# The load runs light, then heavy, then light again. The limit should climb
+# while the function answers at its best, fall back once the service time
+# degrades, and climb again on the way out. A run that only went heavy could not
+# tell a governor that recovers from one stuck at minTargetInFlightPerPod.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# THIS SCENARIO'S VERDICT DEPENDS ON THE MACHINE AND ON HOW FAST THE PLATFORM IS.
+#
+# It asserts that the governor gives concurrency back under load, and a governor
+# can only do that if the load actually degrades the function. That is not a
+# property of the controller alone: it is a property of the controller, the host,
+# and everything in the request path. Make any of them faster and the premise
+# quietly stops holding — the governor then correctly holds its ceiling, and this
+# scenario reads that correct behaviour as a failure.
+#
+# It has happened twice, for two different reasons:
+#
+#   1. On an unconstrained multi-core host, eight parallel requests never
+#      contended for anything. Fixed by capping the function's CPU (see
+#      _CONCURRENCY_FUNCTION_CPUS in plans/loadtest.py).
+#
+#   2. The generator was sending its own built-in sentences — about twenty words.
+#      Capping the function's CPU could not create contention because there was
+#      nothing to compute: measured, 4 cores and 2 cores gave the same 1-3 ms.
+#      Fixed by `payloadProfile` below, which sends the repository's corpus instead.
+#      Observed on an NVIDIA DGX Spark: aarch64, 20 Cortex-X925/A725 cores, 121 GB.
+#      Fast cores are half the story — the same twenty words might still have
+#      degraded a smaller machine, which is why the fix is to send real work rather
+#      than to hope for a slow host.
+#
+#   3. nanoFaaS made `RoundRobinFunctionProxy` concurrent (task P1 of
+#      docs/plans/2026-09-05-control-plane-correctness-and-performance.md in the
+#      nanoFaaS repo). The proxy used to serialise invocations towards the
+#      replicas, and THAT serialisation was most of the degradation the governor
+#      was reacting to. Measured across that commit, same host, same load:
+#      857 -> 3387 req/s and p95 60.01 -> 14.52 ms. With four cores the function
+#      then answered eight concurrent requests in 1-3 ms without degrading, so
+#      the limit sat at its ceiling for 183 of 190 readings and the run failed.
+#      The platform had outgrown the calibration.
+#
+# The lever here is the PAYLOAD, not the CPU cap: with twenty-word inputs the cap
+# had nothing to bite on. The function keeps the shared four-core default, so this
+# scenario stays comparable with the co-tenancy and burst runs. If a future host
+# makes even the medium corpus too easy, a per-function `resources` block here
+# overrides that default without moving the constant under those other runs.
+#
+# If this scenario fails with "never gave concurrency back", read the service
+# times in the trajectory BEFORE suspecting the governor. If they are flat and
+# low, nothing degraded and the governor was right; the cap is stale and wants
+# lowering again — or the load wants raising. Check it against a revision known
+# to pass before concluding the platform regressed.
+# ─────────────────────────────────────────────────────────────────────────────
+workflow: loadtest
+backend: containerd
+concurrencyControl: true
+functions:
+  - word-stats-java
+# 5,000 words per input instead of the generator's built-in ~20. This is the load
+# that makes the function actually work, and it is deterministic and versioned:
+# functions/test-data/word-stats/performance-medium.json in the nanoFaaS checkout.
+payloadProfile: medium
+# Two cores, not the shared default of four. Neither lever works alone here, and
+# both were measured on this host:
+#   * four cores + 20-word inputs -> service 1.1-3.3 ms, governor pinned at 8;
+#   * one core  + 20-word inputs -> governor regulates (floor 5) but p95 75.8 ms
+#     blows the 50 ms end-to-end budget: one failure traded for another;
+#   * four cores + 5,000-word inputs -> service 2.0-5.1 ms, p95 25.3 ms, still pinned.
+# The controller decreases only when the interval mean reaches twice its baseline,
+# and its baseline drifts upward, so sustained load has to be clearly heavy rather
+# than merely present. Real work on half the cores is what puts it there while the
+# SLO still has room.
+resources:
+  word-stats-java:
+    requests:
+      cpu: 1
+      memoryMiB: 256
+    limits:
+      cpu: 2
+      memoryMiB: 512

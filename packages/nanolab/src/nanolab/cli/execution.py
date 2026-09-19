@@ -207,6 +207,22 @@ def resolve_loadtest_urls(
     if backend == "container":
         return _container_urls(environment, control_plane_url, prometheus_url)
 
+    if backend == "containerd":
+        if environment.provider not in {"local", "multipass", "external"}:
+            raise ValueError(
+                "containerd load-test requires a local, Multipass, or external VM"
+            )
+        host = _resolve_stack_host(
+            environment,
+            environment.target("stack"),
+            dry_run=dry_run,
+            host_resolver=host_resolver,
+        )
+        return (
+            control_plane_url or f"http://{host}:8080",  # NOSONAR (S5332): test VM
+            prometheus_url or f"http://{host}:9090",  # NOSONAR (S5332): test VM
+        )
+
     target = environment.target("stack")
     if environment.provider in {"azure", "proxmox"}:
         return _vm_provider_urls(

@@ -179,7 +179,7 @@ def _workflow(
     if scenario.workflow == "soak":
         from nanolab.plans.soak import build_soak_plan
 
-        if environment.provider != "local":
+        if scenario.backend == "container" and environment.provider != "local":
             raise ValueError("soak currently requires a local container environment")
         return build_soak_plan(
             scenario,
@@ -866,9 +866,17 @@ def install_product_commands(
                 validate_soak_selection(
                     resume=resume, only=only, start=start, until=until
                 )
-                if environment_config.provider != "local":
+                if (
+                    scenario_config.backend == "container"
+                    and environment_config.provider != "local"
+                ):
                     raise ValueError(
                         "soak currently requires a local container environment"
+                    )
+                if scenario_config.backend == "containerd" and (keep or teardown):
+                    raise ValueError(
+                        "containerd soak requires automatic owned cleanup; "
+                        "--keep and --teardown are unsupported"
                     )
                 if control_plane_url is not None or prometheus_url is not None:
                     raise ValueError(
@@ -893,7 +901,11 @@ def install_product_commands(
                         tool_root=paths.tool_root,
                     )
                     return
-                missing = diagnostics.missing_executables(("docker", "k6"))
+                missing = diagnostics.missing_executables(
+                    ("docker", "k6")
+                    if scenario_config.backend == "container"
+                    else ("k6",)
+                )
                 if missing:
                     raise ValueError(
                         "soak requires local executables: " + ", ".join(missing)
@@ -1026,6 +1038,19 @@ def install_product_commands(
         except ReleaseRunInProgressError as error:
             raise typer.BadParameter(str(error)) from None
         except BaseException as exc:
+            if (
+                scenario_config.workflow == "soak"
+                and scenario_config.backend == "containerd"
+                and effective_run_dir is not None
+            ):
+                from nanolab.tasks.soak.containerd_runtime import (
+                    finalize_containerd_terminal,
+                )
+
+                try:
+                    finalize_containerd_terminal(effective_run_dir, exc)
+                except Exception as terminal_error:
+                    exc.add_note(f"terminal receipt unavailable: {terminal_error}")
             _write_failure_metadata(
                 effective_run_dir,
                 exc,
@@ -1047,6 +1072,16 @@ def install_product_commands(
                 raise typer.Exit(soak_exit_code(status)) from exc
             raise
         else:
+            if (
+                scenario_config.workflow == "soak"
+                and scenario_config.backend == "containerd"
+                and effective_run_dir is not None
+            ):
+                from nanolab.tasks.soak.containerd_runtime import (
+                    finalize_containerd_terminal,
+                )
+
+                finalize_containerd_terminal(effective_run_dir, None)
             _write_success_metadata(
                 effective_run_dir,
                 started_at=started_at,
@@ -1112,7 +1147,10 @@ def install_product_commands(
                 validate_soak_selection(
                     resume=False, only=only, start=start, until=until
                 )
-                if environment_config.provider != "local":
+                if (
+                    scenario_config.backend == "container"
+                    and environment_config.provider != "local"
+                ):
                     raise ValueError(
                         "soak currently requires a local container environment"
                     )

@@ -1,0 +1,168 @@
+# Single source snapshot; build every application role before measurement.
+# See docs/soak.md for readiness limits and the required operator policy.
+# Smoke only: numerical policy is not evidence of P24 acceptance.
+workflow: soak
+backend: containerd
+functions:
+  - word-stats-java
+  - word-stats-javascript
+resources:
+  control-plane:
+    limits: {cpu: 2, memoryMiB: 1024}
+  word-stats-java:
+    limits: {cpu: 2, memoryMiB: 1024}
+  word-stats-javascript:
+    limits: {cpu: 1, memoryMiB: 512}
+soak:
+  purpose: smoke
+  phases:
+    warmup_s: 12
+    baseline_drain_s: 12
+    baseline_window_s: 30
+    steady_s: 60
+    drain_s: 45
+    cleanup_margin_s: 1
+  # Intended owner settings from NanoFaaS outcome/idempotency policy.
+  # Effective runtime values must be observed; this mapping does not set them.
+  retention_s:
+    unkeyed-sync-outcome: 30
+    terminal-key-and-readable-outcome: 300
+    live-key-and-execution: 1800
+  roles:
+    control-plane:
+      runtime: jvm
+      expected_cpu: 2
+      memory_limit_bytes: 1073741824
+      required_metrics: [process_rss_bytes, process_pss_bytes, cgroup_memory_usage_bytes]
+      required_capabilities: [procfs, cgroup-v2]
+      runtime_options: []
+      collection_sources: [procfs, cgroup-v2]
+    word-stats-java:
+      runtime: jvm
+      expected_cpu: 2
+      memory_limit_bytes: 1073741824
+      required_metrics: [process_rss_bytes, process_pss_bytes, cgroup_memory_usage_bytes]
+      required_capabilities: [procfs, cgroup-v2]
+      runtime_options: []
+      collection_sources: [procfs, cgroup-v2]
+    word-stats-javascript:
+      runtime: node
+      expected_cpu: 1
+      memory_limit_bytes: 536870912
+      required_metrics: [process_rss_bytes, process_pss_bytes, cgroup_memory_usage_bytes]
+      required_capabilities: [procfs, cgroup-v2]
+      runtime_options: []
+      collection_sources: [procfs, cgroup-v2]
+  images:
+    control-plane:
+      artifact_kind: process
+      mode: build
+      variant: jvm
+      platform: linux/arm64
+      modules: [containerd-deployment-provider, async-queue, build-metadata]
+      build_options: {}
+    word-stats-java:
+      mode: build
+      variant: jvm
+      platform: linux/arm64
+      modules: []
+      build_options: {}
+    word-stats-javascript:
+      mode: build
+      variant: default
+      platform: linux/arm64
+      modules: []
+      build_options: {}
+  criteria:
+    - id: control-plane.smoke-cgroup-budget
+      role: control-plane
+      metric: cgroup_memory_usage_bytes
+      label_selector: {}
+      unit: bytes
+      operation: maximum
+      phase: steady
+      window_s: 60
+      threshold: 1073741824
+      rationale: Smoke resource ceiling only; this is not a P24 memory acceptance budget.
+    - id: control-plane.smoke-rss-growth
+      role: control-plane
+      metric: process_rss_bytes
+      label_selector: {}
+      unit: bytes
+      operation: growth_review
+      phase: drain
+      window_s: 30
+      deadline_s: 45
+      threshold: 0
+      rationale: Smoke flags any RSS growth for review; no accepted P24 residual is inferred.
+    - id: word-stats-java.smoke-cgroup-budget
+      role: word-stats-java
+      metric: cgroup_memory_usage_bytes
+      label_selector: {}
+      unit: bytes
+      operation: maximum
+      phase: steady
+      window_s: 60
+      threshold: 1073741824
+      rationale: Smoke resource ceiling only; this is not a P24 memory acceptance budget.
+    - id: word-stats-java.smoke-rss-growth
+      role: word-stats-java
+      metric: process_rss_bytes
+      label_selector: {}
+      unit: bytes
+      operation: growth_review
+      phase: drain
+      window_s: 30
+      deadline_s: 45
+      threshold: 0
+      rationale: Smoke flags any RSS growth for review; no accepted P24 residual is inferred.
+    - id: word-stats-javascript.smoke-cgroup-budget
+      role: word-stats-javascript
+      metric: cgroup_memory_usage_bytes
+      label_selector: {}
+      unit: bytes
+      operation: maximum
+      phase: steady
+      window_s: 60
+      threshold: 536870912
+      rationale: Smoke resource ceiling only; this is not a P24 memory acceptance budget.
+    - id: word-stats-javascript.smoke-rss-growth
+      role: word-stats-javascript
+      metric: process_rss_bytes
+      label_selector: {}
+      unit: bytes
+      operation: growth_review
+      phase: drain
+      window_s: 30
+      deadline_s: 45
+      threshold: 0
+      rationale: Smoke flags any RSS growth for review; no accepted P24 residual is inferred.
+  diagnostics:
+    operations: {}
+    timeout_s: 5
+    max_dumps: 0
+    max_dump_bytes: 0
+    helper_images: {}
+    executables: {}
+    gc_completion_evidence: {}
+  prerequisites:
+    mode: run
+    required_coverage: []
+    relevant_config_keys: {}
+    receipts: {}
+  sample_interval_s: 3
+  scrape_timeout_s: 3
+  max_observation_gap_s: 10
+  # The budget covers every generated file, and a build-from-source run
+  # keeps its source snapshot and build logs: ~400 MiB before any sampling.
+  artifact_limit_bytes: 2147483648
+  cancellation_timeout_s: 5
+  workload:
+    # Explicit initial rates; validate actual offered work and capacity in preflight.
+    rates:
+      word-stats-java: 1
+      word-stats-javascript: 1
+    preallocated_vus: 4
+    max_vus: 8
+    max_error_ratio: 0
+    max_dropped_iterations: 0

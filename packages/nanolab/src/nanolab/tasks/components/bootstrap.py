@@ -238,6 +238,43 @@ def plan_assets_sync_to_vm(
     )
 
 
+def plan_containerd_maven_sync_to_vm(
+    context: ScenarioExecutionContext,
+    *,
+    source: Path,
+    destination: Path,
+) -> tuple[RemoteCommandOperation, ...]:
+    """Sync an already filtered repository, including its SHA256 receipt."""
+    return (
+        _rsync_operation(
+            context.vm_request,
+            operation_id="containerd.maven.sync_to_vm",
+            summary="Sync isolated containerd Maven artifacts",
+            source=source,
+            destination=str(destination),
+            discover_private_key=True,
+        ),
+    )
+
+
+def plan_containerd_rootless_install(
+    context: ScenarioExecutionContext,
+) -> tuple[RemoteCommandOperation, ...]:
+    """Install and verify the rootless daemon after NanoLab assets are synced."""
+    return (
+        _ansible_operation(
+            context=context,
+            operation_id="vm.provision_containerd_rootless",
+            summary="Provision rootless containerd",
+            playbook_name="provision-containerd-rootless.yml",
+            extra_vars={
+                "vm_user": context.vm_request.user,
+                "vm_home": _remote_home(context.vm_request),
+            },
+        ),
+    )
+
+
 def _retarget_ansible_argv(
     argv: tuple[str, ...] | list[str],
     *,
@@ -281,18 +318,32 @@ def retarget_bootstrap_operation(
             ),
         )
 
-    if operation.operation_id in ("repo.sync_to_vm", _ASSETS_SYNC_TO_VM):
+    if operation.operation_id in (
+        "repo.sync_to_vm",
+        _ASSETS_SYNC_TO_VM,
+        "containerd.maven.sync_to_vm",
+    ):
         request = context.vm_request
         assets = operation.operation_id == _ASSETS_SYNC_TO_VM
+        maven = operation.operation_id == "containerd.maven.sync_to_vm"
         if assets and context.assets_root is None:
             raise ValueError("assets sync requires context.assets_root")
+        destination = (
+            operation.argv[-1].rpartition(":")[2]
+            if maven
+            else remote_assets_dir(request)
+            if assets
+            else _remote_project_dir(request)
+        )
+        if not destination:
+            raise ValueError("Maven sync destination is missing")
         argv = repo_rsync_command(
-            source=cast(Path, context.assets_root) if assets else context.repo_root,
+            source=Path(operation.argv[-2])
+            if maven
+            else (cast(Path, context.assets_root) if assets else context.repo_root),
             user=request.user,
             host=host,
-            destination=remote_assets_dir(request)
-            if assets
-            else _remote_project_dir(request),
+            destination=destination,
             ssh_rsh=repo_sync_ssh_rsh(private_key, port=port),
         )
         return cast(RemoteCommandOperation, replace(operation, argv=tuple(argv)))

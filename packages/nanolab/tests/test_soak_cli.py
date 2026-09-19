@@ -187,7 +187,7 @@ def test_soak_routes_before_comparison_and_plan_has_no_side_effects(
 
     monkeypatch.setattr(product, "is_runtime_comparison", forbidden)
     scenario, environment = (
-        SimpleNamespace(workflow="soak"),
+        SimpleNamespace(workflow="soak", backend="container"),
         SimpleNamespace(provider="local"),
     )
     assert product._workflow(scenario, environment, dry_run=True) == "soak-plan"  # pyright: ignore[reportArgumentType]

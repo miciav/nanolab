@@ -152,6 +152,17 @@ def build_soak_plan(
     """Compile deferred preparation/deployment without Docker or source I/O."""
     if config.workflow != "soak" or config.soak is None:
         raise ValueError("build_soak_plan requires a soak scenario")
+    if getattr(config, "backend", "container") == "containerd":
+        from nanolab.plans.containerd_soak import build_containerd_soak_plan
+
+        return build_containerd_soak_plan(
+            config,
+            environment,
+            bindings,
+            run_dir=run_dir,
+            repo_root=repo_root,
+            tool_root=tool_root,
+        )
     if environment.provider != "local":
         raise ValueError("soak currently requires a local environment")
     from nanolab.tasks.soak.runtime import RunSingleVersionSoak, RuntimeOptions

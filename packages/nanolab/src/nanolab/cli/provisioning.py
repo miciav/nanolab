@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any, cast
 
 from sonata_tasks.vm.azure import AzureVmProvider
@@ -16,6 +17,8 @@ from nanolab.config.environment import ExecutionRole
 from nanolab.release.environment import secure_release_endpoints
 from nanolab.tasks.components.bootstrap import (
     plan_assets_sync_to_vm,
+    plan_containerd_maven_sync_to_vm,
+    plan_containerd_rootless_install,
     plan_k3s_configure_registry,
     plan_k3s_install,
     plan_loadtest_install_k6,
@@ -28,6 +31,10 @@ from nanolab.tasks.components.context import ScenarioExecutionContext
 from nanolab.tasks.components.operations import (
     RemoteCommandOperation,
     ScenarioOperation,
+)
+from nanolab.tasks.containerd_maven import (
+    remote_repository_path,
+    stage_snapshot_repository,
 )
 from nanolab.tasks.provisioning import (
     ProvisionedRole,
@@ -51,11 +58,18 @@ def _stack_operations(
     *,
     dedicated_loadgen: bool,
     include_repo_sync: bool = True,
+    maven_source: Path | None = None,
+    maven_destination: Path | None = None,
 ) -> tuple[RemoteCommandOperation, ...]:
+    if scenario.backend == "containerd" and context.vm_request.user == "root":
+        raise ValueError("containerd backend requires an unprivileged VM user")
     planners: list[
         Callable[[ScenarioExecutionContext], tuple[ScenarioOperation, ...]]
     ] = [plan_vm_provision_base]
-    if scenario.backend == "k8s" or scenario.workflow in ("loadtest", "release"):
+    if scenario.backend == "k8s" or (
+        scenario.workflow in ("loadtest", "release")
+        and scenario.backend != "containerd"
+    ):
         planners.extend(
             [
                 plan_k3s_install,
@@ -63,15 +77,24 @@ def _stack_operations(
                 plan_k3s_configure_registry,
             ]
         )
+    if scenario.backend == "containerd":
+        planners.extend([plan_assets_sync_to_vm, plan_containerd_rootless_install])
     if (scenario.workflow == "loadtest" and not dedicated_loadgen) or (
         scenario.workflow == "validate" and scenario.backend == "k8s"
     ):
-        planners.extend([plan_loadtest_install_k6, plan_assets_sync_to_vm])
+        planners.append(plan_loadtest_install_k6)
+        if scenario.backend != "containerd":
+            planners.append(plan_assets_sync_to_vm)
     if include_repo_sync:
         planners.append(plan_repo_sync_to_vm)
-    return remote_operations(
+    operations = tuple(
         operation for planner in planners for operation in planner(context)
     )
+    if maven_source is not None and maven_destination is not None:
+        operations += plan_containerd_maven_sync_to_vm(
+            context, source=maven_source, destination=maven_destination
+        )
+    return remote_operations(operations)
 
 
 def _role_requests_and_operations(
@@ -80,6 +103,7 @@ def _role_requests_and_operations(
     environment: EnvironmentConfig,
     *,
     repo_root: Path,
+    maven_source: Path | None = None,
 ) -> list[tuple[ExecutionRole, VmRequest, tuple[RemoteCommandOperation, ...]]]:
     """Build the per-role (role, request, operations) triples."""
     loadtest_workflow = scenario.workflow in ("loadtest", "offload-loadtest", "release")
@@ -147,6 +171,12 @@ def _role_requests_and_operations(
                     stack_context,
                     dedicated_loadgen=dedicated_loadgen,
                     include_repo_sync=scenario.workflow != "release",
+                    maven_source=maven_source,
+                    maven_destination=(
+                        remote_repository_path(environment)
+                        if maven_source is not None
+                        else None
+                    ),
                 ),
             ),
         )
@@ -228,42 +258,71 @@ def provision_environment(
     """
     if environment.provider == "local":
         raise ValueError("a non-local environment is required")
+    if scenario.backend == "containerd" and environment.provider != "multipass":
+        raise ValueError(
+            "containerd auto-provisioning requires a disposable Multipass VM"
+        )
+    if scenario.backend == "containerd" and environment.target("stack").user == "root":
+        raise ValueError("containerd backend requires an unprivileged VM user")
     provider = provider_for_environment(
         environment, repo_root, orchestrator_factory=orchestrator_factory
     )
-
-    roles: list[ProvisionedRole] = []
-    for role, request, operations in _role_requests_and_operations(
-        provider, scenario, environment, repo_root=repo_root
+    if (
+        scenario.backend == "containerd"
+        and environment.containerd_maven_repository is None
     ):
-        roles.append(ProvisionedRole(role=role, request=request, operations=operations))
+        raise ValueError(
+            "containerdMavenRepository must point to an isolated host Maven repository"
+        )
 
-    stack_request = next(entry.request for entry in roles if entry.role == "stack")
-    loadgen_request = next(
-        (entry.request for entry in roles if entry.role == "loadgen"), None
-    )
-
-    def after_ensure(role: str, request: VmRequest) -> None:
-        if post_ensure_verifier is not None:
-            post_ensure_verifier(cast(ExecutionRole, role), request)
-        # `azure is not None` is guaranteed by EnvironmentConfig's validation for
-        # this provider; saying it here is what lets the checker follow.
-        if (
-            role == "stack"
-            and environment.provider == "azure"
-            and environment.azure is not None
-            and environment.azure.operator_source_cidr
-        ):
-            secure_release_endpoints(
-                environment, provider, stack_request, loadgen_request
+    with TemporaryDirectory(prefix="nanolab-containerd-maven-") as staging:
+        maven_source = None
+        if scenario.backend == "containerd":
+            if environment.containerd_maven_repository is None:
+                raise ValueError("containerd Maven repository is required")
+            maven_source = Path(staging) / "maven"
+            stage_snapshot_repository(
+                environment.containerd_maven_repository, maven_source
             )
 
-    with provision_roles(
-        provider,
-        tuple(roles),
-        repo_root=repo_root,
-        assets_root=discover_tool_root() / "assets",
-        keep=keep,
-        after_ensure=after_ensure,
-    ):
-        yield
+        roles: list[ProvisionedRole] = []
+        for role, request, operations in _role_requests_and_operations(
+            provider,
+            scenario,
+            environment,
+            repo_root=repo_root,
+            maven_source=maven_source,
+        ):
+            roles.append(
+                ProvisionedRole(role=role, request=request, operations=operations)
+            )
+
+        stack_request = next(entry.request for entry in roles if entry.role == "stack")
+        loadgen_request = next(
+            (entry.request for entry in roles if entry.role == "loadgen"), None
+        )
+
+        def after_ensure(role: str, request: VmRequest) -> None:
+            if post_ensure_verifier is not None:
+                post_ensure_verifier(cast(ExecutionRole, role), request)
+            # `azure is not None` is guaranteed by EnvironmentConfig's validation for
+            # this provider; saying it here is what lets the checker follow.
+            if (
+                role == "stack"
+                and environment.provider == "azure"
+                and environment.azure is not None
+                and environment.azure.operator_source_cidr
+            ):
+                secure_release_endpoints(
+                    environment, provider, stack_request, loadgen_request
+                )
+
+        with provision_roles(
+            provider,
+            tuple(roles),
+            repo_root=repo_root,
+            assets_root=discover_tool_root() / "assets",
+            keep=keep,
+            after_ensure=after_ensure,
+        ):
+            yield

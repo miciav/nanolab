@@ -3,6 +3,40 @@
 import pytest
 
 
+def test_process_artifact_requires_actual_sha_and_keeps_docker_image_rule(
+    preflight_case, tmp_path
+):
+    from dataclasses import replace
+
+    from nanolab.config.soak import SoakConfig
+    from nanolab.tasks.soak.artifacts import ArtifactWriter
+    from nanolab.tasks.soak.preflight import preflight
+
+    config, targets, observations = preflight_case
+    raw = config.model_dump(mode="json")
+    raw["images"]["control-plane"]["artifact_kind"] = "process"
+    config = SoakConfig.model_validate(raw)
+    cp = replace(targets[0], image_digest="sha256:" + "b" * 64)
+    targets = (cp, targets[1])
+    observations["roles"]["control-plane"]["image_digest"] = cp.image_digest
+    observations["build_receipts"]["control-plane"]["image_digest"] = cp.image_digest
+    writer = ArtifactWriter(tmp_path / "valid", limit_bytes=65536)
+    assert all(
+        result.status == "PASS"
+        for result in preflight(config, targets, observations, writer)
+    )
+    writer.close()
+
+    observations["roles"]["control-plane"]["image_digest"] = "sha256:unverified"
+    writer = ArtifactWriter(tmp_path / "invalid", limit_bytes=65536)
+    results = preflight(config, targets, observations, writer)
+    assert any(
+        result.criterion_id == "control-plane.image" and result.status == "INCONCLUSIVE"
+        for result in results
+    )
+    writer.close()
+
+
 @pytest.mark.parametrize("actual", [None, 0, -1, float("nan"), float("inf"), 2**63 - 1])
 def test_unlimited_or_unknown_memory_cannot_pass(actual):
     from nanolab.tasks.soak.preflight import check_limits

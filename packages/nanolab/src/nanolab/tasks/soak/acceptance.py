@@ -54,7 +54,7 @@ import json
 import math
 import re
 import sqlite3
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any, TypeGuard
 
@@ -201,6 +201,175 @@ def _reference(root: Path, record: dict[str, Any], limit: int) -> Path:
             "artifact size mismatch",
         )
     return path
+
+
+def verify_containerd_builds(
+    root: Path,
+    manifest: dict[str, Any],
+    config: SoakConfig,
+    targets: dict[str, dict[str, Any]],
+    source: SourceSnapshot,
+    observed: dict[str, Any],
+) -> str:
+    """Bind staged source, process binary and running OCI tasks to receipts."""
+
+    def repository(reference: str) -> str:
+        name = reference.split("@", 1)[0]
+        return name.rsplit(":", 1)[0] if ":" in name.rsplit("/", 1)[-1] else name
+
+    remote = _json(
+        _reference(root, manifest["remote_source"], config.artifact_limit_bytes)
+    )
+    batches = [
+        hashlib.sha256(
+            json.dumps(
+                [asdict(entry) for entry in source.entries[offset : offset + 50]],
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+        for offset in range(0, len(source.entries), 50)
+    ]
+    _require(
+        remote == observed.get("remote_source")
+        and remote.get("schema") == "nanolab-containerd-source-v1"
+        and remote.get("revision") == source.revision
+        and remote.get("source_fingerprint") == source.fingerprint
+        and remote.get("clean") is True
+        and source.dirty is False
+        and remote.get("entry_count") == len(source.entries)
+        and remote.get("batch_size") == 50
+        and remote.get("batches") == batches
+        and remote.get("verification")
+        == "remote-content-after-build; rsync excludes .git",
+        "staged source differs from frozen local checkout",
+    )
+    for role, spec in config.images.items():
+        build = _json(
+            _reference(root, manifest["builds"][role], config.artifact_limit_bytes)
+        )
+        recipe = _json(
+            _reference(root, manifest["recipes"][role], config.artifact_limit_bytes)
+        )
+        digest = targets[role]["image_digest"]
+        if spec.artifact_kind == "process":
+            _require(
+                role == "control-plane"
+                and re.fullmatch(r"sha256:[0-9a-f]{64}", digest) is not None,
+                "process artifact digest must be a SHA256 of the running file",
+            )
+        _require(
+            build.get("schema") == "nanolab-containerd-build-v1"
+            and build.get("role") == role
+            and build.get("image_digest") == digest
+            and build.get("source_fingerprint") == source.fingerprint
+            and build.get("source_revision") == source.revision
+            and build.get("platform") == spec.platform
+            and build.get("platform") == observed["roles"][role].get("platform")
+            and build.get("artifact_kind") == spec.artifact_kind
+            and build.get("artifact_path")
+            == observed["roles"][role].get("artifact_path")
+            and all(
+                observed["build_receipts"][role].get(key) == value
+                for key, value in build.items()
+                if key != "schema"
+            ),
+            "running artifact/source/build receipt differs",
+        )
+        command = build.get("build_argv")
+        steps = build.get("build_steps")
+        executions = build.get("build_results")
+        if not isinstance(command, list) or not isinstance(steps, list):
+            raise ValueError("containerd build command differs from frozen recipe")
+        _require(
+            isinstance(command, list)
+            and bool(command)
+            and all(isinstance(arg, str) and arg for arg in command)
+            and isinstance(steps, list)
+            and bool(steps)
+            and all(
+                isinstance(step, list)
+                and bool(step)
+                and all(isinstance(arg, str) and arg for arg in step)
+                for step in steps
+            )
+            and steps[-1] == command
+            and recipe
+            == {
+                "role": role,
+                "artifact_kind": spec.artifact_kind,
+                "platform": spec.platform,
+                "build_argv": command,
+                "build_steps": steps,
+                "mode": spec.mode,
+                "variant": spec.variant,
+                "modules": spec.modules,
+                "build_options": spec.build_options,
+            },
+            "containerd build command differs from frozen recipe",
+        )
+        _require(
+            all(
+                build.get(key) == recipe[key]
+                for key in (
+                    "build_steps",
+                    "mode",
+                    "variant",
+                    "modules",
+                    "build_options",
+                )
+            )
+            and len(steps)
+            == (2 if spec.variant == "jvm" and role != "control-plane" else 1),
+            "containerd build steps or requested image recipe differ",
+        )
+        expected_titles = (
+            [f"Build application artifact: {role}", f"Build image {role}"]
+            if role != "control-plane" and spec.variant == "jvm"
+            else [
+                "Build control plane"
+                if role == "control-plane"
+                else f"Build image {role}"
+            ]
+        )
+        _require(
+            isinstance(executions, list)
+            and executions
+            == [
+                {"title": title, "argv": step, "status": "passed", "return_code": 0}
+                for title, step in zip(expected_titles, steps, strict=True)
+            ],
+            "containerd build task results differ from executed steps",
+        )
+        if role != "control-plane" and spec.variant == "jvm":
+            _require(
+                len(steps[0]) >= 2
+                and steps[0][0] == "./gradlew"
+                and steps[0][1].startswith(":functions:java:")
+                and steps[0][1].endswith(":bootJar"),
+                "Java application artifact build is missing",
+            )
+        if spec.artifact_kind == "process":
+            _require(
+                isinstance(build.get("artifact_path"), str)
+                and Path(build["artifact_path"]).is_absolute()
+                and "-PcontrolPlaneModules=" + ",".join(spec.modules) in command,
+                "process artifact path/modules differ from policy",
+            )
+        else:
+            _require(
+                re.fullmatch(r"[^\s@]+@sha256:[0-9a-f]{64}", digest) is not None,
+                "function OCI digest missing",
+            )
+            tag_index = command.index("-t") if "-t" in command else -1
+            _require(
+                role != "control-plane"
+                and tag_index >= 0
+                and tag_index + 1 < len(command)
+                and repository(command[tag_index + 1]) == repository(digest),
+                "function build tag differs from running image repository",
+            )
+    return "staged source, systemd process artifact and running OCI functions verified"
 
 
 def _sha(value: Any) -> str:
@@ -882,6 +1051,10 @@ def evaluate_acceptance(
             observed.get("snapshot_fingerprint") == source.fingerprint,
             "preflight source snapshot differs",
         )
+        if manifest.get("backend") == "containerd":
+            return verify_containerd_builds(
+                root, manifest, config, targets, source, observed
+            )
         for role, spec in config.images.items():
             build = _json(
                 _reference(root, manifest["builds"][role], config.artifact_limit_bytes)

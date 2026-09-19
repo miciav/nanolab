@@ -1,0 +1,5 @@
+workflow: loadtest
+backend: containerd
+autoscaling: true
+functions:
+  - word-stats-java

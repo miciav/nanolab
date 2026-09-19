@@ -320,6 +320,82 @@ def test_missing_effective_evidence_blocks_workload_and_writes_preflight(
     value.writer.close()
 
 
+@pytest.mark.parametrize("status", ["PASS", "FAIL"])
+def test_real_deferred_lifecycle_preserves_evaluation_without_early_terminal(
+    tmp_path, status
+):
+    from nanolab.tasks.soak.workflow import LifecycleHooks
+
+    value = prepared(tmp_path)
+    targets = tuple(
+        Target(role, "a" * 64, index + 1, "started", value.images[role], policy.runtime)
+        for index, (role, policy) in enumerate(value.config.roles.items())
+    )
+    deployment = fake_deployment(
+        discover=lambda: targets,
+        metrics_endpoints={},
+        observations=lambda targets: {},
+        api_endpoint="http://127.0.0.1:10000",
+    )
+    lifecycle = create_soak_lifecycle(
+        value,
+        deployment=deployment,
+        run_dir=tmp_path,
+        transport=SimpleNamespace(),
+        defer_terminal=True,
+    )
+
+    class Clock:
+        elapsed = 0.0
+
+        def monotonic(self):
+            self.elapsed += 1.0
+            return self.elapsed
+
+        def wait_until(self, deadline_s, cancelled):
+            self.elapsed = deadline_s
+            return True
+
+    class Observer:
+        def start(self, phase):
+            pass
+
+        def set_phase(self, phase):
+            pass
+
+        def stop(self, timeout_s):
+            pass
+
+    class Driver:
+        def run(self, output_dir, duration_s, cancelled):
+            return tmp_path / "workload.json"
+
+        def stop(self, timeout_s):
+            pass
+
+    lifecycle.clock = Clock()
+    lifecycle.observer = Observer()
+    lifecycle.driver_factory = lambda phase: Driver()
+    lifecycle.hooks = LifecycleHooks(
+        preflight=lambda: None,
+        prerequisites=lambda: None,
+        baseline_capture=lambda state, timeout: None,
+        final_capture=lambda state, timeout: None,
+        evaluate=lambda state: {"status": status},
+        report=lambda state: tmp_path / "report.json",
+    )
+    workflow = Workflow("deferred")
+    workflow.add(lifecycle)
+    if status == "FAIL":
+        with pytest.raises(RuntimeError, match="FAIL"):
+            workflow.run()
+    else:
+        workflow.run()
+    assert lifecycle.state.evaluation == {"status": status}
+    assert not (tmp_path / "terminal.json").exists()
+    value.writer.close()
+
+
 def test_entire_measurement_runs_and_emits_manifest_without_inventing_pass(
     tmp_path, monkeypatch
 ):
@@ -1694,6 +1770,21 @@ def test_the_shipped_nmt_spikes_provision_and_reserve(tmp_path, monkeypatch, sce
         config,
         module.RuntimeOptions(allow_diagnostic_target_stop_on_cancel=True),
     )
+    value.writer.close()
+
+
+def test_prerequisite_body_budget_is_independent_of_diagnostic_capture(tmp_path):
+    import nanolab.tasks.soak.runtime as module
+    from nanolab.tasks.soak.prerequisite_runtime import required_body_budget
+
+    value = prepared(tmp_path, scenario="memory-soak-p24-nmt-spike-container.yaml")
+    value.config.diagnostics.timeout_s = 1
+    _, frozen, supervision = module._make_runtime_prerequisites(
+        value, module.RuntimeOptions(), host_bindings(), tmp_path
+    )
+    assert supervision["body_timeout_s"] == required_body_budget(frozen)
+    assert supervision["body_timeout_s"] > 35
+    assert value.config.diagnostics.timeout_s == 1
     value.writer.close()
 
 

@@ -8,9 +8,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
+from proxmox_sdk.exceptions import VmNotFoundError as ProxmoxVmNotFoundError
 from sonata_engine.workflow.reporting import subtask
 from sonata_tasks.vm.adapters import VmLifecycleAdapter
+from sonata_tasks.vm.azure import AzureVmProvider
 from sonata_tasks.vm.ports import VmOrchestratorProtocol
+from sonata_tasks.vm.proxmox import ProxmoxVmProvider
 from sonata_tasks.vm.tasks import DestroyVm, EnsureVmRunning
 
 from nanolab.tasks.components.operations import RemoteCommandOperation
@@ -84,6 +87,28 @@ def _destroy_task(
     )
 
 
+def _vm_exists(provider: object, request: VmRequest) -> bool:
+    """Prove ownership before an ensure may adopt a machine with this name."""
+    probe = getattr(provider, "vm_exists", None)
+    if callable(probe):
+        exists = probe(request)
+    elif isinstance(provider, AzureVmProvider):
+        # The Azure provider already probes the remote authority before ensure.
+        exists = provider._exists_in_azure(request)  # noqa: SLF001 - SDK authority probe
+    elif isinstance(provider, ProxmoxVmProvider):
+        try:
+            provider._client(request).get_vm(request.name or "").info()  # noqa: SLF001 - SDK lookup
+        except ProxmoxVmNotFoundError:
+            exists = False
+        else:
+            exists = True
+    else:
+        raise RuntimeError("VM provider cannot establish ownership before provisioning")
+    if type(exists) is not bool:
+        raise RuntimeError("VM ownership probe must return a boolean")
+    return exists
+
+
 def _run_cleanup_tasks(cleanup_tasks: list[DestroyVm]) -> list[str]:
     """Tear down in reverse order, collecting RuntimeError messages."""
     cleanup_errors: list[str] = []
@@ -132,9 +157,14 @@ def provision_roles(
     try:
         resolved: list[VmRequest] = []
         for entry in roles:
-            cleanup = _destroy_task(provider, entry.request, role=entry.role)
-            if cleanup is not None:
-                cleanup_tasks.append(cleanup)
+            if entry.request.lifecycle != "external" and not _vm_exists(
+                provider, entry.request
+            ):
+                cleanup = _destroy_task(provider, entry.request, role=entry.role)
+                if cleanup is not None:
+                    # Register before ensure: launch can succeed and connection
+                    # discovery or provisioning can still fail afterwards.
+                    cleanup_tasks.append(cleanup)
             resolved.append(_ensure_vm(provider, entry.request, role=entry.role))
         for entry, _request in zip(roles, resolved, strict=False):
             if after_ensure is not None:

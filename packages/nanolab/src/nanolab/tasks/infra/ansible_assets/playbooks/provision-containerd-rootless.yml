@@ -1,0 +1,44 @@
+---
+- name: Provision the disposable rootless containerd stack
+  hosts: all
+  gather_facts: false
+  vars:
+    vm_user: ubuntu
+    vm_home: /home/ubuntu
+  tasks:
+    - name: Install rootless runtime and CNI
+      ansible.builtin.command:
+        argv:
+          - bash
+          - "{{ vm_home }}/nanolab-assets/containerd-rootless/provision.sh"
+          - install
+      environment:
+        HOME: "{{ vm_home }}"
+        XDG_RUNTIME_DIR: "/run/user/{{ ansible_user_uid | default('1000') }}"
+      changed_when: false
+
+    - name: Check whether cgroup delegation requires reboot
+      ansible.builtin.stat:
+        path: "{{ vm_home }}/.local/share/nanolab/containerd-rootless/needs-reboot"
+      register: rootless_reboot
+
+    - name: Activate delegated cgroup controllers
+      ansible.builtin.reboot:
+        reboot_timeout: 300
+      become: true
+      when: rootless_reboot.stat.exists
+
+    - name: Clear delegation reboot marker
+      ansible.builtin.file:
+        path: "{{ vm_home }}/.local/share/nanolab/containerd-rootless/needs-reboot"
+        state: absent
+
+    - name: Verify rootless namespace and delegated controllers
+      ansible.builtin.command:
+        argv:
+          - bash
+          - "{{ vm_home }}/nanolab-assets/containerd-rootless/provision.sh"
+          - check
+      environment:
+        HOME: "{{ vm_home }}"
+      changed_when: false

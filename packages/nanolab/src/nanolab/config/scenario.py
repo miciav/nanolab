@@ -25,7 +25,7 @@ WorkflowName = Literal[
     "soak",
     "heap-analysis",
 ]
-BackendName = Literal["container", "k8s"]
+BackendName = Literal["container", "containerd", "k8s"]
 BuildStrategy = Literal["docker", "buildpack"]
 AutoscalingStrategy = Literal["INTERNAL", "HPA"]
 
@@ -254,8 +254,8 @@ class ScenarioConfig(BaseModel):
         if self.workflow == "soak":
             if self.soak is None:
                 raise ValueError("soak workflow requires its protocol block")
-            if self.backend != "container":
-                raise ValueError("soak currently requires the container backend")
+            if self.backend not in {"container", "containerd"}:
+                raise ValueError("soak requires a container or containerd backend")
             unexpected = self.model_fields_set - {
                 "workflow",
                 "backend",
@@ -269,6 +269,21 @@ class ScenarioConfig(BaseModel):
                     + ", ".join(sorted(unexpected))
                 )
             self.soak.validate_functions(self.functions)
+            for name, role in self.soak.roles.items():
+                image = self.soak.images[name]
+                if self.backend == "containerd":
+                    expected = "process" if name == "control-plane" else "oci-image"
+                    if image.artifact_kind != expected:
+                        raise ValueError(f"{name} requires {expected} artifact")
+                    if (
+                        "docker-engine" in role.collection_sources
+                        or "docker-engine" in role.required_capabilities
+                    ):
+                        raise ValueError(
+                            "containerd soak cannot claim Docker engine observations"
+                        )
+                elif image.artifact_kind != "oci-image":
+                    raise ValueError("Docker soak requires OCI images for every role")
             if set(self.resources) - set(self.functions) - {CONTROL_PLANE_RESOURCES}:
                 raise ValueError(
                     "resources must refer to selected functions or control-plane"
@@ -402,15 +417,16 @@ class ScenarioConfig(BaseModel):
             )
         if self.autoscaling_strategy == "HPA" and not self.autoscaling:
             raise ValueError("HPA autoscaling requires autoscaling=true")
-        if self.autoscaling_strategy == "HPA" and self.backend == "container":
+        if self.autoscaling_strategy == "HPA" and self.backend != "k8s":
             raise ValueError("HPA autoscaling requires the k8s backend")
         if self.hpa_scale_to_zero and self.autoscaling_strategy != "HPA":
             raise ValueError("HPA scale-to-zero requires autoscalingStrategy=HPA")
         if self.async_load and (
-            self.workflow != "validate" or self.backend != "container"
+            self.workflow != "validate"
+            or self.backend not in ("container", "containerd")
         ):
             raise ValueError(
-                "async load requires the validate workflow with the container backend"
+                "async load requires the validate workflow with a container backend"
             )
         if self.persistent_recovery and self.workflow != "validate":
             raise ValueError(

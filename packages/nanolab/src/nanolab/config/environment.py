@@ -7,9 +7,11 @@ selected provider needs, and it validates that the two agree.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Literal
+from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
 ProviderName = Literal["local", "multipass", "external", "azure", "proxmox"]
 ExecutionRole = Literal["host", "stack", "loadgen", "cloud", "arm-builder"]
@@ -95,6 +97,15 @@ class EnvironmentConfig(BaseModel):
     roles: dict[ExecutionRole, RoleTarget] = Field(default_factory=dict)
     azure: AzureEnvironment | None = None
     proxmox: ProxmoxEnvironment | None = None
+    containerd_maven_repository: Path | None = Field(
+        default=None, alias="containerdMavenRepository"
+    )
+    _containerd_maven_token: str = PrivateAttr(default_factory=lambda: uuid4().hex[:12])
+
+    @property
+    def containerd_maven_token(self) -> str:
+        """The identity of this environment instance's owned Maven stage."""
+        return self._containerd_maven_token
 
     @model_validator(mode="after")
     def validate_provider(self) -> EnvironmentConfig:
@@ -118,6 +129,11 @@ class EnvironmentConfig(BaseModel):
             raise ValueError("azure configuration is required for azure provider")
         if self.provider == "proxmox" and self.proxmox is None:
             raise ValueError("proxmox configuration is required for proxmox provider")
+        if (
+            self.containerd_maven_repository is not None
+            and not self.containerd_maven_repository.is_absolute()
+        ):
+            raise ValueError("containerdMavenRepository must be an absolute host path")
         return self
 
     def target(self, role: ExecutionRole) -> RoleTarget:

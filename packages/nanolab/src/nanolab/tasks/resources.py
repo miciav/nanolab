@@ -4,19 +4,103 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Mapping
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
+from sonata_engine import Task, TaskInputs, TaskOutcome
+from sonata_tasks.command import CommandTask
 from sonata_tasks.core.fingerprint import fingerprint_digest
 from sonata_tasks.docker import DockerInspectTask
 from sonata_tasks.execution.bindings import CommandTaskExecutor
 from sonata_tasks.execution.models import CommandOptions
 from sonata_tasks.tasks.models import TaskResult
 
+from nanolab.tasks.containerd_rootless import RootlessRun
 from nanolab.tasks.execution import ExecutionRole
 from nanolab.tasks.kubectl import KubectlTask
 
 ResourceSpec = Mapping[str, Any]
+
+
+class ContainerdResourceCheckTask(Task[None]):
+    """Read the OCI spec from containerd and compare declared resource limits."""
+
+    def __init__(
+        self,
+        *,
+        function: str,
+        replica: int,
+        resources: ResourceSpec | None,
+        run: RootlessRun,
+        executor: CommandTaskExecutor,
+        role: ExecutionRole,
+        cwd: Path | None = None,
+    ) -> None:
+        """Record the expected resources and the test-owned containerd runtime."""
+        self.title = f"Inspect resources of {function} replica {replica}"
+        self._function = function
+        self._replica = replica
+        self._resources = resources
+        self._run = run
+        self._executor = executor
+        self._role = role
+        self._cwd = cwd
+
+    def run(self, inputs: TaskInputs) -> TaskOutcome[None]:
+        """Fail when the actual OCI CPU or memory values differ from the manifest."""
+        subject = f"{self._function} replica {self._replica}"
+        outcome = CommandTask(
+            title=self.title,
+            argv=(
+                "bash",
+                str(self._run.script),
+                "inspect-owned",
+                self._run.run_id,
+                str(self._run.repo_root),
+                self._function,
+                str(self._replica),
+            ),
+            executor=self._executor,
+            role=self._role,
+            options=CommandOptions(cwd=self._cwd),
+        ).run(inputs)
+        if outcome.value is None:
+            raise RuntimeError(f"{subject}: containerd inspect returned no result")
+        payload = _payload(outcome.value, subject)
+        identifier = payload.get("ID", payload.get("id"))
+        if not isinstance(identifier, str) or not identifier:
+            raise RuntimeError(f"{subject}: containerd inspect returned no ID")
+        if self._resources is None:
+            return TaskOutcome(value=None)
+        spec = payload.get("Spec") or payload.get("spec") or {}
+        actual = spec.get("linux", {}).get("resources", {})
+        if not isinstance(actual, dict):
+            raise RuntimeError(f"{identifier}: no OCI Linux resources")
+        requests, limits = _halves(self._resources)
+        cpu = actual.get("cpu") or {}
+        memory = actual.get("memory") or {}
+        expected: dict[str, int] = {}
+        if requests.get("cpu") is not None:  # nosec B113: resource mapping, not HTTP
+            expected["cpu.shares"] = max(
+                2, int(Decimal(str(requests["cpu"])) * 1024 + Decimal("0.5"))
+            )
+        if limits.get("cpu") is not None:
+            expected["cpu.quota"] = int(Decimal(str(limits["cpu"])) * 100000)
+            expected["cpu.period"] = 100000
+        if requests.get("memoryMiB") is not None:  # nosec B113: resource mapping, not HTTP
+            expected["memory.reservation"] = int(requests["memoryMiB"]) * 1024 * 1024
+        if limits.get("memoryMiB") is not None:
+            expected["memory.limit"] = int(limits["memoryMiB"]) * 1024 * 1024
+        _compare(
+            {
+                f"{scope}.{name}": (cpu if scope == "cpu" else memory).get(name)
+                for scope, name in (key.split(".") for key in expected)
+            },
+            expected,
+            identifier,
+        )
+        return TaskOutcome(value=None)
 
 
 def _payload(result: TaskResult, subject: str) -> dict[str, Any]:

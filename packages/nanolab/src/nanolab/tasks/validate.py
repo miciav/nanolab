@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from sonata_engine import Resource, Steps, Workflow
+from sonata_engine import Resource, Steps, Task, Workflow
 from sonata_tasks.command import CommandTask
 from sonata_tasks.execution.bindings import (
     CommandTaskExecutor,
@@ -17,6 +17,7 @@ from sonata_tasks.execution.bindings import (
 )
 
 from nanolab.tasks.compose import DockerComposeProject
+from nanolab.tasks.containerd_rootless import RootlessRun
 from nanolab.tasks.deployment import LOCAL_CONTROL_PLANE_API_PORT
 from nanolab.tasks.http_function import (
     HttpExecutionSuccessTask,
@@ -33,8 +34,13 @@ from nanolab.tasks.platform import (
     PlatformRequest,
     add_platform,
 )
-from nanolab.tasks.resources import ContainerResourceCheckTask, K8sResourceCheckTask
+from nanolab.tasks.resources import (
+    ContainerdResourceCheckTask,
+    ContainerResourceCheckTask,
+    K8sResourceCheckTask,
+)
 from nanolab.tasks.validate_recovery import (
+    ContainerdPersistentRecoveryTask,
     ContainerPersistentRecoveryTask,
     KubernetesPersistentRecoveryTask,
 )
@@ -79,14 +85,15 @@ class ValidateWorkflowRequest(PlatformRequest):
     async_checks: tuple[AsyncCheck, ...] = ()
     persistent_recovery: bool = False
     recovery_project: DockerComposeProject | None = None
+    rootless_run: RootlessRun | None = None
 
 
 def _inspection_task(
-    request: PlatformRequest,
+    request: ValidateWorkflowRequest,
     function: PlatformFunction,
     executor: CommandTaskExecutor,
     cwd: Path | None,
-) -> CommandTask:
+) -> Task[Any]:
     """Read the object the backend created and assert the declared limits reached it.
 
     Deliberately asks the backend, not the control plane: the control plane would
@@ -98,6 +105,18 @@ def _inspection_task(
             deployment=f"fn-{function.name}",
             namespace=request.namespace,
             resources=function.resources,
+            executor=executor,
+            role=request.role,
+            cwd=cwd,
+        )
+    if request.backend == "containerd":
+        if request.rootless_run is None:
+            raise ValueError("containerd validation requires a rootless run")
+        return ContainerdResourceCheckTask(
+            function=function.name,
+            replica=1,
+            resources=function.resources,
+            run=request.rootless_run,
             executor=executor,
             role=request.role,
             cwd=cwd,
@@ -157,8 +176,20 @@ def build_validate_workflow(  # NOSONAR (S3776): assembly mirrors the execution 
         request.functions, platform.functions, strict=False
     ):
         if request.persistent_recovery:
-            recovery = (
-                ContainerPersistentRecoveryTask(
+            if request.backend == "containerd" and request.rootless_run is not None:
+                recovery = ContainerdPersistentRecoveryTask(
+                    name=function.name,
+                    payload=function.payload,
+                    run=request.rootless_run,
+                    endpoint=platform.endpoint,
+                    executor=executor,
+                    role=request.role,
+                    cwd=cwd,
+                )
+            elif (
+                request.backend == "container" and request.recovery_project is not None
+            ):
+                recovery = ContainerPersistentRecoveryTask(
                     name=function.name,
                     payload=function.payload,
                     project=request.recovery_project,
@@ -167,9 +198,8 @@ def build_validate_workflow(  # NOSONAR (S3776): assembly mirrors the execution 
                     role=request.role,
                     cwd=cwd,
                 )
-                if request.backend == "container"
-                and request.recovery_project is not None
-                else KubernetesPersistentRecoveryTask(
+            else:
+                recovery = KubernetesPersistentRecoveryTask(
                     name=function.name,
                     payload=function.payload,
                     namespace=request.namespace,
@@ -178,7 +208,6 @@ def build_validate_workflow(  # NOSONAR (S3776): assembly mirrors the execution 
                     role=request.role,
                     cwd=cwd,
                 )
-            )
             workflow.add(
                 recovery,
                 requires=(*requires, *platform.resources, registered),

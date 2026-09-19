@@ -64,15 +64,12 @@ from urllib.parse import quote
 
 import httpx
 
+from nanolab.config.soak import PREREQUISITE_GROUPS
 from nanolab.tasks.soak.artifacts import describe_artifact, fingerprint
 from nanolab.tasks.soak.preflight import applies_declared_options
 from nanolab.tasks.soak.prerequisites import SUPPORTED_COVERAGE, ProfileRunner
 from nanolab.tasks.soak.probes import parse_exposition
 
-_GROUPS = {
-    "error-timeout-cancellation": {"error", "timeout", "cancellation"},
-    "async-late-callback": {"async", "late-callback"},
-}
 _MAX_RESPONSE = 1024 * 1024
 _MAX_EVIDENCE = 256 * 1024
 _NAME = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}")
@@ -146,7 +143,7 @@ def expand_coverage(coverage: Iterable[str]) -> frozenset[str]:
     """Expand workflow group labels into the validator's exact atomic IDs."""
     result: set[str] = set()
     for name in coverage:
-        result.update(_GROUPS.get(name, {name}))
+        result.update(PREREQUISITE_GROUPS.get(name, (name,)))
     unknown = result - SUPPORTED_COVERAGE
     if unknown:
         raise UnsupportedPreflightError(

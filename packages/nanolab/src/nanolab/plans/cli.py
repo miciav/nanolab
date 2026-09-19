@@ -50,6 +50,12 @@ from nanolab.tasks.components.operations import (
     RemoteCommandOperation,
     ScenarioOperation,
 )
+from nanolab.tasks.containerd_maven import repository_for_build
+from nanolab.tasks.containerd_rootless import (
+    control_plane_resource,
+    registry_resource,
+    run_for_environment,
+)
 from nanolab.tasks.deployment import (
     CONTROL_PLANE_NODE_PORT,
     DEFAULT_NAMESPACE,
@@ -60,6 +66,7 @@ from nanolab.tasks.execution import ExecutionRole
 from nanolab.tasks.provisioning.resources import provisioned_vm
 from nanolab.tasks.vm.models import VmInfo, VmRequest
 from nanolab.tasks.vm.sync import repo_sync_ssh_rsh
+from nanolab.workspace.paths import discover_tool_root
 
 LOCAL_ENDPOINT = _local_control_plane.ENDPOINT
 # The runtime-config module carries both the admin API `control-plane config`
@@ -382,6 +389,62 @@ def _build_k8s_plan(
     )
 
 
+def _build_containerd_plan(
+    config: ScenarioConfig,
+    bindings: RoleBindings,
+    *,
+    repo_root: Path,
+    environment: EnvironmentConfig | None,
+    namespace: str,
+) -> Workflow:
+    maven_repository = repository_for_build(environment)
+    run = run_for_environment(repo_root, discover_tool_root(), environment)
+    executor = RoleBoundCommandTaskExecutor(bindings)
+    registry = registry_resource(run, executor=executor, role="stack")
+    control = control_plane_resource(
+        run, executor=executor, role="stack", requires=(registry,)
+    )
+    functions = tuple(
+        CliFunction(
+            name=resolved.name,
+            image=resolved.image,
+            payload=json.dumps(
+                json.loads(resolved.payload)["input"], separators=(",", ":")
+            ),
+            resources=resolved.resources,
+            build_argv=resolved.build_argv,
+            image_build_argv=resolved.image_build_argv,
+        )
+        for key in config.functions
+        for resolved in (resolve_function(config, key, source_root=repo_root),)
+    )
+    request = CliWorkflowRequest(
+        functions=functions,
+        cli_role="stack",
+        build_role="stack",
+        endpoint="http://127.0.0.1:8080",
+        namespace=namespace,
+        push_function_images=True,
+        runtime_config_namespace=RUNTIME_CONFIG_NAMESPACE,
+    )
+    return build_cli_workflow(
+        request,
+        bindings,
+        cwd=repo_root,
+        control_plane_build_argv=(
+            "./gradlew",
+            ":control-plane:bootJar",
+            "-PcontrolPlaneModules=containerd-deployment-provider,runtime-config",
+            "-PcontainerdMavenLocal=true",
+            f"-Dmaven.repo.local={maven_repository}",
+            "--no-daemon",
+        ),
+        requires=(registry, control),
+        function_requires=(control,),
+        push_requires=(registry,),
+    )
+
+
 def build_cli_plan(  # NOSONAR (S3776): selects one complete deployment graph
     config: ScenarioConfig,
     bindings: RoleBindings,
@@ -403,6 +466,14 @@ def build_cli_plan(  # NOSONAR (S3776): selects one complete deployment graph
     if config.workflow != "cli":
         raise ValueError("CLI plan requires a cli scenario")
     root = repo_root or Path.cwd()
+    if config.backend == "containerd":
+        return _build_containerd_plan(
+            config,
+            bindings,
+            repo_root=root,
+            environment=environment,
+            namespace=namespace,
+        )
     local = config.backend == "container"
     if local and cli_role != "host":
         raise ValueError("container cli workflow must run on the host role")

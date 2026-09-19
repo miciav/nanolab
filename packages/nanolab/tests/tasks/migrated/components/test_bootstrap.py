@@ -111,6 +111,32 @@ def test_retarget_bootstrap_repo_sync_uses_endpoint_port_and_key() -> None:
     assert argv[-1] == "ubuntu@pve.example:/home/ubuntu/nanofaas/"
 
 
+def test_retarget_maven_sync_preserves_paths_and_ssh_endpoint() -> None:
+    context = _ctx(lifecycle="proxmox", host=None)
+    source = Path("/isolated/filtered-maven")
+    destination = Path("/home/ubuntu/nanolab-containerd-maven-run123")
+    operation = _remote(
+        bs.plan_containerd_maven_sync_to_vm(
+            context, source=source, destination=destination
+        )[0]
+    )
+
+    retargeted = bs.retarget_bootstrap_operation(
+        operation,
+        context=context,
+        host="pve.example",
+        port=42022,
+        private_key=Path("/keys/id_ed25519"),
+    )
+
+    assert retargeted.argv[-2] == f"{source}/"
+    assert retargeted.argv[-1] == f"ubuntu@pve.example:{destination}/"
+    assert (
+        "-p 42022 -i /keys/id_ed25519"
+        in retargeted.argv[retargeted.argv.index("-e") + 1]
+    )
+
+
 def test_assets_sync_stages_the_nanolab_assets_dir() -> None:
     argv = list(_remote(bs.plan_assets_sync_to_vm(_ctx())[0]).argv)
 

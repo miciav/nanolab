@@ -29,10 +29,19 @@ class FakeOrchestrator:
     destroyed: list[str] = field(default_factory=list)
     destroy_failures: set[str] = field(default_factory=set)
     events: list[str] = field(default_factory=list)
+    present: set[str] = field(default_factory=set)
+    fail_after_create: str | None = None
+
+    def vm_exists(self, request: SharedVmRequest) -> bool:
+        self.events.append(f"exists:{request.name or '?'}")
+        return (request.name or "?") in self.present
 
     def ensure_running(self, request: SharedVmRequest) -> _Result:
         self.ensured.append(request)
         self.events.append(f"ensure:{request.name or '?'}")
+        self.present.add(request.name or "?")
+        if request.name == self.fail_after_create:
+            raise RuntimeError("ensure failed after launch")
         return _Result(return_code=0)
 
     def connection_host(self, request: SharedVmRequest) -> str:
@@ -42,6 +51,7 @@ class FakeOrchestrator:
         if request.name in self.destroy_failures:
             raise RuntimeError(f"destroy {request.name} failed")
         self.destroyed.append(request.name or "?")
+        self.present.discard(request.name or "?")
         self.events.append(f"destroy:{request.name or '?'}")
         return _Result(return_code=0)
 
@@ -181,7 +191,9 @@ def test_provision_roles_ensures_all_before_verify_then_operations(tmp_path) -> 
     ):
         pass
     assert events == [
+        "exists:stack",
         "ensure:stack",
+        "exists:loadgen",
         "ensure:loadgen",
         "verify:stack",
         "verify:loadgen",
@@ -190,3 +202,55 @@ def test_provision_roles_ensures_all_before_verify_then_operations(tmp_path) -> 
         "destroy:loadgen",
         "destroy:stack",
     ]
+
+
+def test_existing_vm_survives_bootstrap_failure(tmp_path) -> None:
+    provider = FakeOrchestrator(present={"stack"})
+    with (
+        pytest.raises(RuntimeError, match="bootstrap failed"),
+        provision_roles(
+            provider,
+            (ProvisionedRole("stack", VmRequest(lifecycle="multipass", name="stack")),),
+            repo_root=tmp_path,
+            assets_root=tmp_path / "assets",
+        ),
+    ):
+        raise RuntimeError("bootstrap failed")
+    assert provider.present == {"stack"}
+    assert provider.destroyed == []
+
+
+def test_new_vm_is_cleaned_when_ensure_fails_after_launch(tmp_path) -> None:
+    provider = FakeOrchestrator(fail_after_create="stack")
+    with (
+        pytest.raises(RuntimeError, match="ensure failed after launch"),
+        provision_roles(
+            provider,
+            (ProvisionedRole("stack", VmRequest(lifecycle="multipass", name="stack")),),
+            repo_root=tmp_path,
+            assets_root=tmp_path / "assets",
+        ),
+    ):
+        pass
+    assert provider.present == set()
+    assert provider.destroyed == ["stack"]
+
+
+def test_unknown_vm_ownership_fails_before_ensure_or_teardown(tmp_path) -> None:
+    class UncertainOrchestrator(FakeOrchestrator):
+        def vm_exists(self, request: SharedVmRequest) -> bool:
+            raise RuntimeError("provider lookup failed")
+
+    provider = UncertainOrchestrator()
+    with (
+        pytest.raises(RuntimeError, match="provider lookup failed"),
+        provision_roles(
+            provider,
+            (ProvisionedRole("stack", VmRequest(lifecycle="multipass", name="stack")),),
+            repo_root=tmp_path,
+            assets_root=tmp_path / "assets",
+        ),
+    ):
+        pass
+    assert provider.ensured == []
+    assert provider.destroyed == []

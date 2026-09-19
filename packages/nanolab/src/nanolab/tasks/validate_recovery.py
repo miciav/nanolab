@@ -16,6 +16,7 @@ from sonata_tasks.execution.models import CommandOptions
 from sonata_tasks.tasks.models import TaskResult
 
 from nanolab.tasks.compose import DockerComposeProject, WaitForDockerCompose
+from nanolab.tasks.containerd_rootless import RootlessRun
 from nanolab.tasks.execution import ExecutionRole
 from nanolab.tasks.http_function import (
     Endpoint,
@@ -243,6 +244,116 @@ class ContainerPersistentRecoveryTask(Task[None]):
             raise RuntimeError(
                 f"{self._name}: managed container IDs changed from "
                 f"{before!r} to {after!r}"
+            )
+        _ = HttpFunctionInvokeTask(
+            self._name,
+            payload=self._payload,
+            endpoint=self._endpoint,
+            executor=self._executor,
+            role=self._role,
+            cwd=self._cwd,
+        ).run(inputs)
+        return TaskOutcome(value=None)
+
+
+class ContainerdPersistentRecoveryTask(Task[None]):
+    """Restart only the test control plane and prove its replicas were adopted."""
+
+    def __init__(
+        self,
+        *,
+        name: str,
+        payload: str,
+        run: RootlessRun,
+        endpoint: Endpoint,
+        executor: CommandTaskExecutor,
+        role: ExecutionRole,
+        cwd: Path | None = None,
+    ) -> None:
+        """Capture the run and HTTP endpoint used across the restart."""
+        self.title = f"Recover {name} after containerd control-plane restart"
+        self._name = name
+        self._payload = payload
+        self._run = run
+        self._endpoint = endpoint
+        self._executor = executor
+        self._role: ExecutionRole = role
+        self._cwd = cwd
+
+    def _managed_ids(self, inputs: TaskInputs) -> tuple[str, ...]:
+        result = CommandTask(
+            title=f"Read containerd replicas of {self._name}",
+            argv=(
+                "bash",
+                str(self._run.script),
+                "managed-ids",
+                self._run.run_id,
+                str(self._run.repo_root),
+                self._name,
+            ),
+            executor=self._executor,
+            role=self._role,
+            options=CommandOptions(cwd=self._cwd),
+        ).run(inputs)
+        ids = _container_ids(_result(result, self.title).stdout)
+        if len(ids) != 2:
+            raise RuntimeError(
+                f"{self._name}: expected 2 running managed containers, got {ids!r}"
+            )
+        return ids
+
+    def run(self, inputs: TaskInputs) -> TaskOutcome[None]:
+        """Keep the container IDs across a systemd user-unit restart."""
+        _ = HttpFunctionSetReplicasTask(
+            self._name,
+            replicas=2,
+            endpoint=self._endpoint,
+            executor=self._executor,
+            role=self._role,
+            cwd=self._cwd,
+        ).run(inputs)
+        _ = HttpFunctionReplicaStatusTask(
+            self._name,
+            replicas=2,
+            endpoint=self._endpoint,
+            executor=self._executor,
+            role=self._role,
+            cwd=self._cwd,
+        ).run(inputs)
+        before = self._managed_ids(inputs)
+        _ = CommandTask(
+            title="Restart rootless control plane",
+            argv=(
+                "bash",
+                str(self._run.script),
+                "control-restart",
+                self._run.run_id,
+                str(self._run.repo_root),
+            ),
+            executor=self._executor,
+            role=self._role,
+            options=CommandOptions(cwd=self._cwd),
+        ).run(inputs)
+        _ = HttpFunctionBackendTask(
+            self._name,
+            backend="containerd",
+            endpoint=self._endpoint,
+            executor=self._executor,
+            role=self._role,
+            cwd=self._cwd,
+        ).run(inputs)
+        _ = HttpFunctionReplicaStatusTask(
+            self._name,
+            replicas=2,
+            endpoint=self._endpoint,
+            executor=self._executor,
+            role=self._role,
+            cwd=self._cwd,
+        ).run(inputs)
+        after = self._managed_ids(inputs)
+        if before != after:
+            raise RuntimeError(
+                f"{self._name}: managed IDs changed from {before!r} to {after!r}"
             )
         _ = HttpFunctionInvokeTask(
             self._name,

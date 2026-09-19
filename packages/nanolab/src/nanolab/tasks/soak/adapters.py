@@ -195,28 +195,54 @@ class RoleBoundProbe:
             errors["procfs"] = str(error)[:1024]
 
         try:
-            memory_stats = data.get("stats", {}).get("memory_stats", {})
-            usage = _number(memory_stats.get("usage"))
-            values.append(
-                (
-                    "cgroup_memory_usage_bytes",
-                    (),
-                    "bytes",
-                    usage,
-                    "docker-engine/memory_stats",
+            cgroup = data.get("cgroup")
+            if cgroup is not None:
+                usage = _number(cgroup.get("memory_current"))
+                limit = _number(cgroup.get("memory_max"))
+                raw = cgroup.get("memory_stat", {})
+                source = "cgroup-v2"
+                values.extend(
+                    (
+                        (
+                            "cgroup_memory_usage_bytes",
+                            (),
+                            "bytes",
+                            usage,
+                            source + "/memory.current",
+                        ),
+                        (
+                            "cgroup_memory_limit_bytes",
+                            (),
+                            "bytes",
+                            limit,
+                            source + "/memory.max",
+                        ),
+                    )
                 )
-            )
-            limit = _number(memory_stats.get("limit"))
-            values.append(
-                (
-                    "cgroup_memory_limit_bytes",
-                    (),
-                    "bytes",
-                    limit,
-                    "docker-engine/memory_stats",
+            else:
+                memory_stats = data.get("stats", {}).get("memory_stats", {})
+                usage = _number(memory_stats.get("usage"))
+                limit = _number(memory_stats.get("limit"))
+                raw = memory_stats.get("stats", {})
+                source = "docker-engine"
+                values.extend(
+                    (
+                        (
+                            "cgroup_memory_usage_bytes",
+                            (),
+                            "bytes",
+                            usage,
+                            source + "/memory_stats",
+                        ),
+                        (
+                            "cgroup_memory_limit_bytes",
+                            (),
+                            "bytes",
+                            limit,
+                            source + "/memory_stats",
+                        ),
+                    )
                 )
-            )
-            raw = memory_stats.get("stats", {})
             if not isinstance(raw, dict) or len(raw) > 1000:
                 raise ValueError("invalid raw cgroup statistics")
             for field, raw_value in raw.items():
@@ -226,11 +252,16 @@ class RoleBoundProbe:
                         (("field", str(field)),),
                         "raw",
                         _number(raw_value),
-                        "docker-engine/memory_stats.stats",
+                        source
+                        + (
+                            "/memory.stat"
+                            if cgroup is not None
+                            else "/memory_stats.stats"
+                        ),
                     )
                 )
             inactive = raw.get("total_inactive_file", raw.get("inactive_file"))
-            if inactive is not None:
+            if cgroup is None and inactive is not None:
                 values.append(
                     (
                         "docker_working_set_estimate_bytes",

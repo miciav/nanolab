@@ -8,6 +8,7 @@ from sonata_tasks.execution.bindings import RoleBindings
 from sonata_tasks.registry import docker_registry_resource
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
+from nanolab.config.environment import EnvironmentConfig
 from nanolab.config.scenario import ScenarioConfig
 from nanolab.functions.catalog import list_functions
 from nanolab.plans.functions import resolve_function, sonata_function
@@ -91,6 +92,17 @@ class RecordingExecutor:
 
 
 def _plan(backend: str, **config: object) -> Workflow:
+    environment = (
+        EnvironmentConfig.model_validate(
+            {
+                "provider": "multipass",
+                "roles": {"stack": {"name": "rootless-stack"}},
+                "containerdMavenRepository": "/tmp/test-containerd-maven",
+            }
+        )
+        if backend == "containerd"
+        else None
+    )
     return build_validate_plan(
         ScenarioConfig.model_validate(
             {
@@ -101,6 +113,7 @@ def _plan(backend: str, **config: object) -> Workflow:
             }
         ),
         RoleBindings({"host": RecordingExecutor(), "stack": RecordingExecutor()}),
+        environment=environment,
     )
 
 
@@ -165,6 +178,39 @@ def test_validate_plan_keeps_container_validation_local() -> None:
     )
 
     assert stack.seen == []
+
+
+def test_containerd_plan_uses_rootless_resource_and_shared_http_checks() -> None:
+    plan = _plan("containerd")
+    titles = [task.task.title for task in plan.compile().tasks]
+
+    assert "Acquire rootless containerd test runtime" in titles
+    assert "Invoke word-stats-java" in titles
+    assert "Inspect resources of word-stats-java replica 1" in titles
+    assert not any("Docker Compose" in title for title in titles)
+    assert not any(
+        "docker inspect" in " ".join(getattr(task.task, "argv", ()))
+        for task in plan.compile().tasks
+    )
+    assert "-PcontrolPlaneModules=containerd-deployment-provider" in _argv(
+        plan, "Build control plane"
+    )
+    build = _argv(plan, "Build control plane")
+    assert "-PcontainerdMavenLocal=true" in build
+    assert any(
+        arg.startswith("-Dmaven.repo.local=/home/ubuntu/nanolab-containerd-maven-")
+        for arg in build
+    )
+
+
+def test_containerd_recovery_plan_uses_containerd_restart() -> None:
+    titles = [
+        task.task.title
+        for task in _plan("containerd", persistentRecovery=True).compile().tasks
+    ]
+
+    assert "Recover word-stats-java after containerd control-plane restart" in titles
+    assert "Acquire Docker Compose project nanofaas-recovery" not in titles
 
 
 def test_persistent_recovery_container_plan_restarts_only_the_control_plane() -> None:

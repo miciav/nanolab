@@ -22,7 +22,7 @@ from copy import deepcopy
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from threading import Event, Thread
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
 from sonata_engine import Resource, Task, TaskInputs, TaskOutcome
@@ -67,6 +67,12 @@ from nanolab.tasks.soak.workflow import (
     write_policy_input,
     write_terminal_receipt,
 )
+
+if TYPE_CHECKING:
+    from nanolab.tasks.soak.containerd_runtime import (
+        ContainerdDeployment,
+        PreparedContainerdSoak,
+    )
 
 
 @dataclass(frozen=True)
@@ -348,11 +354,7 @@ def _make_runtime_prerequisites(prepared, options, bindings, run_dir):
         profile["effective_config"] = deepcopy(expected)
     coverage = frozenset(prepared.config.prerequisites.required_coverage)
     _inputs(frozen, coverage)
-    if prepared.config.diagnostics.timeout_s < required_body_budget(frozen):
-        raise ValueError(
-            "configured prerequisite body deadline cannot cover "
-            "frozen retention/exercise"
-        )
+    body_timeout_s = required_body_budget(frozen)
     factory_root = prepared.evidence_dir / "prerequisite-platforms"
     parent_root = prepared.evidence_dir / "prerequisites"
     factory = make_prerequisite_platform_factory(
@@ -448,7 +450,7 @@ def _make_runtime_prerequisites(prepared, options, bindings, run_dir):
             "recovery_artifact_bytes": recovery_quota,
             "acquire_timeout_s": options.prerequisite_acquire_timeout_s,
             "release_timeout_s": options.prerequisite_release_timeout_s,
-            "body_timeout_s": prepared.config.diagnostics.timeout_s,
+            "body_timeout_s": body_timeout_s,
             "global_artifact_limit_bytes": prepared.config.artifact_limit_bytes,
         },
     )
@@ -459,6 +461,7 @@ def _make_runtime_prerequisites(prepared, options, bindings, run_dir):
             "before_fork": before_fork,
             "recover_after_reap": recover_after_reap,
             "parent_artifact_bytes": parent_quota,
+            "body_timeout_s": body_timeout_s,
             "acquire_timeout_s": options.prerequisite_acquire_timeout_s,
             "release_timeout_s": options.prerequisite_release_timeout_s,
         },
@@ -1274,9 +1277,9 @@ def _capture_owned_diagnostic(
 
 
 def create_soak_lifecycle(
-    prepared: PreparedSoak,
+    prepared: PreparedSoak | PreparedContainerdSoak,
     *,
-    deployment: RuntimeDeployment,
+    deployment: RuntimeDeployment | ContainerdDeployment,
     run_dir: Path,
     observations: Callable[[tuple[Target, ...]], dict[str, Any]] | None = None,
     prerequisite_runner: Any = None,
@@ -1351,6 +1354,9 @@ def create_soak_lifecycle(
             raise ValueError("memory helper option conflicts with frozen helper_images")
         helper_images.update({target.role: memory_helper_image for target in targets})
     if helper_images:
+        project = getattr(deployment, "project", None)
+        if project is None:
+            raise ValueError("memory helper images require a Docker deployment")
         writer.write_json(
             "memory-helper-inputs.json",
             {
@@ -1373,7 +1379,7 @@ def create_soak_lifecycle(
         memory_transport = _MemoryHelperTransport(
             collection_transport,
             images=helper_images,
-            project_name=deployment.project.name,
+            project_name=project.name,
             output_root=root / "memory-helpers",
             docker_socket=docker_socket,
             cancelled=cancelled,
@@ -1413,6 +1419,11 @@ def create_soak_lifecycle(
         "schema": "nanolab-soak-v1",
         "run_id": prepared.run_id,
         "policy_sha256": fingerprint(config.model_dump(mode="json")),
+        "backend": (
+            "containerd"
+            if config.images["control-plane"].artifact_kind == "process"
+            else "container"
+        ),
     }
     results: tuple = ()
     diagnostic_entries: list[dict] = []
@@ -1549,11 +1560,13 @@ def create_soak_lifecycle(
                         ),
                         runner=prerequisite_runner,
                         writer=profile_writer,
-                        timeout_s=config.diagnostics.timeout_s,
+                        timeout_s=prerequisite_supervision.get(
+                            "body_timeout_s", config.diagnostics.timeout_s
+                        ),
                         **{
                             key: value
                             for key, value in prerequisite_supervision.items()
-                            if key != "parent_artifact_bytes"
+                            if key not in {"parent_artifact_bytes", "body_timeout_s"}
                         },
                     )
                 )
@@ -1822,6 +1835,7 @@ def create_soak_lifecycle(
         for key, name in {
             "config": "config.json",
             "source": "source/snapshot.json",
+            "remote_source": "remote-source.json",
             "preflight": "preflight.json",
             "prerequisites": "prerequisites.json",
             "prerequisite_inputs": "prerequisite-inputs.json",
@@ -2366,7 +2380,9 @@ def _observed_collection_sources(rows: Iterable[Any]) -> set[str]:
 
 
 def observe_local_configuration(
-    prepared: PreparedSoak, management_url: str, api_url: str | None = None
+    prepared: PreparedSoak | PreparedContainerdSoak,
+    management_url: str,
+    api_url: str | None = None,
 ) -> dict[str, Any]:
     """Query bounded actuator documents; missing bound values stay unavailable."""
     from urllib.request import ProxyHandler, Request, build_opener

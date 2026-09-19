@@ -10,6 +10,7 @@ from sonata_engine import TaskInputs
 from sonata_tasks.tasks.models import CommandTaskSpec, TaskResult
 
 from nanolab.tasks.compose import DockerComposeProject
+from nanolab.tasks.containerd_rootless import RootlessRun
 
 
 @dataclass
@@ -120,6 +121,43 @@ def test_container_recovery_restarts_only_the_control_plane_and_keeps_ids() -> N
         executor.seen[2].argv,
         executor.seen[7].argv,
     ]
+
+
+def test_containerd_recovery_uses_owned_unit_and_preserves_instance_ids() -> None:
+    module = _recovery_module()
+    executor = SequencedExecutor(
+        responses=[
+            "{}",
+            '{"desiredReplicas":2,"readyReplicas":2}',
+            "first\nsecond\n",
+            "",
+            '{"deploymentBackend":"containerd"}',
+            '{"desiredReplicas":2,"readyReplicas":2}',
+            "first\nsecond\n",
+            '{"status":"success","output":"ok"}',
+        ]
+    )
+    run = RootlessRun(
+        "run123", Path("/home/ubuntu/nanofaas"), Path("/assets/session.sh")
+    )
+
+    module.ContainerdPersistentRecoveryTask(
+        name="word-stats-java",
+        payload='{"input":{"text":"a b"}}',
+        run=run,
+        endpoint="http://127.0.0.1:8080",
+        executor=executor,
+        role="stack",
+    ).run(TaskInputs.empty())
+
+    assert (
+        "bash",
+        "/assets/session.sh",
+        "control-restart",
+        "run123",
+        "/home/ubuntu/nanofaas",
+    ) in [task.argv for task in executor.seen]
+    assert all(task.argv[0] != "docker" for task in executor.seen)
 
 
 def _pod(name: str, uid: str, *, ready: bool = True) -> str:
